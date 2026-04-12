@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+venv/
+
+# Runtime data
+ip_cache.json
+ip_cache.json.gz
+ip_cache.json.zst
+processing_history.json
+logs/
+output/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Pytest
+.pytest_cache/
+
+# Backups
+cache_backups/

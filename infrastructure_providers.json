@@ -1,0 +1,99 @@
+{
+    "datacenter_vpn_keywords": [
+        "datacamp", "hostroyal", "ovh", "hetzner", "leaseweb", "digitalocean",
+        "linode", "vultr", "choopa", "m247", "worldstream", "contabo",
+        "scaleway", "servers.com", "cherry servers", "alexhost", "hostdime",
+        "iqweb", "iq pl", "gthost", "hostzealot", "cdn77",
+        "mullvad", "nordvpn", "expressvpn", "surfshark", "cyberghost",
+        "privadovpn", "protonvpn", "ipvanish", "hidemyass", "pia ",
+        "private internet access", "torguard", "windscribe",
+        "psychz", "quadranet", "colocrossing", "buyvm", "ramnode",
+        "hostwinds", "hostkey", "blazingfast", "sharktech", "reliablesite",
+        "nocix", "combahton", "flokinet", "1gservers", "serverius",
+        "xserver", "vpn", "proxy", "tor exit", "tor relay",
+        "tzulo", "frantech", "privatelayer", "incloudzone",
+        "ponynet", "emerald onion", "calyx institute",
+        "path.net", "arelion", "zayo", "he.net", "hurricane electric",
+
+        "stark industries solutions", "gcore", "dedipath", "fdcservers",
+        "limestone networks", "greencloudvps", "bandwagonhost", "virmach",
+        "datapacket", "zare", "lumen", "centurylink", "level3",
+        "cogent", "cogent communications", "ntt communications", "ntt global",
+        "gtt communications", "telia carrier", "telia company",
+        "selectel", "baxet", "marosnet", "reg.ru", "ihor",
+        "quasi networks", "enzu", "vpls", "deft", "servercentral",
+        "joe's datacenter", "joesdatacenter", "dacentec", "colocat",
+        "lease packet", "hostsailor", "hostinger hosting",
+        "serverhub", "serverpronto", "iweb", "internap",
+        "packetfabric", "packethub", "coresite", "equinix",
+        "telehouse", "interxion", "cyrusone", "qts realty",
+        "switch ltd", "vnet", "flexential",
+
+        "perfect privacy", "hide.me", "airvpn", "ivpn", "astrill",
+        "vyprvpn", "purevpn", "zenmate", "hotspot shield", "tunnelbear",
+        "strongvpn", "cactus vpn", "trust.zone", "safervpn",
+        "mysterium", "betternet", "hola vpn", "ultrasurf",
+        "psiphon", "lantern vpn", "outline vpn",
+
+        "ukservers", "redstation", "rapidswitch", "fasthosts", "memset",
+        "online.net", "ikoula", "gandi", "infomaniak", "tilaa",
+        "transip", "time4vps", "netcup", "ionos", "1und1", "strato",
+        "serverdiscounter", "webtropia", "myloc", "plusserver",
+        "host europe", "keyweb", "alfahosting",
+
+        "oneprovider", "hosthatch", "racknerd", "spartanhost",
+        "crowncloud", "hudsonvalleyhost", "photonvps", "ultravps",
+        "hostigger", "clouvider", "bitaccel", "serverastra",
+        "routerhosting", "hosteons", "nexusbytes", "v.ps",
+        "webhorizon", "letbox", "gullo's hosting",
+
+        "claro datacenter", "ascenty", "odata", "elea digital",
+        "scala data centers", "maxihost", "hostdime brasil",
+        "hostgator datacenter", "locaweb datacenter", "umbler",
+
+        "stark vpn", "atlas vpn", "norton secure vpn", "kaspersky vpn",
+        "f-secure freedome", "avira phantom vpn", "avg secure vpn",
+
+        "tor project", "i2p", "tor bridge", "obfs4", "snowflake proxy",
+        "meek bridge", "tor snowflake"
+    ],
+    "cloud_keywords": [
+        "amazon", "aws", "ec2", "cloudfront", "amazonaws", "lightsail",
+        "elastic beanstalk", "fargate", "lambda aws",
+        "google cloud", "google llc", "gcp", "google compute engine",
+        "google app engine", "firebase hosting",
+        "microsoft azure", "microsoft corporation", "azure cdn",
+        "alibaba cloud", "alicloud", "aliyun", "ecs alibaba",
+        "oracle cloud", "oracle corporation", "oci oracle",
+        "tencent cloud", "tencent", "tencent cdn",
+        "ibm cloud", "softlayer", "ibm watson",
+        "rackspace", "cloudflare", "fastly", "akamai",
+        "heroku", "vercel", "netlify", "railway", "render",
+        "huawei cloud",
+
+        "fly.io", "supabase", "planetscale", "neon.tech",
+        "upcloud", "kamatera", "backblaze", "wasabi",
+        "stackpath", "edgecast", "edgio", "limelight networks",
+        "imperva", "incapsula", "sucuri", "section.io",
+        "keycdn", "bunny cdn", "bunnycdn", "arvan cloud",
+        "gcore cdn", "beluga cdn", "cachefly",
+
+        "sap cloud", "sap hana cloud", "salesforce cloud",
+        "vmware cloud", "nutanix", "openstack",
+        "ovhcloud", "ionos cloud", "hetzner cloud",
+        "scaleway cloud", "exoscale", "cleura", "elastx",
+        "citycloud", "cloud.dk",
+
+        "godaddy cloud", "bluehost cloud", "siteground cloud",
+        "hostgator cloud", "dreamhost cloud", "a2 hosting cloud",
+        "inmotion cloud", "kinsta", "wp engine", "pagely",
+        "cloudways", "runcloud",
+
+        "yandex cloud", "mail.ru cloud", "sbercloud",
+        "naver cloud", "kakao cloud", "nhn cloud",
+        "baidu cloud", "ucloud", "kingsoft cloud",
+
+        "magalu cloud", "locaweb cloud", "kinghost",
+        "mandic cloud", "embratel cloud", "claro cloud"
+    ]
+}

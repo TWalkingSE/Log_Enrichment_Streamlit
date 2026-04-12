@@ -1,0 +1,82 @@
+{
+    "impossible_jump_speed_kmh": 900,
+    "provider_coverage_threshold_pct": 70,
+    "investigative_window_hours": 72,
+    "home_hours": [22, 23, 0, 1, 2, 3, 4, 5, 6],
+    "work_hours": [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
+    "base_location_precision": 2,
+    "risk_score_weights": {
+        "proxy_vpn": 40,
+        "hosting": 25,
+        "unusual_location": 20,
+        "low_frequency": 10,
+        "mobile_bonus": -5
+    },
+    "investigative_score_weights": {
+        "temporal_proximity": 40,
+        "provider_recurrence": 20,
+        "period_compatibility": 15,
+        "temporal_continuity": 15,
+        "proxy_hosting_penalty": -10
+    },
+    "vpn_detection": {
+        "rotation_interval_minutes": 30,
+        "max_asn_diversity": 5,
+        "residential_jump_hours": 1,
+        "min_rotation_count": 3
+    },
+    "life_pattern": {
+        "dbscan_eps_km": 5.0,
+        "dbscan_min_samples": 3,
+        "routine_deviation_threshold": 2.0
+    },
+    "shodan": {
+        "max_concurrent": 1,
+        "timeout_seconds": 10,
+        "dangerous_ports": [22, 23, 25, 445, 1433, 3306, 3389, 5432, 5900, 6379, 8080, 27017]
+    },
+    "tor_exit_nodes": {
+        "enabled": true,
+        "update_interval_hours": 6,
+        "cache_file": "tor_exit_nodes.json",
+        "list_url": "https://check.torproject.org/torbulkexitlist",
+        "threat_bonus_points": 20
+    },
+    "subnet_analysis": {
+        "ipv4_mask": 24,
+        "ipv6_mask": 48,
+        "min_ips_per_subnet": 2
+    },
+    "provider_timing": {
+        "min_records_per_provider": 5,
+        "time_bucket_minutes": 60,
+        "transition_window_minutes": 30
+    },
+    "geo_history": {
+        "track_changes": true,
+        "max_history_entries_per_ip": 10
+    },
+    "cache_ttl_seconds": 2592000,
+    "max_cache_backups": 10,
+    "partial_save_interval": 50,
+    "max_log_messages": 200,
+    "max_history_entries": 50,
+    "ai_assistant": {
+        "default_tier": "lite",
+        "ollama_url": "http://localhost:11434",
+        "timeout_seconds": {
+            "lite": 45,
+            "standard": 90,
+            "premium": 180
+        },
+        "healthcheck_timeout_seconds": {
+            "lite": 20,
+            "standard": 35,
+            "premium": 60
+        },
+        "fallback_to_lighter_model": true,
+        "max_ips_in_prompt": 30,
+        "max_ips_per_provider_in_prompt": 20,
+        "system_prompt_template": null
+    }
+}
