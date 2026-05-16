@@ -22,6 +22,26 @@ Use a private channel to the maintainer or, if the repository has GitHub Securit
 - Initial triage: up to 10 business days
 - Fix or mitigation: according to severity and reproducibility
 
+## Application authentication (Streamlit)
+
+Optional UI authentication via `.env`:
+
+- **`AUTH_PASSWORD_HASH` (recommended):** set an **Argon2** or **bcrypt** hash produced locally (passlib). Never store a plaintext password here.
+- **Legacy:** a **SHA-256** hexadecimal digest (64 chars) of the UTF-8 password is still accepted; comparison uses `secrets.compare_digest`.
+- **`AUTH_PASSWORD`:** plaintext in `.env` — development only; verification uses SHA-256 digests with a timing-safe comparison. **Do not use in production.**
+
+Generate an Argon2 hash for `.env`:
+
+```bash
+python -c "from passlib.hash import argon2; print(argon2.hash(input('Password: ')))"
+```
+
+Or use the repo script:
+
+```bash
+python scripts/gen_auth_password_hash.py
+```
+
 ## Scope Notes
 
 This project processes potentially sensitive data. When reporting issues:

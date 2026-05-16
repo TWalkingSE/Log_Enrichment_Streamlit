@@ -7,12 +7,12 @@ Page implementations in pages_app/ directory.
 import streamlit as st
 import os
 import logging
-import hashlib
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 load_dotenv()
 
+from auth_password import verify_stored_password_hash, verify_plain_env_password
 from i18n import t, get_lang, set_lang, SUPPORTED_LANGUAGES
 
 # ============================================================
@@ -54,9 +54,6 @@ register_plotly_theme()
 AUTH_PASSWORD = os.getenv('AUTH_PASSWORD', '')
 AUTH_PASSWORD_HASH = os.getenv('AUTH_PASSWORD_HASH', '')
 MAX_LOGIN_ATTEMPTS = 5
-
-def _hash_password(password):
-    return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 # ============================================================
 # PAGE CONFIG
@@ -128,9 +125,9 @@ if (AUTH_PASSWORD or AUTH_PASSWORD_HASH) and not st.session_state.authenticated:
     if st.button(t('auth.login'), type="primary"):
         is_valid = False
         if AUTH_PASSWORD_HASH:
-            is_valid = _hash_password(pwd) == AUTH_PASSWORD_HASH
+            is_valid = verify_stored_password_hash(pwd, AUTH_PASSWORD_HASH)
         elif AUTH_PASSWORD:
-            is_valid = _hash_password(pwd) == _hash_password(AUTH_PASSWORD)
+            is_valid = verify_plain_env_password(pwd, AUTH_PASSWORD)
 
         if is_valid:
             st.session_state.authenticated = True

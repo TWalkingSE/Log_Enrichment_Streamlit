@@ -5,98 +5,25 @@ import logging
 import os
 from datetime import datetime, timedelta
 from api_client import is_valid_ip
+from data_processing.providers import (
+    PROVIDER_ALIASES,
+    normalizar_provedor,
+    normalizar_provedor_df,
+)
+from data_processing.timezone import (
+    TZ_LABEL,
+    TZ_OFFSET_HOURS,
+    convert_utc_to_local,
+    format_iso_date,
+    get_periodo,
+    is_diurno,
+    is_noturno,
+    normalizar_periodo,
+    periodo_matches,
+)
 
 # Configurar logger para este módulo
 logger = logging.getLogger(__name__)
-
-# Fuso horário configurável via variável de ambiente (padrão: -3)
-TZ_OFFSET_HOURS = int(os.getenv('TZ_OFFSET_HOURS', '-3'))
-
-def _format_tz_label():
-    """Formata o label do fuso horário baseado no offset configurado"""
-    sign = '+' if TZ_OFFSET_HOURS >= 0 else '-'
-    hours = abs(TZ_OFFSET_HOURS)
-    return f'GMT {sign}{hours:02d}00'
-
-TZ_LABEL = os.getenv('TZ_LABEL', _format_tz_label())
-
-def convert_utc_to_local(dt_utc):
-    """Converte datetime UTC para o fuso horário local configurado"""
-    return dt_utc + timedelta(hours=TZ_OFFSET_HOURS)
-
-def format_iso_date(dt_local):
-    """Formata datetime local em ISO 8601 com offset do fuso configurado"""
-    sign = '+' if TZ_OFFSET_HOURS >= 0 else '-'
-    hours = abs(TZ_OFFSET_HOURS)
-    return dt_local.strftime(f'%Y-%m-%dT%H:%M:%S{sign}{hours:02d}:00')
-
-def get_periodo(hora):
-    """Retorna período do dia baseado na hora"""
-    return '☀️ Diurno' if 6 <= hora < 18 else '🌙 Noturno'
-
-def normalizar_periodo(periodo_str):
-    """Remove emojis e normaliza string de período para comparação segura."""
-    if not isinstance(periodo_str, str):
-        return ''
-    p = periodo_str.strip().lower()
-    if 'noturno' in p:
-        return 'noturno'
-    if 'diurno' in p:
-        return 'diurno'
-    return p
-
-def is_noturno(periodo_str):
-    """Verifica se o período é noturno (funciona com ou sem emoji)."""
-    return normalizar_periodo(periodo_str) == 'noturno'
-
-def is_diurno(periodo_str):
-    """Verifica se o período é diurno (funciona com ou sem emoji)."""
-    return normalizar_periodo(periodo_str) == 'diurno'
-
-def periodo_matches(p1, p2):
-    """Compara dois períodos de forma segura, ignorando emojis."""
-    return normalizar_periodo(p1) == normalizar_periodo(p2)
-
-
-# ============================================================
-# NORMALIZAÇÃO DE PROVEDORES
-# ============================================================
-PROVIDER_ALIASES = {
-    'Claro': ['claro s.a', 'claro s/a', 'claro nxt', 'net servicos', 'net serviços',
-              'net telecomunicacoes', 'embratel', 'claro nxt telecomunica'],
-    'Vivo': ['telefonica', 'telefônica', 'global village', 'global vilage', 'gvt',
-             'terra networks', 'vivo s.a', 'vivo s/a'],
-    'TIM': ['tim s.a', 'tim s/a', 'tim celular', 'tim live', 'intelig telecomunicacoes'],
-    'Oi': ['oi movel', 'oi móvel', 'telemar', 'oi s.a', 'brasil telecom'],
-    'Algar': ['algar telecom', 'ctbc telecom'],
-}
-
-def normalizar_provedor(nome):
-    """
-    Normaliza nome de provedor para agrupar variantes da mesma empresa.
-    Ex: 'Claro S.A.' → 'Claro', 'TELEFÔNICA BRASIL S.A.' → 'Vivo'
-    Retorna o nome normalizado ou o original se não encontrar match.
-    """
-    if not isinstance(nome, str) or not nome.strip():
-        return nome
-    nome_lower = nome.strip().lower()
-    for grupo, aliases in PROVIDER_ALIASES.items():
-        if re.search(r'\b' + re.escape(grupo.lower()) + r'\b', nome_lower):
-            return grupo
-        for alias in aliases:
-            if re.search(r'\b' + re.escape(alias), nome_lower):
-                return grupo
-    return nome
-
-
-def normalizar_provedor_df(df, col='Ip_Dono'):
-    """Aplica normalização de provedores a um DataFrame inteiro."""
-    if col not in df.columns:
-        return df
-    df = df.copy()
-    df[col] = df[col].apply(normalizar_provedor)
-    return df
-
 
 # Padrão regex de IP reutilizável (IPv4 + IPv6)
 IP_REGEX_PATTERN = r'\b(?:\d{1,3}\.){3}\d{1,3}\b|(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){0,6}):?(?::[0-9a-fA-F]{1,4}){1,7}'

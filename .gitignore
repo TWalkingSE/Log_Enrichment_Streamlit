@@ -38,3 +38,8 @@ Thumbs.db
 
 # Backups
 cache_backups/
+
+# Reversa reverse-engineering artifacts (optional local docs — keeps PRs focused on app code)
+.reversa/
+_reversa_sdd/
+.agents/

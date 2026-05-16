@@ -232,9 +232,9 @@ Módulo especializado para uso investigativo policial:
 - **GeoJSON** — formato padrão GIS
 
 ### 🔒 Segurança
-- **Autenticação com hashing SHA-256**: Senhas nunca comparadas em texto plano
+- **Autenticação com Argon2/bcrypt (recomendado)** em `AUTH_PASSWORD_HASH`; hash SHA-256 hex (64 caracteres) ainda aceito como legado
 - **Rate limit de login**: 5 tentativas, bloqueio de 5 minutos após exceder
-- **Suporte a AUTH_PASSWORD_HASH**: Configure hash SHA-256 diretamente no `.env`
+- **`AUTH_PASSWORD`**: apenas para dev; em produção use `AUTH_PASSWORD_HASH` gerado com `python scripts/gen_auth_password_hash.py` (ver [SECURITY.md](SECURITY.md))
 - **API Key via query parameter**: Key enviada como parâmetro GET `?key=` conforme documentação ip-api.com
 - **Arquivos temporários seguros**: Uso de `tempfile.mkstemp()` em vez de nomes previsíveis
 - **API Keys via .env**: VirusTotal, AbuseIPDB e Shodan configuráveis via variáveis de ambiente
@@ -522,8 +522,8 @@ Suporta upload de ZIP com 15 dias de interceptação (ZIP contendo ZIPs internos
 | `VIRUSTOTAL_API_KEY` | API Key do VirusTotal (free: 4 req/min) | (vazio) |
 | `ABUSEIPDB_API_KEY` | API Key do AbuseIPDB (free: 1000 checks/dia) | (vazio) |
 | `SHODAN_API_KEY` | API Key do Shodan (serviços e portas expostas) | (vazio) |
-| `AUTH_PASSWORD` | Senha de acesso em texto plano | (vazio) |
-| `AUTH_PASSWORD_HASH` | Hash SHA-256 da senha (mais seguro) | (vazio) |
+| `AUTH_PASSWORD` | Senha em texto plano (só desenvolvimento) | (vazio) |
+| `AUTH_PASSWORD_HASH` | Hash Argon2/bcrypt (recomendado) ou SHA-256 hex legado | (vazio) |
 | `TZ_OFFSET_HOURS` | Offset UTC do fuso horário | `-3` |
 | `TZ_LABEL` | Label customizado do fuso | Auto |
 | `WATCH_FOLDER` | Pasta para varredura automática | (vazio) |

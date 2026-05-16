@@ -74,6 +74,38 @@ class TestZIPSecurity(unittest.TestCase):
                 self.assertFalse(is_safe)
 
 
+class TestAuthPassword(unittest.TestCase):
+    def test_argon2_verify_ok(self):
+        from passlib.hash import argon2
+        from auth_password import verify_stored_password_hash
+
+        h = argon2.hash('secret123')
+        self.assertTrue(verify_stored_password_hash('secret123', h))
+        self.assertFalse(verify_stored_password_hash('wrong', h))
+
+    def test_legacy_sha256_hex(self):
+        import hashlib
+        from auth_password import verify_stored_password_hash
+
+        h = hashlib.sha256(b'legacy-pass').hexdigest()
+        self.assertTrue(verify_stored_password_hash('legacy-pass', h))
+        self.assertFalse(verify_stored_password_hash('other', h))
+
+    def test_bcrypt_hash_verify(self):
+        from passlib.hash import bcrypt
+        from auth_password import verify_stored_password_hash
+
+        h = bcrypt.hash('bcrypt-secret')
+        self.assertTrue(verify_stored_password_hash('bcrypt-secret', h))
+        self.assertFalse(verify_stored_password_hash('no', h))
+
+    def test_plain_env_compares_digest(self):
+        from auth_password import verify_plain_env_password
+
+        self.assertTrue(verify_plain_env_password('x', 'x'))
+        self.assertFalse(verify_plain_env_password('x', 'y'))
+
+
 class TestInputSanitization(unittest.TestCase):
     def test_sanitize_alvo_removes_unsafe(self):
         import re

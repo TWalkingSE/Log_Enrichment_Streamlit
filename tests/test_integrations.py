@@ -1,4 +1,13 @@
+from unittest.mock import patch
+
 from tests.common import *
+
+# 1x1 PNG — avoids Kaleido/Chromium during PDF tests (hangs on some Windows setups)
+_MINIMAL_PNG = (
+    b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06'
+    b'\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xdb'
+    b'\x00\x00\x00\x00IEND\xaeB`\x82'
+)
 
 
 class TestAPIClient(unittest.TestCase):
@@ -59,6 +68,11 @@ class TestAuditLogger(unittest.TestCase):
 
 
 class TestReportGenerator(unittest.TestCase):
+    def setUp(self):
+        self._plotly_img = patch('plotly.io.to_image', return_value=_MINIMAL_PNG)
+        self._plotly_img.start()
+        self.addCleanup(self._plotly_img.stop)
+
     def _make_sample_df(self):
         return pd.DataFrame({
             'Ip': ['8.8.8.8', '1.1.1.1', '8.8.8.8'],
@@ -123,6 +137,11 @@ class TestCacheCompression(unittest.TestCase):
 
 
 class TestSmokeFlows(unittest.TestCase):
+    def setUp(self):
+        self._plotly_img = patch('plotly.io.to_image', return_value=_MINIMAL_PNG)
+        self._plotly_img.start()
+        self.addCleanup(self._plotly_img.stop)
+
     def _make_enriched_df(self):
         df = extrair_ips_do_formato_simples('8.8.8.8\n1.1.1.1', alvo='smoke')
         df['Data'] = ['2025-01-01 10:00:00', '2025-01-01 11:00:00']
