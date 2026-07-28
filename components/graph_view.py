@@ -6,6 +6,7 @@ Renders IP/ASN/location network graphs directly in the UI.
 
 import json
 import streamlit as st
+import streamlit.components.v1 as components
 from styles.theme import COLORS
 
 
@@ -170,6 +171,6 @@ def render_ip_network_graph(df, height=650):
     </body>
     </html>'''
 
-    st.iframe(html, height=height + 10)
+    components.html(html, height=height + 10, scrolling=False)
 
 

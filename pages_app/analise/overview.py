@@ -14,6 +14,32 @@ from analysis import (
 from i18n import t
 
 
+@st.cache_data(show_spinner=False)
+def _cached_overview_kpis(df, ip_col):
+    unique_ips = df[ip_col].nunique()
+    n_providers = df['Ip_Dono'].dropna().nunique() if 'Ip_Dono' in df.columns else 0
+    proxy_pct = (df['Ip_Proxy'].sum() / len(df) * 100) if 'Ip_Proxy' in df.columns and len(df) > 0 else 0
+    health = compute_data_health(df)
+    health_score = health.get('overall_score', 0)
+    scores = calculate_risk_scores(df, ip_col=ip_col)
+    avg_risk = float(scores['Score'].mean()) if not scores.empty else 0.0
+    high_risk = int(len(scores[scores['Score'] >= 50])) if not scores.empty else 0
+    vpn = detect_vpn_heuristics(df)
+    ip_conf = compute_ip_confidence(df)
+    masked = int(len(ip_conf[ip_conf['Classification'] == 'IP Mascarado'])) if not ip_conf.empty else 0
+    return {
+        'unique_ips': unique_ips,
+        'n_providers': n_providers,
+        'proxy_pct': proxy_pct,
+        'health_score': health_score,
+        'scores': scores,
+        'avg_risk': avg_risk,
+        'high_risk': high_risk,
+        'vpn_score': vpn.get('score', 0),
+        'masked': masked,
+    }
+
+
 def page_overview():
     from styles.components import section_header, empty_state
     section_header(t('overview.title'), divider="violet")
@@ -25,16 +51,15 @@ def page_overview():
 
     ip_col = 'Sender IP' if 'Sender IP' in df.columns else 'Ip'
 
-    # ── Row 1: KPIs ──
-    unique_ips = df[ip_col].nunique()
-    n_providers = df['Ip_Dono'].dropna().nunique() if 'Ip_Dono' in df.columns else 0
-    proxy_pct = (df['Ip_Proxy'].sum() / len(df) * 100) if 'Ip_Proxy' in df.columns and len(df) > 0 else 0
-    health = compute_data_health(df)
-    health_score = health.get('overall_score', 0)
-
-    scores = calculate_risk_scores(df, ip_col=ip_col)
-    avg_risk = scores['Score'].mean() if not scores.empty else 0
-    high_risk = len(scores[scores['Score'] >= 50]) if not scores.empty else 0
+    # ── Row 1: KPIs (cached) ──
+    kpis = _cached_overview_kpis(df, ip_col)
+    unique_ips = kpis['unique_ips']
+    n_providers = kpis['n_providers']
+    proxy_pct = kpis['proxy_pct']
+    health_score = kpis['health_score']
+    scores = kpis['scores']
+    avg_risk = kpis['avg_risk']
+    high_risk = kpis['high_risk']
 
     with st.container(border=True):
         c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -45,9 +70,8 @@ def page_overview():
                   delta="Alto" if proxy_pct > 20 else "Normal",
                   delta_color="inverse" if proxy_pct > 20 else "off")
         c4.metric("Provedores", n_providers)
-        vpn = detect_vpn_heuristics(df)
-        c5.metric("Score VPN", f"{vpn.get('score', 0)}/100",
-                  delta_color="inverse" if vpn.get('score', 0) >= 50 else "off")
+        c5.metric("Score VPN", f"{kpis['vpn_score']}/100",
+                  delta_color="inverse" if kpis['vpn_score'] >= 50 else "off")
         c6.metric("Saúde Dados", f"{health_score}%",
                   delta="Boa" if health_score >= 80 else "Atenção",
                   delta_color="normal" if health_score >= 80 else "inverse")
@@ -73,8 +97,7 @@ def page_overview():
             else:
                 st.metric("🔎 Shodan Alerts", "—", delta="Não consultado", delta_color="off")
         with s3:
-            ip_conf = compute_ip_confidence(df)
-            masked = len(ip_conf[ip_conf['Classification'] == 'IP Mascarado']) if not ip_conf.empty else 0
+            masked = kpis['masked']
             st.metric("🎯 IPs Mascarados", masked,
                       delta="Suspeito" if masked > 0 else "OK",
                       delta_color="inverse" if masked > 0 else "normal")

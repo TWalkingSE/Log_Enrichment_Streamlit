@@ -14,7 +14,7 @@
 
 ## ⚠️ Aviso Importante sobre Sigilo e Serviços Externos
 
-Antes de usar a ferramenta com dados reais, considere que ela pode manipular **IPs, portas, horários, ASN/provedor, localização aproximada e outros metadados** extraídos de registros de **Google, WhatsApp, Meta, Discord** e provedores de acesso. Esses elementos podem ser **sensíveis, protegidos por sigilo** e sujeitos a regras legais e institucionais específicas.
+Antes de usar a ferramenta com dados reais, considere que ela pode manipular **IPs, portas, horários, ASN/provedor, localização aproximada e outros metadados** extraídos de registros de **Google, WhatsApp, Meta, Discord, TikTok** e provedores de acesso. Esses elementos podem ser **sensíveis, protegidos por sigilo** e sujeitos a regras legais e institucionais específicas.
 
 Quando o app consulta **IP-API, VirusTotal, AbuseIPDB ou Shodan**, os identificadores processados são enviados para **serviços externos de terceiros**. Se houver **API Key** configurada, essa autenticação acompanha a requisição; no plano pago da **IP-API**, por exemplo, a chave é transmitida como **query parameter `?key=`**.
 
@@ -205,11 +205,12 @@ A ferramenta aceita múltiplas fontes de dados:
 | **HTML Meta Platforms** | Upload de `records.html` do Facebook/Instagram — com porta (IG) ou sem (FB) |
 | **HTML Google** | Upload de `SubscriberInfo.html` com tabela IP Activity |
 | **Discord (PDF)** | Upload de PDF do Discord com Session Start/IP Address + User ID/Username/Email |
+| **TikTok (PDF)** | Upload de PDF "Events IP Data" do TikTok com Date/IP/Event/Country (coluna `Evento` na saída) |
 | **ZIP de Interceptação** | Upload do ZIP de 15 dias do WhatsApp |
 | **HTML de Interceptação** | Upload de `records.html` individual |
 | **Modo Offline** | Carregue CSV já enriquecido (sem chamar API) |
 
-**Formatos de log detectados automaticamente:** Genérico, Meta Platforms, WhatsApp, Google, Preservation Google, Discord (PDF), HTML WhatsApp, HTML Meta Platforms, HTML Google.
+**Formatos de log detectados automaticamente:** Genérico, Meta Platforms, WhatsApp, Google, Preservation Google, Discord (PDF), TikTok (PDF), HTML WhatsApp, HTML Meta Platforms, HTML Google.
 
 ---
 

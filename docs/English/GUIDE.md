@@ -14,7 +14,7 @@
 
 ## ⚠️ Important Notice on Confidentiality and External Services
 
-Before using the tool with real data, consider that it may handle **IPs, ports, timestamps, ASN/provider, approximate location, and other metadata** extracted from records of **Google, WhatsApp, Meta, Discord**, and access providers. These elements may be **sensitive, protected by confidentiality**, and subject to specific legal and institutional rules.
+Before using the tool with real data, consider that it may handle **IPs, ports, timestamps, ASN/provider, approximate location, and other metadata** extracted from records of **Google, WhatsApp, Meta, Discord, TikTok**, and access providers. These elements may be **sensitive, protected by confidentiality**, and subject to specific legal and institutional rules.
 
 When the app queries **IP-API, VirusTotal, AbuseIPDB, or Shodan**, the processed identifiers are sent to **third-party external services**. If an **API Key** is configured, this authentication accompanies the request.
 
@@ -62,4 +62,4 @@ A: No, the tool works with the free IP-API (45 req/min). A paid key removes rate
 A: Enrichment queries are sent to external APIs when enabled. The AI assistant (Ollama) runs locally.
 
 **Q: What file formats are supported?**
-A: TXT, CSV, XLSX, XLS, PDF, HTML, HTM — with automatic format detection for WhatsApp, Meta, Google, Discord, and generic IP lists.
+A: TXT, CSV, XLSX, XLS, PDF, HTML, HTM — with automatic format detection for WhatsApp, Meta, Google, Discord, TikTok, and generic IP lists.

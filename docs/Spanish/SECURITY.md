@@ -1,4 +1,4 @@
-# Política de Seguridad
+﻿# Política de Seguridad
 
 ## Versiones Soportadas
 
@@ -47,3 +47,7 @@ Este proyecto procesa datos potencialmente sensibles. Al reportar problemas:
 - Remueva IPs reales, identificadores personales y credenciales
 - No adjunte archivos de producción sin sanitización
 - Describa el contexto operacional solo al nivel necesario para reproducir
+
+## Controles de seguridad implementados
+
+CSV injection, XSS, path sandbox, cadena de audit + HMAC, caché firmado, air-gapped, auth Argon2, logs rotativos, retención. Ver [DEPLOY.md](../DEPLOY.md) y [AUDITORIA_TECNICA.md](../AUDITORIA_TECNICA.md).

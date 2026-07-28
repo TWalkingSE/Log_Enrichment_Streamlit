@@ -13,7 +13,7 @@ from data_processor import COLUNAS_EXPORT, COLUNAS_EXPORT_META, COLUNAS_EXPORT_P
 from analysis import classify_infrastructure
 from components.graph_view import render_ip_network_graph
 from components.visualizations import render_ip_table_with_sparklines
-from helpers.pdf_report import generate_pdf_report
+from html_report_generator import generate_html_report
 from file_handler import export_xlsx_colored
 from i18n import t
 
@@ -29,7 +29,8 @@ def _build_reputacao(df_key_cols):
 
 @st.cache_data
 def _generate_csv_export(df_data):
-    return df_data.to_csv(index=False, sep=';').encode('utf-8-sig')
+    from validators import sanitize_dataframe_for_csv
+    return sanitize_dataframe_for_csv(df_data).to_csv(index=False, sep=';').encode('utf-8-sig')
 
 
 @st.cache_data
@@ -150,9 +151,9 @@ def page_resultados():
         max_cells = len(df_display) * len(df_display.columns)
         pd.set_option("styler.render.max_elements", max(262144, max_cells))
         styled = df_display.style.map(_color_reputacao_text, subset=['Reputação'])
-        st.dataframe(styled, height=500, hide_index=True, width='stretch')
+        st.dataframe(styled, height=500, hide_index=True, use_container_width=True)
     else:
-        st.dataframe(df_display, height=500, hide_index=True, width='stretch')
+        st.dataframe(df_display, height=500, hide_index=True, use_container_width=True)
     st.caption(t('resultados.records_of_total', filtered=len(df_display), total=len(df)))
 
     with st.expander(t('resultados.sparklines_title'), expanded=False):
@@ -192,23 +193,71 @@ def page_resultados():
                     st.download_button(t('resultados.csv_complete'), f,
                         os.path.basename(st.session_state.output_file), "text/csv")
 
+    # IOC / STIX export (SIEM)
+    from export_ioc import export_ioc_csv, export_ioc_list, export_stix_json
+    st.markdown(f"**{t('resultados.ioc_stix_title')}**")
+    only_susp = st.checkbox(t('resultados.ioc_only_suspicious'), value=False, key="ioc_only_susp")
+    i1, i2, i3 = st.columns(3)
+    with i1:
+        st.download_button(
+            t('resultados.ioc_txt'),
+            export_ioc_list(df_f, only_suspicious=only_susp),
+            "iocs.txt",
+            "text/plain",
+            key="dl_ioc_txt",
+        )
+    with i2:
+        st.download_button(
+            t('resultados.ioc_csv'),
+            export_ioc_csv(df_f),
+            "iocs.csv",
+            "text/csv",
+            key="dl_ioc_csv",
+        )
+    with i3:
+        alvo_name = st.session_state.get("alvo") or "Log Enrichment"
+        stix_payload = export_stix_json(
+            df_f,
+            name=f"IOCs — {alvo_name}",
+            only_suspicious=only_susp,
+        )
+        st.download_button(
+            t('resultados.stix_export'),
+            stix_payload,
+            "iocs_stix_bundle.json",
+            "application/stix+json",
+            key="dl_stix",
+        )
+
     if st.button(t('resultados.export_all_zip'), key="zip_export_btn"):
         import zipfile
+        from validators import sanitize_dataframe_for_csv
         zip_buf = io.BytesIO()
         with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("resultado.csv",
-                df_f[display_cols].to_csv(index=False, sep=';', encoding='utf-8-sig'))
+                sanitize_dataframe_for_csv(df_f[display_cols]).to_csv(
+                    index=False, sep=';', encoding='utf-8-sig'))
             zf.writestr("resultado.json",
                 df_f[display_cols].to_json(orient='records', force_ascii=False, indent=2))
             # Excel colorido no ZIP (usa cache)
             zf.writestr("resultado.xlsx", _generate_xlsx_export(df_export))
+            zf.writestr("iocs.txt", export_ioc_list(df_f, only_suspicious=only_susp))
+            zf.writestr("iocs.csv", export_ioc_csv(df_f))
+            zf.writestr(
+                "iocs_stix_bundle.json",
+                export_stix_json(
+                    df_f,
+                    name=f"IOCs — {st.session_state.get('alvo') or 'Log Enrichment'}",
+                    only_suspicious=only_susp,
+                ),
+            )
             try:
                 alvo_z = st.session_state.alvo or t('common.unknown')
-                pdf_data = generate_pdf_report(df, alvo_z)
-                if pdf_data:
-                    zf.writestr("relatorio.pdf", pdf_data)
+                html_data = generate_html_report(df, alvo_z, config={}, analyses={}, audit_hash='')
+                if html_data:
+                    zf.writestr("relatorio.html", html_data)
             except Exception as e:
-                logger.warning(f"PDF não incluído no ZIP: {e}")
+                logger.warning(f"Relatório HTML não incluído no ZIP: {e}")
                 st.toast(t('resultados.pdf_not_included'))
         zip_buf.seek(0)
         st.download_button(t('resultados.download_zip'), zip_buf.getvalue(),

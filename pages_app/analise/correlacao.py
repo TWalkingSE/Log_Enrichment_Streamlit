@@ -45,7 +45,7 @@ def page_correlacao():
                 corr = cross_target_correlation(targets)
                 if not corr.empty:
                     st.success(f"**{len(corr)}** IPs em comum!")
-                    st.dataframe(corr, width='stretch', hide_index=True)
+                    st.dataframe(corr, use_container_width=True, hide_index=True)
         if st.session_state.alvo and df is not None:
             if st.button(f"💾 Salvar resultado atual para correlação", key="save_target"):
                 st.session_state.stored_targets[st.session_state.alvo] = df.copy()
@@ -55,7 +55,7 @@ def page_correlacao():
             if st.button("🔍 Correlacionar alvos armazenados", key="corr_stored"):
                 corr = cross_target_correlation(st.session_state.stored_targets)
                 if not corr.empty:
-                    st.dataframe(corr, width='stretch', hide_index=True)
+                    st.dataframe(corr, use_container_width=True, hide_index=True)
             st.divider()
             st.subheader("📊 Comparação Lado a Lado")
             names = list(st.session_state.stored_targets.keys())
@@ -78,7 +78,7 @@ def page_correlacao():
                 tolerance = st.slider("Tolerância (seg)", 10, 300, 60, key="wifi_tol")
             shared = detect_shared_wifi(stored, tolerance_seconds=tolerance)
             if shared:
-                st.dataframe(pd.DataFrame(shared), width='stretch', hide_index=True)
+                st.dataframe(pd.DataFrame(shared), use_container_width=True, hide_index=True)
             else:
                 st.success("✅ Nenhuma conexão WiFi compartilhada.")
         else:

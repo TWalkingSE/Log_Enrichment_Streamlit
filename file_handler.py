@@ -6,20 +6,15 @@ import json
 from pathlib import Path
 from data_processor import (COLUNAS_MODELO, COLUNAS_EXPORT, COLUNAS_EXPORT_META,
                           COLUNAS_EXPORT_PRESERVATION_GOOGLE, COLUNAS_EXPORT_DISCORD,
+                          COLUNAS_EXPORT_TIKTOK,
                           detectar_separador_csv, extrair_ips_de_texto, processar_resultados,
                           extrair_ips_do_formato_preservation_google,
                           TZ_LABEL, get_periodo, format_iso_date)
-from api_client import IPAPIClient, is_valid_ip
+from api_client import is_valid_ip
 from analysis import format_reputacao
-import asyncio
-import aiohttp
-import tempfile
 
 # Configurar logger para este módulo
 logger = logging.getLogger(__name__)
-
-# Lock para escrita atômica em arquivo CSV
-_csv_write_lock = asyncio.Lock()
 
 def carregar_arquivo_log(input_file, update_callback=None, alvo='desconhecido'):
     """Carrega um arquivo de log e extrai os IPs com seus dados temporais"""
@@ -322,10 +317,12 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
         else:
             df = extrair_ips_de_texto(input_file_or_content, False, update_callback, alvo=alvo)
 
-        # Detectar se é formato Meta (tem coluna Porta), Preservation Google (tem User_Agent) ou Discord (tem User_ID)
+        # Detectar formato pelas colunas extras: Meta (Porta), Preservation Google (User_Agent),
+        # Discord (User_ID) ou TikTok (Evento)
         is_meta = 'Porta' in df.columns
         is_preservation_google = 'User_Agent' in df.columns
         is_discord = 'User_ID' in df.columns
+        is_tiktok = 'Evento' in df.columns
 
         if df.empty:
             if update_callback:
@@ -334,6 +331,8 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
                 return pd.DataFrame(columns=COLUNAS_EXPORT_DISCORD)
             if is_preservation_google:
                 return pd.DataFrame(columns=COLUNAS_EXPORT_PRESERVATION_GOOGLE)
+            if is_tiktok:
+                return pd.DataFrame(columns=COLUNAS_EXPORT_TIKTOK)
             return pd.DataFrame(columns=COLUNAS_EXPORT_META if is_meta else COLUNAS_EXPORT)
 
         total_records = len(df)
@@ -361,13 +360,15 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
                     else:
                         df_resultado = pd.read_csv(output_file, sep=sep_existente, encoding='utf-8', errors='replace')
 
-                # Verificar se resultado existente é Meta, Preservation Google ou Discord
+                # Verificar se resultado existente é Meta, Preservation Google, Discord ou TikTok
                 if 'Porta' in df_resultado.columns:
                     is_meta = True
                 if 'User_Agent' in df_resultado.columns:
                     is_preservation_google = True
                 if 'User_ID' in df_resultado.columns:
                     is_discord = True
+                if 'Evento' in df_resultado.columns:
+                    is_tiktok = True
 
                 # Garantir que temos as colunas do modelo
                 for col in COLUNAS_MODELO:
@@ -430,35 +431,34 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
         if total_ips == 0:
             if update_callback:
                 update_callback("Nenhum IP novo para processar")
-            return df_resultado if df_resultado is not None else pd.DataFrame(columns=COLUNAS_EXPORT_DISCORD if is_discord else COLUNAS_EXPORT_META if is_meta else COLUNAS_EXPORT)
+            if df_resultado is not None:
+                return df_resultado
+            if is_discord:
+                return pd.DataFrame(columns=COLUNAS_EXPORT_DISCORD)
+            if is_tiktok:
+                return pd.DataFrame(columns=COLUNAS_EXPORT_TIKTOK)
+            return pd.DataFrame(columns=COLUNAS_EXPORT_META if is_meta else COLUNAS_EXPORT)
 
-        # Inicializar cliente da API
-        client = IPAPIClient(batch_size=batch_size, period=period, cache_file=cache_file, api_key=api_key)
+        # Enriquecimento via application layer (use-case facade)
+        from application.enrich_use_case import enrich_ip_list
 
-        # Dicionário para armazenar resultados por IP
-        resultados_ips = {}
+        def _on_batch_progress(processed, total):
+            if progress_callback:
+                progress_callback(min(processed, total_ips), total_ips, total_records)
 
-        # Enviar TODOS os IPs de uma vez para o batch endpoint
-        # consultar_batch divide internamente em chunks de 100 (limite da API)
-        # API paga: 5 batches concorrentes (500 IPs simultâneos)
-        # API gratuita: batches sequenciais respeitando 45 req/min
+        if update_callback:
+            update_callback(f"Enviando {total_ips} IPs para o endpoint batch...")
 
-        async with aiohttp.ClientSession() as session:
-            def _on_batch_progress(processed, total):
-                if progress_callback:
-                    progress_callback(min(processed, total_ips), total_ips, total_records)
-
-            if update_callback:
-                update_callback(f"Enviando {total_ips} IPs para o endpoint batch...")
-
-            resultados_ips = await client.consultar_batch(
-                session, list(ips_unicos),
-                callback=update_callback,
-                progress_callback=_on_batch_progress
-            )
-
-        # Salvar o cache
-        client.salvar_cache()
+        resultados_ips, _client = await enrich_ip_list(
+            list(ips_unicos),
+            cache_file=cache_file,
+            api_key=api_key,
+            batch_size=batch_size,
+            period=period,
+            update_callback=update_callback,
+            progress_callback=_on_batch_progress,
+            save_cache=True,
+        )
 
         # Processar resultados finais
         df_processado = processar_resultados(df, resultados_ips)
@@ -466,8 +466,7 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
         # Combinar com dados existentes
         if df_resultado is not None:
             df_final = pd.concat([df_resultado, df_processado])
-            # Remover duplicatas exatas, mantendo as informações mais recentes
-            dedup_cols = ['Ip', 'Data'] if 'Data' in df_final.columns else ['Ip']
+            dedup_cols = _incremental_dedup_columns(df_final)
             df_final = df_final.drop_duplicates(subset=dedup_cols, keep='last')
         else:
             df_final = df_processado
@@ -479,16 +478,19 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
         # Adicionar coluna Reputação
         df_final = _add_reputacao_column(df_final)
 
-        # Definir colunas de exportação (com User_ID/Username/Email para Discord, User_Agent para Preservation Google, Porta para Meta)
+        # Definir colunas de exportação (com User_ID/Username/Email para Discord, User_Agent para Preservation Google, Porta para Meta, Evento para TikTok)
         if is_discord:
             export_cols = [c for c in COLUNAS_EXPORT_DISCORD if c in df_final.columns]
         elif is_preservation_google:
             export_cols = [c for c in COLUNAS_EXPORT_PRESERVATION_GOOGLE if c in df_final.columns]
+        elif is_tiktok:
+            export_cols = [c for c in COLUNAS_EXPORT_TIKTOK if c in df_final.columns]
         elif is_meta:
             export_cols = [c for c in COLUNAS_EXPORT_META if c in df_final.columns]
         else:
             export_cols = [c for c in COLUNAS_EXPORT if c in df_final.columns]
-        df_export = df_final[export_cols]
+        from validators import sanitize_dataframe_for_csv
+        df_export = sanitize_dataframe_for_csv(df_final[export_cols])
 
         # Salvar como CSV
         df_export.to_csv(output_file, index=False, sep=';', encoding='utf-8-sig')
@@ -503,6 +505,15 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
         if update_callback:
             update_callback(f"Erro: {str(e)}")
         raise
+
+
+def _incremental_dedup_columns(df):
+    """Colunas de dedup incremental: Ip+Data e chaves de formato (Porta/Evento/User_ID/User_Agent)."""
+    cols = []
+    for c in ('Ip', 'Data', 'Porta', 'Evento', 'User_ID', 'User_Agent'):
+        if c in df.columns:
+            cols.append(c)
+    return cols or list(df.columns[:1])
 
 
 def _add_reputacao_column(df):

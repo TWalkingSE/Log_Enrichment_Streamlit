@@ -14,21 +14,33 @@ exclude = [
 
 [tool.ruff.lint]
 # Pragmatic baseline for legacy Streamlit codebase; tighten over time.
+# F401 re-enabled for core modules; monólitos legados usam per-file-ignores.
 ignore = [
     "E402",   # module import not at top of file
-    "F401",   # unused imports (common with conditional / re-exports)
     "F403",   # star imports (tests.common pattern)
     "F405",   # names from star imports
     "F541",   # f-string without placeholders
     "F841",   # unused local variable
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["F401"]
+"__init__.py" = ["F401"]
+"pages_app/**" = ["F401"]
+"analysis/**" = ["F401"]
+"advanced_analysis.py" = ["F401"]
+"ip_investigativo.py" = ["F401"]
+"data_processor.py" = ["F401"]
+"html_report_generator.py" = ["F401"]
+"ai_assistant.py" = ["F401"]
+"components/**" = ["F401"]
+
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
 warn_unused_ignores = true
 explicit_package_bases = true
-files = ["auth_password.py", "api_client.py", "validators.py"]
+files = ["auth_password.py", "api_client.py", "validators.py", "enrich_service.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

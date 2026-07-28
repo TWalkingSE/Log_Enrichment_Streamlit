@@ -574,7 +574,7 @@ def page_mapa():
         main_map = _render_markers_map(classified_df, ip_col, tile_style)
 
     if main_map is not None:
-        st_folium(main_map, width='stretch', height=650, returned_objects=[], key='main_map')
+        st_folium(main_map, use_container_width=True, height=650, returned_objects=[], key='main_map')
         _render_legend(classified_df)
 
     st.divider()
@@ -647,7 +647,7 @@ def page_mapa():
         jumps = detect_impossible_jumps(df, max_speed_kmh=max_speed)
         if not jumps.empty:
             st.error(f'🚨 **{len(jumps)}** saltos impossiveis detectados (>{max_speed} km/h).')
-            st.dataframe(jumps, hide_index=True, width='stretch')
+            st.dataframe(jumps, hide_index=True, use_container_width=True)
         else:
             st.success('✅ Nenhum salto impossivel detectado.')
 
@@ -717,7 +717,7 @@ def page_mapa():
                     plot_bgcolor='rgba(0,0,0,0)',
                     paper_bgcolor='rgba(0,0,0,0)',
                 )
-                st.plotly_chart(fig_timeline, width='stretch', key='map_profile_timeline')
+                st.plotly_chart(fig_timeline, use_container_width=True, key='map_profile_timeline')
 
                 profile_df['_hour'] = profile_df['_dt'].dt.hour
                 profile_df['_dow'] = profile_df['_dt'].dt.day_name()
@@ -737,7 +737,7 @@ def page_mapa():
                     plot_bgcolor='rgba(0,0,0,0)',
                     paper_bgcolor='rgba(0,0,0,0)',
                 )
-                st.plotly_chart(fig_heat, width='stretch', key='map_profile_heatmap')
+                st.plotly_chart(fig_heat, use_container_width=True, key='map_profile_heatmap')
 
     with tool_tabs[4]:
         st.subheader('📅 Comparacao Temporal')
@@ -834,7 +834,7 @@ def page_mapa():
                         fill_opacity=0.85,
                         tooltip=f"{row.get(ip_col, '')} - {row.get('Ip_Cidade', '')}",
                     ).add_to(hull_map)
-                st_folium(hull_map, width='stretch', height=400, returned_objects=[], key='map_hull_map')
+                st_folium(hull_map, use_container_width=True, height=400, returned_objects=[], key='map_hull_map')
         except Exception as exc:
             st.warning(f'Nao foi possivel calcular a area: {exc}')
 
@@ -844,7 +844,7 @@ def page_mapa():
         if segments:
             travel_df = pd.DataFrame(segments)
             st.metric('Deslocamentos detectados', len(travel_df))
-            st.dataframe(travel_df, width='stretch', hide_index=True)
+            st.dataframe(travel_df, use_container_width=True, hide_index=True)
 
             route = [segments[0]['De']]
             for segment in segments:
@@ -856,7 +856,7 @@ def page_mapa():
 
             travel_map = _render_travel_preview_map(classified_df, tile_style)
             if travel_map is not None:
-                st_folium(travel_map, width='stretch', height=350, returned_objects=[], key='map_travel_preview')
+                st_folium(travel_map, use_container_width=True, height=350, returned_objects=[], key='map_travel_preview')
         else:
             st.info('Nenhum deslocamento entre cidades detectado.')
 

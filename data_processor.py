@@ -68,6 +68,17 @@ COLUNAS_EXPORT_DISCORD = [
     'Ip_Hospedagem', 'Ip_Tor', 'Ip_Lat', 'Ip_Lon', 'Reputação', 'Periodo', 'ISO_Date'
 ]
 
+# Colunas para exportação TikTok (com Evento)
+COLUNAS_EXPORT_TIKTOK = [
+    'Alvo', 'Ip', 'Evento', 'Data', 'Data_Fuso', 'Ip_Dono', 'Ip_AS',
+    'Ip_Regiao', 'Ip_Cidade',
+    'Ip_Movel', 'Ip_Proxy',
+    'Ip_Hospedagem', 'Ip_Tor', 'Ip_Lat', 'Ip_Lon', 'Reputação', 'Periodo', 'ISO_Date'
+]
+
+# Colunas extras específicas de provedor, inseridas após 'Ip' na saída
+COLUNAS_EXTRAS_PROVEDOR = ['Porta', 'Evento', 'User_ID', 'Username', 'Email', 'User_Agent']
+
 # Exemplos dos formatos suportados
 FORMATO_1 = """Endereços IP
 191.13.51.97
@@ -138,6 +149,21 @@ FORMATO_PRESERVATION_GOOGLE = """Gaia ID,Activity Timestamp,IP Address,Proxiedho
 314329686157,2026-03-11 02:49:39 UTC,2804:214:85c1:b496:81e9:9e8e:a396:d027,,No,App : YOUTUBE_APP. App Version : 21.10.2. Os : IOS_OS. Os Version : 26.3. Device Type : MOBILE.,YouTube
 314329686157,2026-03-11 02:33:59 UTC,2804:214:85c1:b496:81e9:9e8e:a396:d027,,No,App : GMAIL_APP. App Version : 6.0.260302. Os : IOS_OS. Os Version : 26.3. Device Type : MOBILE.,Gmail
 314329686157,2026-03-11 00:04:30 UTC,168.0.233.233,,No,App : GMAIL_APP. App Version : 6.0.260302.1803824. Os : IOS_OS. Os Version : 26.3. Device Type : MOBILE.,Gmail
+"""
+
+FORMATO_TIKTOK = """Events IP Data
+Date: 27/07/2026 03:04:43PM (UTC +00)
+IP: 203.0.113.45
+Event: video_play
+Country: Brazil
+Date: 27/07/2026 03:04:31PM (UTC +00)
+IP: 203.0.113.45
+Event: like
+Country: Brazil
+Date: 27/07/2026 02:48:12PM (UTC +00)
+IP: 203.0.113.45
+Event: publish
+Country: Brazil
 """
 
 def parse_meta_ip_port(raw):
@@ -785,10 +811,158 @@ def extrair_ips_do_formato_discord(content, update_callback=None, alvo='desconhe
     return df
 
 
+def extrair_ips_do_formato_tiktok(content, update_callback=None, alvo='desconhecido'):
+    """
+    Extrai IPs, eventos e timestamps do formato TikTok (Events IP Data).
+
+    O formato TikTok (PDF da TikTok Pte. Limited) contém registros com campos
+    rotulados, um por linha, na ordem Date -> IP -> Event -> Country:
+
+        Date: 27/07/2026 03:04:43PM (UTC +00)
+        IP: 203.0.113.45
+        Event: video_play
+        Country: Brazil
+
+    Rodapés de página ("TikTok Pte. Limited", endereço e número da página) podem
+    aparecer intercalados no meio de um registro e são removidos na limpeza.
+
+    Args:
+        content: Conteúdo do texto extraído do PDF
+        update_callback: Função para atualizar status
+        alvo: Identificador do alvo
+
+    Returns:
+        DataFrame com IPs, dados temporais e coluna extra 'Evento'
+    """
+    if update_callback:
+        update_callback("Processando formato TikTok (Events IP Data)...")
+
+    # Remover ruído de paginação: cabeçalho, rodapé da empresa e números de página.
+    # Seguro porque linhas de dados sempre têm o formato "Chave: valor".
+    lines_clean = []
+    for line in content.split('\n'):
+        line_stripped = line.strip()
+        if not line_stripped:
+            continue
+        if line_stripped == 'Events IP Data':
+            continue
+        if 'TikTok Pte' in line_stripped:
+            continue
+        if line_stripped.startswith('One Raffles Quay'):
+            continue
+        # Linha contendo apenas número de página
+        if re.fullmatch(r'\d{1,4}', line_stripped):
+            continue
+        lines_clean.append(line_stripped)
+
+    # Máquina de estados: acumula campos rotulados até completar um registro.
+    # Tolerante à ordem dos campos e a registros divididos entre páginas.
+    field_pattern = re.compile(r'^(Date|IP|Event|Country)\s*:\s*(.+?)\s*$', re.IGNORECASE)
+    registros_brutos = []
+    atual = {}
+
+    for line in lines_clean:
+        m = field_pattern.match(line)
+        if not m:
+            continue
+        campo = m.group(1).capitalize()  # Date, Ip->IP, Event, Country
+        if campo == 'Ip':
+            campo = 'IP'
+        valor = m.group(2).strip()
+
+        # Se o campo já existe no registro atual, o anterior estava incompleto:
+        # emitir se estiver completo e reiniciar pelo campo repetido.
+        if campo in atual:
+            if all(k in atual for k in ('Date', 'IP', 'Event')):
+                registros_brutos.append(atual)
+            atual = {}
+        atual[campo] = valor
+
+        # Registro completo: Date + IP + Event (Country é opcional/descartado)
+        if all(k in atual for k in ('Date', 'IP', 'Event')):
+            registros_brutos.append(atual)
+            atual = {}
+
+    # Registro pendente ao final do documento
+    if 'IP' in atual and 'Date' in atual and 'Event' in atual:
+        registros_brutos.append(atual)
+
+    resultados = []
+    ips_processados = set()
+
+    for reg in registros_brutos:
+        ip = reg['IP'].strip()
+        if not is_valid_ip(ip):
+            continue
+
+        evento = reg['Event'].strip()
+        date_raw = reg['Date'].strip()
+
+        # Remover sufixo de fuso: "27/07/2026 03:04:43PM (UTC +00)" -> "27/07/2026 03:04:43PM"
+        date_str = re.sub(r'\s*\(UTC\s*[+\-]?\d+\)\s*$', '', date_raw).strip()
+
+        # Dedup por (IP, data, evento) — mantém eventos distintos no mesmo segundo
+        dedup_key = (ip, date_str, evento)
+        if dedup_key in ips_processados:
+            continue
+        ips_processados.add(dedup_key)
+
+        # Converter de UTC para fuso local configurável
+        try:
+            dt_utc = datetime.strptime(date_str, '%d/%m/%Y %I:%M:%S%p')
+            dt_local = convert_utc_to_local(dt_utc)
+            data = dt_local.strftime('%Y-%m-%d %H:%M:%S')
+            periodo = get_periodo(dt_local.hour)
+            iso_date = format_iso_date(dt_local)
+        except (TypeError, ValueError) as e:
+            logger.warning(f"Erro ao converter data TikTok '{date_raw}': {e}")
+            data = date_str
+            periodo = '☀️ Diurno'
+            iso_date = None
+
+        resultados.append({
+            'Alvo': alvo,
+            'Ip': ip,
+            'Evento': evento,
+            'Data': data,
+            'Data_Fuso': TZ_LABEL,
+            'Ip_Dono': None,
+            'Ip_AS': None,
+            'Ip_Regiao': None,
+            'Ip_Cidade': None,
+            'Ip_Pais': None,
+            'Ip_Pais_Codigo': None,
+            'Ip_Movel': False,
+            'Ip_Proxy': False,
+            'Ip_Hospedagem': False,
+            'Ip_Tor': False,
+            'Ip_Lat': None,
+            'Ip_Lon': None,
+            'Periodo': periodo,
+            'ISO_Date': iso_date
+        })
+
+    if not resultados:
+        return pd.DataFrame(columns=COLUNAS_MODELO)
+
+    df = pd.DataFrame(resultados)
+
+    # Ordenar colunas: modelo base com Evento após Ip
+    cols_ordered = list(COLUNAS_MODELO)
+    idx_ip = cols_ordered.index('Ip')
+    cols_ordered.insert(idx_ip + 1, 'Evento')
+    df = df[[c for c in cols_ordered if c in df.columns]]
+
+    if update_callback:
+        update_callback(f"Extraídos {len(df)} registros ({df['Evento'].nunique()} tipos de evento) do formato TikTok")
+
+    return df
+
+
 def detectar_formato_log(content):
     """
     Detecta o formato do log de acesso baseado no conteúdo.
-    Retorna: 'preservation_google', 'meta', 'whatsapp', 'google', 'discord' ou 'generico'
+    Retorna: 'preservation_google', 'meta', 'whatsapp', 'google', 'discord', 'tiktok' ou 'generico'
     """
     # Preservation Google: CSV do Google Takeout com colunas específicas
     if 'Activity Timestamp' in content and 'User Agent String' in content and 'Product Name' in content:
@@ -796,6 +970,9 @@ def detectar_formato_log(content):
     # Discord: contém "Session Start (UTC)" com "User ID:" ou "Username:"
     if 'Session Start (UTC)' in content and ('User ID:' in content or 'Username:' in content):
         return 'discord'
+    # TikTok: PDF "Events IP Data" da TikTok Pte. Limited (campos Date/IP/Event/Country)
+    if 'Events IP Data' in content or 'TikTok Pte' in content:
+        return 'tiktok'
     # Meta Platforms: contém "source port/port numbers" ou "Meta Platforms Business Record"
     if 'source port' in content.lower() or 'Meta Platforms Business Record' in content:
         return 'meta'
@@ -852,6 +1029,12 @@ def extrair_ips_de_texto(file_path_or_content, is_file=True, update_callback=Non
         # Formato Discord (Session Start/IP Address com metadados do usuário)
         if formato == 'discord':
             df = extrair_ips_do_formato_discord(content, update_callback, alvo)
+            if not df.empty:
+                return df
+
+        # Formato TikTok (Events IP Data: Date/IP/Event/Country)
+        if formato == 'tiktok':
+            df = extrair_ips_do_formato_tiktok(content, update_callback, alvo)
             if not df.empty:
                 return df
 
@@ -1041,8 +1224,9 @@ def processar_resultados(df_original, resultados_ips):
     """Processa os resultados da API e combina com o DataFrame original (vetorizado)"""
     df_processado = df_original.copy()
 
-    # Verificar se é formato Meta (tem coluna Porta)
-    is_meta = 'Porta' in df_processado.columns
+    # Colunas extras de provedor presentes (Porta=Meta, Evento=TikTok,
+    # User_ID/Username/Email=Discord, User_Agent=Preservation Google)
+    extras_presentes = [c for c in COLUNAS_EXTRAS_PROVEDOR if c in df_processado.columns]
 
     # Garantir que temos todos os campos do modelo
     for col in COLUNAS_MODELO:
@@ -1093,13 +1277,12 @@ def processar_resultados(df_original, resultados_ips):
         except (AttributeError, TypeError, ValueError) as e:
             logger.warning(f"Erro ao calcular Periodo/ISO_Date vetorizado: {e}")
 
-    # Definir colunas de saída preservando Porta para Meta
-    if is_meta:
+    # Definir colunas de saída preservando extras de provedor após 'Ip'
+    if extras_presentes:
         colunas_saida = [col for col in COLUNAS_MODELO]
-        # Inserir Porta após Ip
-        if 'Porta' not in colunas_saida:
-            idx_ip = colunas_saida.index('Ip')
-            colunas_saida.insert(idx_ip + 1, 'Porta')
+        idx_ip = colunas_saida.index('Ip')
+        for i, extra_col in enumerate(extras_presentes):
+            colunas_saida.insert(idx_ip + 1 + i, extra_col)
         return df_processado[colunas_saida]
     else:
         return df_processado[COLUNAS_MODELO]

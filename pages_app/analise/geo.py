@@ -16,6 +16,21 @@ from analysis import (
 from i18n import t
 
 
+@st.cache_data(show_spinner=False)
+def _cached_subnet_patterns(df, ipv4_mask, ipv6_mask):
+    return analyze_subnet_patterns(df, ipv4_mask=ipv4_mask, ipv6_mask=ipv6_mask)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_subnet_consistency(df, ipv4_mask, ipv6_mask):
+    return compute_subnet_consistency(df, ipv4_mask=ipv4_mask, ipv6_mask=ipv6_mask)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_life_patterns(df):
+    return detect_life_patterns(df)
+
+
 def page_geo():
     from styles.components import section_header, empty_state
     section_header(t('geo.title'), divider="green")
@@ -27,8 +42,8 @@ def page_geo():
 
     # ── Geo History ──
     with st.container(border=True):
-        st.subheader("🌍 Histórico de Geolocalização")
-        st.caption("Detecta mudanças de localização em IPs cacheados.")
+        st.subheader(t('geo.history_title'))
+        st.caption(t('geo.history_subtitle'))
         cache_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'ip_cache.json')
         cache = {}
         if os.path.exists(cache_path):
@@ -41,38 +56,38 @@ def page_geo():
             result = detect_geo_changes(df, cache)
             changes = result.get('changed_ips', [])
             if changes:
-                st.warning(f"🌍 **{result['total_changes']}** mudança(s) de geolocalização detectada(s)!")
+                st.warning(t('geo.geo_changes_found', count=result['total_changes']))
                 for ch in changes:
                     sev_icon = {'Crítico': '🔴', 'Alto': '🟠', 'Médio': '🟡'}.get(ch.get('severity', ''), '⚪')
                     with st.expander(f"{sev_icon} {ch['ip']} — {ch.get('severity', '')}"):
-                        st.markdown(f"**Atual:** {ch.get('new_city', '')} / {ch.get('new_isp', '')}")
-                        st.markdown(f"**Anterior:** {ch.get('old_city', '')} / {ch.get('old_isp', '')}")
-                        st.markdown(f"**Data da mudança:** {ch.get('change_date', 'N/A')}")
+                        st.markdown(f"**{t('geo.current')}:** {ch.get('new_city', '')} / {ch.get('new_isp', '')}")
+                        st.markdown(f"**{t('geo.previous')}:** {ch.get('old_city', '')} / {ch.get('old_isp', '')}")
+                        st.markdown(f"**{t('geo.change_date')}:** {ch.get('change_date', 'N/A')}")
                         if ch.get('distance_km'):
-                            st.markdown(f"**Distância:** {ch['distance_km']} km")
+                            st.markdown(f"**{t('geo.distance')}:** {ch['distance_km']} km")
             else:
-                st.success("✅ Nenhuma mudança de geolocalização detectada.")
+                st.success(t('geo.no_geo_changes'))
         else:
-            st.info("Cache vazio. Processe dados primeiro para construir histórico.")
+            st.info(t('geo.empty_cache'))
 
     # ── Sub-redes ──
     with st.container(border=True):
-        st.subheader("🔢 Análise de Sub-redes")
-        with st.popover("⚙️ Configurar máscaras"):
-            ipv4_mask = st.slider("Máscara IPv4", 16, 32, 24, key="subnet_v4")
-            ipv6_mask = st.slider("Máscara IPv6", 32, 64, 48, key="subnet_v6")
+        st.subheader(t('geo.subnets_title'))
+        with st.popover("⚙️"):
+            ipv4_mask = st.slider("IPv4", 16, 32, 24, key="subnet_v4")
+            ipv6_mask = st.slider("IPv6", 32, 64, 48, key="subnet_v6")
 
-        result = analyze_subnet_patterns(df, ipv4_mask=ipv4_mask, ipv6_mask=ipv6_mask)
+        result = _cached_subnet_patterns(df, ipv4_mask, ipv6_mask)
         c1, c2 = st.columns(2)
-        c1.metric("Total de Sub-redes", result['total_subnets'])
-        consistency = compute_subnet_consistency(df, ipv4_mask=ipv4_mask, ipv6_mask=ipv6_mask)
-        c2.metric("Score de Consistência", f"{consistency['consistency_score']}%")
+        c1.metric("Subnets", result['total_subnets'])
+        consistency = _cached_subnet_consistency(df, ipv4_mask, ipv6_mask)
+        c2.metric("Consistency", f"{consistency['consistency_score']}%")
 
         if result['dominant_subnets']:
             st.markdown("**Top Sub-redes:**")
             dom_df = pd.DataFrame(result['dominant_subnets'])
             display_cols = [c for c in ['subnet', 'ip_count', 'record_count', 'providers', 'cities'] if c in dom_df.columns]
-            st.dataframe(dom_df[display_cols], width='stretch', hide_index=True)
+            st.dataframe(dom_df[display_cols], use_container_width=True, hide_index=True)
 
         if consistency.get('top_subnets'):
             st.markdown(f"**Sub-rede primária:** `{consistency['primary_subnet']}` ({consistency.get('primary_pct', 0)}%)")
@@ -90,17 +105,17 @@ def page_geo():
                         'Sub-rede': s['subnet'],
                         'Alvos': ', '.join(s['targets']),
                         'Total IPs': s['total_ips']
-                    } for s in shared]), width='stretch', hide_index=True)
+                    } for s in shared]), use_container_width=True, hide_index=True)
                 else:
                     st.success("✅ Nenhuma sub-rede compartilhada.")
 
     # ── Padrões de Vida ──
     with st.container(border=True):
-        st.subheader("📍 Padrões de Vida (Clustering)")
-        life = detect_life_patterns(df)
+        st.subheader(t('geo.life_patterns_title'))
+        life = _cached_life_patterns(df)
         if life.get('has_data'):
             for c in life.get('clusters', []):
                 icon = {'home': '🏠', 'work': '🏢', 'other': '📍'}.get(c.get('type', ''), '📍')
                 st.markdown(f"**{icon} {c.get('label', '')}** — {c.get('city', '')} ({c.get('count', 0)} acessos)")
         else:
-            st.info("Dados insuficientes para clustering.")
+            st.info(t('geo.life_patterns_subtitle'))

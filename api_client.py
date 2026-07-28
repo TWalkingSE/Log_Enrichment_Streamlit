@@ -42,13 +42,26 @@ FREE_API_PERIOD = 60
 class IPAPIClient:
     """Cliente para a API IP-API.com (gratuita e paga)"""
 
-    def __init__(self, batch_size=500, period=0, cache_file=None, api_key=None, cache_ttl=None):
+    def __init__(self, batch_size=500, period=0, cache_file=None, api_key=None, cache_ttl=None,
+                 air_gapped=None):
         self.api_key = api_key
         self._api_key_lock = asyncio.Lock()
+        if air_gapped is None:
+            try:
+                from helpers.runtime_flags import is_air_gapped
+                air_gapped = is_air_gapped()
+            except Exception:
+                air_gapped = False
+        self.air_gapped = bool(air_gapped)
 
         # API paga (com key) = pro endpoint HTTPS ilimitado
         # API gratuita (sem key) = endpoint HTTP com rate limit 45 req/min
-        if api_key:
+        if self.air_gapped:
+            self.API_URL = "offline://cache-only"
+            self.batch_size = batch_size
+            self.period = period
+            logger.warning("AIR_GAPPED mode: external IP-API calls disabled (cache-only).")
+        elif api_key:
             self.API_URL = "https://pro.ip-api.com/json/"
             self.batch_size = batch_size
             self.period = period
@@ -56,6 +69,10 @@ class IPAPIClient:
             self.API_URL = "http://ip-api.com/json/"
             self.batch_size = min(batch_size, FREE_API_RATE_LIMIT)
             self.period = max(period, FREE_API_PERIOD)
+            logger.warning(
+                "IP-API free tier uses cleartext HTTP (http://ip-api.com). "
+                "Prefer IPAPI_KEY for HTTPS pro endpoint in production."
+            )
 
         self.total_requests = 0
         self._request_times = []  # Para rate limiting da API gratuita
@@ -87,8 +104,20 @@ class IPAPIClient:
                 with gzip.open(cache_file, 'rt', encoding='utf-8') as f:
                     raw_cache = json.load(f)
             else:
-                with open(cache_file, 'r') as f:
+                with open(cache_file, 'r', encoding='utf-8') as f:
                     raw_cache = json.load(f)
+            # Envelope assinado (HMAC) opcional
+            try:
+                from helpers.signed_cache import is_signed_envelope, verify_signed_package
+                if is_signed_envelope(raw_cache):
+                    ok, msg, payload = verify_signed_package(raw_cache)
+                    if not ok:
+                        logger.error(f"Cache assinado rejeitado: {msg}")
+                        return
+                    raw_cache = payload
+                    logger.info("Cache assinado verificado com sucesso")
+            except Exception as sig_err:
+                logger.debug(f"Verificação de assinatura de cache ignorada: {sig_err}")
             # Migrar cache antigo (sem TTL) e filtrar expirados
             now = time.time()
             for ip_key, entry in raw_cache.items():
@@ -172,6 +201,11 @@ class IPAPIClient:
             if callback:
                 callback(f"IP privado/reservado ignorado: {ip}")
             return self._make_error_result('IP privado/reservado')
+
+        if self.air_gapped:
+            if callback:
+                callback(f"Air-gapped: sem cache para IP {ip}")
+            return self._make_error_result('Air-gapped: IP não encontrado no cache')
 
         await self.rate_limit()
 
@@ -357,9 +391,14 @@ class IPAPIClient:
             if not is_valid_ip(ip) or is_private_ip(ip):
                 resultados[ip] = self._make_error_result('IP inválido ou privado')
                 continue
+            if self.air_gapped:
+                resultados[ip] = self._make_error_result('Air-gapped: IP não encontrado no cache')
+                continue
             ips_to_query.append(ip)
 
         if not ips_to_query:
+            if self.air_gapped and callback:
+                callback("Air-gapped: apenas resultados do cache local")
             return resultados
 
         total_to_query = len(ips_to_query)
@@ -435,11 +474,21 @@ class IPAPIClient:
 
             return chunk_results
 
+        def _check_cancel():
+            try:
+                from helpers.job_control import JobCancelled, check_cancel
+                check_cancel()
+            except ImportError:
+                pass
+            except JobCancelled:
+                raise
+
         # API paga: batches concorrentes (até 5 simultâneos)
         # API gratuita: sequencial (respeitando rate limit)
         if self.api_key:
             CONCURRENT_BATCHES = 5
             for wave_start in range(0, len(chunks), CONCURRENT_BATCHES):
+                _check_cancel()
                 wave = chunks[wave_start:wave_start + CONCURRENT_BATCHES]
                 tasks = [_query_one_chunk(chunk, wave_start + i) for i, chunk in enumerate(wave)]
                 wave_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -453,6 +502,7 @@ class IPAPIClient:
                     progress_callback(processed_count, total_to_query)
         else:
             for idx, chunk in enumerate(chunks):
+                _check_cancel()
                 chunk_results = await _query_one_chunk(chunk, idx)
                 resultados.update(chunk_results)
                 processed_count += len(chunk_results)
@@ -497,7 +547,19 @@ class IPAPIClient:
                     with gzip.open(self.cache_file, 'wt', encoding='utf-8') as f:
                         json.dump(self.cache, f)
                 else:
-                    with open(self.cache_file, 'w') as f:
+                    sign = os.getenv('SIGN_IP_CACHE', '').strip().lower() in {'1', 'true', 'yes', 'on'}
+                    if sign:
+                        try:
+                            from helpers.signed_cache import build_signed_package, get_cache_hmac_secret
+                            if get_cache_hmac_secret():
+                                package = build_signed_package(self.cache)
+                                with open(self.cache_file, 'w', encoding='utf-8') as f:
+                                    json.dump(package, f, ensure_ascii=False)
+                                logger.info(f"Cache assinado salvo com {len(self.cache)} entradas")
+                                return
+                        except Exception as sig_err:
+                            logger.warning(f"Falha ao assinar cache, salvando plain: {sig_err}")
+                    with open(self.cache_file, 'w', encoding='utf-8') as f:
                         json.dump(self.cache, f)
                 logger.info(f"Cache salvo com {len(self.cache)} entradas")
             except (OSError, TypeError, ValueError) as e:

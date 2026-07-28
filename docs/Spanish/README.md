@@ -1,88 +1,71 @@
-# Log Enrichment v5.2 Pro
+﻿# Log Enrichment v5.2 Pro
 
-> 🇧🇷 [Português](../Portuguese/README.md) · 🇺🇸 [English](../English/README.md)
+> 🇧🇷 [Português](../Portuguese/README.md) · 🇺🇸 [English](../English/README.md) · Docs PT completas: [README raíz](../../README.md)
 
-Herramienta profesional para extracción, análisis forense y enriquecimiento de direcciones IP en logs de acceso e interceptación telemática, utilizando múltiples fuentes de inteligencia (IP-API, VirusTotal, AbuseIPDB).
+Herramienta profesional para extracción, análisis forense y enriquecimiento de IPs en logs de acceso e interceptación telemática (IP-API, VirusTotal, AbuseIPDB, Shodan).
 
-## 📋 Descripción
+## Descripción
 
-**Log Enrichment** es una aplicación web (Streamlit) que automatiza el análisis de logs de acceso e interceptación telemática de WhatsApp. Extrae direcciones IP de diversos formatos, consulta APIs de geolocalización y reputación vía **batch endpoint** (hasta 100 IPs por solicitud), y genera informes completos con gráficos, mapas, grafos interactivos y resumen ejecutivo.
+Aplicación Streamlit multipágina que extrae IPs de múltiples formatos, enriquece vía **API batch** (hasta 100 IPs/request) y genera tablas, mapas, grafos, resúmenes ejecutivos, export IOC/STIX y audit trail forense.
 
-## ⚠️ Alerta de Datos Sensibles
+## Datos sensibles
 
-> **Atención:** esta herramienta puede procesar **direcciones IP, puertos lógicos, horarios de conexión, ubicación aproximada, ASN/proveedor y metadatos correlatos** obtenidos de registros de plataformas y servicios como **Google, WhatsApp, Meta, Discord** y proveedores de acceso. En muchos contextos, estos datos pueden ser **sensibles, confidenciales o legalmente protegidos**.
->
-> Cuando activa consultas de enriquecimiento o reputación con **API Key**, parte de estos datos se envía a **servicios externos de terceros**, como **IP-API, VirusTotal, AbuseIPDB y Shodan**.
->
-> **Antes de procesar datos reales:** verifique su base legal, política institucional, cadena de custodia y necesidad operacional.
+Puede procesar IPs, puertos, timestamps, geo, ASN/proveedor y metadatos. Con API keys, parte de los datos se envía a terceros. Prefiera entornos controlados y use **air-gapped / caché firmado** cuando se requiera offline. Ver [SECURITY.md](../../SECURITY.md) y [DEPLOY.md](../DEPLOY.md).
 
-## ✨ Funcionalidades
+## Funcionalidades (auditoría Lotes 1–8)
 
-### Enriquecimiento de Logs de Acceso
-- **10 Formatos de Entrada**: Genérico, Meta Platforms, WhatsApp, Google, Preservation Google, Discord (PDF), CSV/Excel, HTML WhatsApp, HTML Meta Platforms, HTML Google
-- **API Batch**: Consulta hasta 100 IPs por solicitud vía POST `/batch`
-- **rDNS Asíncrono**: Resolución DNS inversa en paralelo
-- **Detección Automática de Formato**: Identifica el tipo de log automáticamente
-- **Vista Previa**: Visualice los IPs detectados antes de procesar
+### Enriquecimiento
+- 11 formatos de entrada (incluido TikTok PDF)
+- Batch IP-API, rDNS async, detección de formato, vista previa, dedup incremental
+- **Cancelación cooperativa** entre lotes (multi-pestaña)
+- **Worker headless**: `python scripts/enrich_worker.py`
+- **Air-gapped**: `AIR_GAPPED=true` (solo caché)
+- **Caché firmado HMAC**: `CACHE_HMAC_SECRET` / `SIGN_IP_CACHE`
+- Persistencia de sesión: `data/sessions/`
+- Capa de aplicación: `application.enrich_use_case` + `enrich_service`
+- Paquete modular `analysis/`
+- Retención: `scripts/retention_cleanup.py`
+- **Export SIEM**: IOC + **STIX 2.1**
+- **Comparación A/B** de períodos
+- Audit trail con cadena de hash + HMAC opcional
+- i18n: pt / en / es
+- Seguridad: sanitización CSV, escape XSS, sandbox de paths, logs rotativos
 
-### Panel de Estadísticas
-- Cards resumen, tendencias de actividad, spotlight por proveedor, mix de conexión, heatmap temporal, top IPs recurrentes
+### Análisis avanzado (8 páginas)
+Visión general · Riesgo · Temporal · **Comparación A/B** · Geo · Correlación · Comportamiento · Operacional
 
-### 🗺️ Mapa de Geolocalización (Leaflet / Folium)
-Cinco modos de visualización: Marcadores, Clusters, Heatmap, Ruta Temporal, Visión Investigativa
+### Exportación
+CSV sanitizado, JSON, Excel, ZIP (con IOC/STIX), KML, GeoJSON, informe HTML/PDF
 
-### Informe PDF
-- Resumen general, top proveedores, anomalías, IPs recurrentes, gráficos incrustados
-
-### Análisis Avanzado (7 páginas dedicadas)
-- **Visión General**: KPIs, scores de riesgo, resumen ejecutivo
-- **Riesgo y Amenazas**: Score de riesgo, VirusTotal, AbuseIPDB, Shodan, Tor exit nodes
-- **Patrones Temporales**: Análisis horario, silencio digital, validación de huso horario
-- **Geolocalización**: Historial geo, sub-redes, patrones de vida (clustering DBSCAN)
-- **Correlación**: Correlación cruzada, WiFi compartido, relay chains
-- **Comportamiento**: Detección heurística VPN/proxy, confianza de IP, números descartables
-- **Operacional**: Análisis investigativo, comparación temporal, salud de datos
-
-### 🌐 Soporte Multilingüe
-- Interfaz disponible en **Portugués**, **Inglés** y **Español**
-- Selector de idioma en la barra lateral para cambio en tiempo real
-- Documentación disponible en los tres idiomas en `docs/`
-
-## 🛠️ Instalación
-
-### Prerrequisitos
-- Python 3.10+ (3.11 recomendado)
-- pip
-
-### Pasos
+## Instalación
 
 ```bash
 python -m venv venv
-# Windows: venv\Scripts\activate
-# Linux/Mac: source venv/bin/activate
 pip install -r requirements.txt
-```
-
-### Ejecutar
-
-```bash
+cp .env.example .env
 streamlit run app.py
 ```
 
-La aplicación se abrirá automáticamente en `http://localhost:8501`.
-
-## 🧪 Tests
+Variables clave: `AUTH_PASSWORD_HASH`, `IPAPI_KEY`, `AUDIT_HMAC_SECRET`, `CACHE_HMAC_SECRET`, `SIGN_IP_CACHE`, `AIR_GAPPED`, `RETENTION_*`.
 
 ```bash
-python -m pytest tests -v
+python scripts/enrich_worker.py --input logs.txt --output output/csv/out.csv --air-gapped
+python scripts/retention_cleanup.py
+python -m pytest tests -q
 ```
 
-**167+ tests automatizados** organizados en `tests/` por dominio.
+## Tests
 
-## 📜 Licencia
+~196 tests automatizados.
 
-Este proyecto se distribuye bajo la licencia MIT. Vea el archivo `LICENSE` para el texto completo.
+## Documentación
 
-## 👨‍💻 Autor
+- [DEPLOY.md](../DEPLOY.md) · [AUDITORIA_TECNICA.md](../AUDITORIA_TECNICA.md) · [SECURITY.md](../../SECURITY.md) · [README PT completo](../../README.md)
+
+## Licencia
+
+MIT — ver `LICENSE`.
+
+## Autor
 
 **Desarrollado por TWalking con ayuda de AI**

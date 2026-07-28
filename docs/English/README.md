@@ -1,114 +1,110 @@
-# Log Enrichment v5.2 Pro
+﻿# Log Enrichment v5.2 Pro
 
-> 🇧🇷 [Português](../Portuguese/README.md) · 🇪🇸 [Español](../Spanish/README.md)
+> 🇧🇷 [Português](../Portuguese/README.md) · 🇪🇸 [Español](../Spanish/README.md) · Full PT docs: [root README](../../README.md)
 
-Professional tool for extraction, forensic analysis, and enrichment of IP addresses in access logs and telematic interception, using multiple intelligence sources (IP-API, VirusTotal, AbuseIPDB).
+Professional tool for extraction, forensic analysis, and enrichment of IP addresses in access logs and telematic interception (IP-API, VirusTotal, AbuseIPDB, Shodan).
 
-## 📋 Description
+## Description
 
-**Log Enrichment** is a web application (Streamlit) that automates the analysis of access logs and WhatsApp telematic interception. It extracts IP addresses from various formats, queries geolocation and reputation APIs via **batch endpoint** (up to 100 IPs per request), and generates complete reports with charts, maps, interactive graphs, and executive summaries.
+Streamlit multipage app that extracts IPs from many log formats, enriches via **batch API** (up to 100 IPs/request), and produces tables, maps, graphs, executive summaries, IOC/STIX exports, and forensic audit trails.
 
-## ⚠️ Sensitive Data Warning
+## Sensitive data
 
-> **Attention:** this tool may process **IP addresses, logical ports, connection times, approximate location, ASN/provider, and related metadata** obtained from platform and service records such as **Google, WhatsApp, Meta, Discord**, and access providers. In many contexts, this data may be **sensitive, confidential, or legally protected**.
->
-> When you enable enrichment or reputation queries with an **API Key**, part of this data is sent to **third-party external services** such as **IP-API, VirusTotal, AbuseIPDB, and Shodan**, according to the configuration used.
->
-> **Before processing real data:** verify your legal basis, institutional policy, chain of custody, and operational necessity. Whenever possible, use a controlled environment, minimize the set sent to third parties, and prefer local/offline flows when external queries are not indispensable.
+May process IPs, ports, timestamps, geo, ASN/provider and related metadata. With API keys enabled, data is sent to third parties. Prefer controlled environments, minimize external queries, and use **air-gapped / signed cache** when offline is required. See [SECURITY.md](../../SECURITY.md) and [DEPLOY.md](../DEPLOY.md).
 
-## ✨ Features
+## Features (audit Lotes 1–8)
 
-### Access Log Enrichment
-- **10 Input Formats**: Generic, Meta Platforms, WhatsApp, Google, Preservation Google, Discord (PDF), CSV/Excel, HTML WhatsApp, HTML Meta Platforms, HTML Google
-- **Batch API**: Queries up to 100 IPs per request via POST `/batch`
-- **Async rDNS**: Parallel reverse DNS resolution for all IPs
-- **Automatic Format Detection**: Automatically identifies log type
-- **Preview**: View detected IPs before processing
-- **Incremental Processing**: Add new IPs to existing files
+### Enrichment
+- 11 input formats (Generic, Meta, WhatsApp, Google, Discord PDF, TikTok PDF, HTML, CSV/Excel, …)
+- Batch IP-API, async rDNS, format detection, preview, incremental dedup
+- **Cooperative cancel** between API batches (multi-tab)
+- **Headless worker**: `python scripts/enrich_worker.py --input … --output …`
+- **Air-gapped**: `AIR_GAPPED=true` (cache-only)
+- **HMAC-signed cache**: `CACHE_HMAC_SECRET` / `SIGN_IP_CACHE` (export/import in Settings)
+- Session restore: `data/sessions/` (parquet/pickle)
+- Application layer: `application.enrich_use_case` + `enrich_service`
+- Modular `analysis/` package
+- Retention: `scripts/retention_cleanup.py` + `RETENTION_*`
+- **SIEM export**: IOC txt/csv + **STIX 2.1** on Results (+ ZIP)
+- **A/B period comparison** page under Analysis
+- Audit trail hash chain (`prev_hash`) + optional `AUDIT_HMAC_SECRET`
+- i18n: pt / en / es
+- Security: CSV injection sanitization, HTML escape (XSS), path sandbox under `output/`, rotating logs
 
-### Statistics Dashboard
-- Summary cards, activity trends, provider spotlight, connection mix, temporal heatmap, top recurring IPs
+### Advanced analysis (8 pages)
+Overview · Risk & Threats · Temporal · **A/B Compare** · Geo · Correlation · Behavior · Operational
 
-### 🗺️ Geolocation Map (Leaflet / Folium)
-Five visualization modes: Markers, Clusters, Heatmap, Temporal Route, Investigative View
+### Export
+CSV (sanitized), JSON, colored Excel, ZIP (includes IOC/STIX), KML, GeoJSON, HTML/PDF report
 
-### PDF Report
-- General summary, top providers, anomalies, recurring IPs, embedded charts
+### Settings tabs
+API & Cache (air-gap, signed cache) · AI · Branding · Audit Trail
 
-### Advanced Analysis (7 dedicated pages)
-- **Overview**: KPIs, risk scores, executive summary
-- **Risk & Threats**: Risk score, VirusTotal, AbuseIPDB, Shodan, Tor exit nodes
-- **Temporal Patterns**: Hourly analysis, digital silence, timezone validation
-- **Geolocation**: Geo history, subnets, life patterns (DBSCAN clustering)
-- **Correlation**: Cross-target correlation, shared WiFi, relay chains
-- **Behavior**: VPN/proxy heuristic detection, IP confidence, disposable numbers
-- **Operational**: Investigative analysis, temporal comparison, data health
-
-### 🔍 Investigative Analysis
-Specialized module for police investigative use with IPv6 priority, temporal anchors, investigative scoring (0-100), and AI assistant.
-
-### 🌐 Multilingual Support
-- Interface available in **Portuguese**, **English**, and **Spanish**
-- Language selector in the sidebar for real-time switching
-- Documentation available in all three languages under `docs/`
-
-## 🛠️ Installation
-
-### Prerequisites
-- Python 3.10+ (3.11 recommended)
-- pip
-
-### Steps
+## Install
 
 ```bash
 python -m venv venv
 # Windows: venv\Scripts\activate
 # Linux/Mac: source venv/bin/activate
 pip install -r requirements.txt
-```
-
-### Run
-
-```bash
+cp .env.example .env
 streamlit run app.py
 ```
 
-The application will open automatically at `http://localhost:8501`.
+### Key environment variables
 
-## 📁 Project Structure
+| Variable | Purpose |
+|----------|---------|
+| `AUTH_PASSWORD_HASH` | Streamlit auth (Argon2 recommended) |
+| `IPAPI_KEY` | Paid IP-API (HTTPS) |
+| `AUDIT_HMAC_SECRET` | Optional audit HMAC |
+| `CACHE_HMAC_SECRET` | Signed cache HMAC |
+| `SIGN_IP_CACHE` | Write signed `ip_cache.json` |
+| `AIR_GAPPED` | Cache-only enrichment |
+| `RETENTION_*` | Retention policy |
+| VT / AbuseIPDB / Shodan keys | Optional reputation |
 
-```
-Log_Enrichment/
-├── app.py                         # Config, auth, navigation, language selector
-├── i18n.py                        # Internationalization module
-├── locales/                       # Translation files
-│   ├── pt.json                    # Portuguese (reference)
-│   ├── en.json                    # English
-│   └── es.json                    # Spanish
-├── docs/                          # Translated documentation
-│   ├── Portuguese/
-│   ├── English/
-│   └── Spanish/
-├── pages_app/                     # UI pages (multipage Streamlit)
-├── styles/                        # Centralized design system
-├── helpers/                       # Shared functions
-├── components/                    # Reusable visual components
-├── tests/                         # Automated test suite (167+ tests)
-└── ...
-```
-
-## 🧪 Tests
+### Headless worker & maintenance
 
 ```bash
-python -m pytest tests -v
+python scripts/enrich_worker.py --input logs.txt --output output/csv/out.csv
+python scripts/enrich_worker.py --input logs.txt --air-gapped
+python scripts/retention_cleanup.py
+python scripts/gen_auth_password_hash.py
+python -m pytest tests -q
 ```
 
-**167+ automated tests** organized in `tests/` by domain.
+## Project structure (high level)
 
-## 📜 License
+```
+app.py, pages_app/, analysis/, enrich_service.py, export_ioc.py
+application/, domain/, infrastructure/
+helpers/ (geo, job_control, period_compare, signed_cache, retention, persistence, …)
+scripts/ (enrich_worker, retention_cleanup, gen_auth_password_hash)
+locales/ (pt, en, es)
+docs/ (DEPLOY, AUDITORIA_TECNICA, translations)
+tests/
+```
 
-This project is distributed under the MIT license. See `LICENSE` for the full text.
+## Tests
 
-## 👨‍💻 Author
+```bash
+python -m pytest tests -q
+```
+
+~196 automated tests (security, cache, STIX, cancel, A/B, API client mocks, …).
+
+## Docs
+
+- Deploy: [DEPLOY.md](../DEPLOY.md)
+- Technical audit: [AUDITORIA_TECNICA.md](../AUDITORIA_TECNICA.md)
+- Security: [SECURITY.md](../../SECURITY.md)
+- Full Portuguese product README: [../../README.md](../../README.md)
+
+## License
+
+MIT — see `LICENSE`.
+
+## Author
 
 **Developed by TWalking with AI assistance**

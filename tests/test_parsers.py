@@ -120,6 +120,16 @@ class TestFormatDetection(unittest.TestCase):
         content = "192.168.1.1\n10.0.0.1\n8.8.8.8"
         self.assertEqual(detectar_formato_log(content), 'generico')
 
+    def test_tiktok_format(self):
+        content = ("Events IP Data\nDate: 27/07/2026 03:04:43PM (UTC +00)\n"
+                   "IP: 203.0.113.45\nEvent: video_play\nCountry: Brazil")
+        self.assertEqual(detectar_formato_log(content), 'tiktok')
+
+    def test_tiktok_format_by_footer(self):
+        content = ("Date: 27/07/2026 03:04:43PM (UTC +00)\nIP: 203.0.113.45\n"
+                   "Event: like\nCountry: Brazil\n1\nTikTok Pte. Limited")
+        self.assertEqual(detectar_formato_log(content), 'tiktok')
+
 
 class TestWhatsAppParser(unittest.TestCase):
     def test_basic_parsing(self):
@@ -166,6 +176,125 @@ Time
         self.assertEqual(df.iloc[0]['Porta'], '22859')
 
 
+class TestTikTokParser(unittest.TestCase):
+    def test_basic_parsing(self):
+        df = extrair_ips_do_formato_tiktok(FORMATO_TIKTOK, alvo='tiktok_test')
+        self.assertEqual(len(df), 3)
+        self.assertIn('Evento', df.columns)
+        self.assertIn('Ip', df.columns)
+        self.assertIn('Data', df.columns)
+        self.assertEqual(df.iloc[0]['Alvo'], 'tiktok_test')
+        self.assertEqual(df.iloc[0]['Evento'], 'video_play')
+        self.assertEqual(df.iloc[1]['Evento'], 'like')
+        self.assertNotIn('Porta', df.columns)
+
+    def test_evento_column_position(self):
+        df = extrair_ips_do_formato_tiktok(FORMATO_TIKTOK, alvo='tiktok_test')
+        cols = list(df.columns)
+        self.assertEqual(cols.index('Evento'), cols.index('Ip') + 1)
+
+    def test_utc_to_gmt3_with_ampm(self):
+        # 03:04:43PM UTC = 15:04:43 UTC -> 12:04:43 no fuso GMT -03
+        content = """Events IP Data
+Date: 27/07/2026 03:04:43PM (UTC +00)
+IP: 203.0.113.45
+Event: video_play
+Country: Brazil"""
+        df = extrair_ips_do_formato_tiktok(content, alvo='test')
+        self.assertEqual(len(df), 1)
+        self.assertIn('12:04:43', df.iloc[0]['Data'])
+        self.assertIn('2026-07-27', df.iloc[0]['Data'])
+
+    def test_am_stays_morning(self):
+        # 11:50:13AM UTC = 11:50:13 UTC -> 08:50:13 no fuso GMT -03
+        content = """Date: 26/07/2026 11:50:13AM (UTC +00)
+IP: 203.0.113.45
+Event: message_notice_show
+Country: Brazil"""
+        df = extrair_ips_do_formato_tiktok(content, alvo='test')
+        self.assertEqual(len(df), 1)
+        self.assertIn('08:50:13', df.iloc[0]['Data'])
+
+    def test_page_break_inside_record(self):
+        # Rodapé de página intercalado no meio de um registro não pode quebrá-lo
+        content = """Events IP Data
+Date: 27/07/2026 03:04:23PM (UTC +00)
+1
+TikTok Pte. Limited
+One Raffles Quay, #26-10, South Tower, Singapore 048583
+IP: 203.0.113.45
+Event: video_play
+Country: Brazil
+Date: 27/07/2026 03:04:17PM (UTC +00)
+IP: 203.0.113.45
+Event: like
+Country: Brazil
+2
+TikTok Pte. Limited
+One Raffles Quay, #26-10, South Tower, Singapore 048583"""
+        df = extrair_ips_do_formato_tiktok(content, alvo='test')
+        self.assertEqual(len(df), 2)
+        self.assertEqual(df.iloc[0]['Evento'], 'video_play')
+        self.assertEqual(df.iloc[1]['Evento'], 'like')
+
+    def test_dedup_same_event_keeps_distinct_events(self):
+        # Duplicata exata (mesmo IP+data+evento) é removida,
+        # mas eventos diferentes no mesmo segundo são mantidos
+        content = """Date: 27/07/2026 03:04:31PM (UTC +00)
+IP: 203.0.113.45
+Event: video_play
+Country: Brazil
+Date: 27/07/2026 03:04:31PM (UTC +00)
+IP: 203.0.113.45
+Event: video_play
+Country: Brazil
+Date: 27/07/2026 03:04:31PM (UTC +00)
+IP: 203.0.113.45
+Event: like
+Country: Brazil"""
+        df = extrair_ips_do_formato_tiktok(content, alvo='test')
+        self.assertEqual(len(df), 2)
+        self.assertEqual(sorted(df['Evento'].tolist()), ['like', 'video_play'])
+
+    def test_periodo_and_iso_date(self):
+        content = """Date: 27/07/2026 03:04:43PM (UTC +00)
+IP: 203.0.113.45
+Event: follow
+Country: Brazil"""
+        df = extrair_ips_do_formato_tiktok(content, alvo='test')
+        self.assertEqual(df.iloc[0]['Periodo'], '☀️ Diurno')
+        self.assertIsNotNone(df.iloc[0]['ISO_Date'])
+        self.assertEqual(df.iloc[0]['Data_Fuso'], 'GMT -0300')
+
+    def test_empty_content(self):
+        df = extrair_ips_do_formato_tiktok("texto sem campos tiktok", alvo='test')
+        self.assertEqual(len(df), 0)
+
+    def test_real_pdf_eventsipdata(self):
+        # Teste de integração com o PDF real do caso (se presente no repositório)
+        pdf_path = os.path.join(ROOT_DIR, 'EventsIPData.pdf')
+        if not os.path.exists(pdf_path):
+            self.skipTest('EventsIPData.pdf não encontrado')
+        try:
+            import pdfplumber
+        except ImportError:
+            self.skipTest('pdfplumber não instalado')
+        text_parts = []
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text_parts.append(page_text)
+        content = '\n'.join(text_parts)
+        df = extrair_ips_do_formato_tiktok(content, alvo='caso_real')
+        self.assertGreater(len(df), 0)
+        self.assertIn('Evento', df.columns)
+        for ip in df['Ip']:
+            self.assertTrue(is_valid_ip(ip), f'Invalid IP: {ip}')
+        # Todos os registros do documento são do mesmo IP (não hardcodar o IP real do caso)
+        self.assertEqual(len(set(df['Ip'])), 1)
+
+
 class TestGoogleParser(unittest.TestCase):
     def test_basic_parsing(self):
         df = extrair_ips_do_formato_google(FORMATO_4, alvo='google_test')
@@ -192,6 +321,15 @@ class TestColumnsDefinition(unittest.TestCase):
     def test_meta_has_porta(self):
         self.assertIn('Porta', COLUNAS_EXPORT_META)
         self.assertNotIn('Porta', COLUNAS_EXPORT)
+
+    def test_tiktok_has_evento(self):
+        self.assertIn('Evento', COLUNAS_EXPORT_TIKTOK)
+        self.assertNotIn('Evento', COLUNAS_EXPORT)
+        # Evento deve vir logo após Ip, como Porta na Meta
+        self.assertEqual(
+            COLUNAS_EXPORT_TIKTOK.index('Evento'),
+            COLUNAS_EXPORT_TIKTOK.index('Ip') + 1
+        )
 
     def test_latlon_in_export(self):
         self.assertIn('Ip_Lat', COLUNAS_EXPORT)

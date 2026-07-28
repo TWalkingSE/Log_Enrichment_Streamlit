@@ -4,7 +4,6 @@ Functions used across multiple pages: logging, history, anomaly detection.
 """
 
 import streamlit as st
-import pandas as pd
 import os
 import re
 import json
@@ -62,9 +61,9 @@ def load_history():
 
 
 def detect_anomalies(df):
-    """Detect IPs in unusual locations compared to the majority"""
+    """Detect IPs in unusual locations compared to the majority (vectorized)."""
     anomalies = []
-    if 'Ip_Cidade' not in df.columns or 'Ip' not in df.columns:
+    if df is None or df.empty or 'Ip_Cidade' not in df.columns or 'Ip' not in df.columns:
         return anomalies
 
     city_counts = df['Ip_Cidade'].value_counts()
@@ -72,58 +71,73 @@ def detect_anomalies(df):
         return anomalies
 
     top_city = city_counts.index[0]
-    top_count = city_counts.iloc[0]
+    top_count = int(city_counts.iloc[0])
     total = len(df)
-
     if top_count / total < 0.3:
         return anomalies
 
-    for _, row in df.iterrows():
-        city = row.get('Ip_Cidade')
-        if pd.notna(city) and city != top_city:
-            count_this = city_counts.get(city, 0)
-            if count_this <= max(2, total * 0.05):
-                is_proxy = row.get('Ip_Proxy', False)
-                is_hosting = row.get('Ip_Hospedagem', False)
-                flags = []
-                if is_proxy:
-                    flags.append('Proxy/VPN')
-                if is_hosting:
-                    flags.append('Hosting')
-                anomalies.append({
-                    'Ip': row.get('Ip', ''),
-                    'Cidade': city,
-                    'Regiao': row.get('Ip_Regiao', ''),
-                    'Provedor': row.get('Ip_Dono', ''),
-                    'Data': row.get('Data', ''),
-                    'Flags': ', '.join(flags) if flags else 'Nenhum',
-                    'Motivo': f'Localização incomum (cidade principal: {top_city})'
-                })
+    threshold = max(2, total * 0.05)
+    rare_cities = set(city_counts[city_counts <= threshold].index)
+    rare_cities.discard(top_city)
+    if not rare_cities:
+        return anomalies
+
+    mask = df['Ip_Cidade'].isin(rare_cities) & df['Ip_Cidade'].notna()
+    subset = df.loc[mask]
+    if subset.empty:
+        return anomalies
 
     seen = set()
-    unique = []
-    for a in anomalies:
-        if a['Ip'] not in seen:
-            seen.add(a['Ip'])
-            unique.append(a)
-    return unique[:20]
+    for row in subset.itertuples(index=False):
+        ip = getattr(row, 'Ip', '')
+        if ip in seen:
+            continue
+        seen.add(ip)
+        city = getattr(row, 'Ip_Cidade', '')
+        is_proxy = bool(getattr(row, 'Ip_Proxy', False)) if hasattr(row, 'Ip_Proxy') else False
+        is_hosting = bool(getattr(row, 'Ip_Hospedagem', False)) if hasattr(row, 'Ip_Hospedagem') else False
+        flags = []
+        if is_proxy:
+            flags.append('Proxy/VPN')
+        if is_hosting:
+            flags.append('Hosting')
+        anomalies.append({
+            'Ip': ip,
+            'Cidade': city,
+            'Regiao': getattr(row, 'Ip_Regiao', '') if hasattr(row, 'Ip_Regiao') else '',
+            'Provedor': getattr(row, 'Ip_Dono', '') if hasattr(row, 'Ip_Dono') else '',
+            'Data': getattr(row, 'Data', '') if hasattr(row, 'Data') else '',
+            'Flags': ', '.join(flags) if flags else 'Nenhum',
+            'Motivo': f'Localização incomum (cidade principal: {top_city})',
+        })
+        if len(anomalies) >= 20:
+            break
+    return anomalies
+
+
+def run_async(coro):
+    """Run a coroutine safely from Streamlit (no nested-loop crashes)."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop and loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result()
+    return asyncio.run(coro)
 
 
 def run_processing(input_data, output_file, is_file, batch_size, period,
                    cache_file, incremental, alvo, api_key=None,
                    progress_callback=None):
     from file_handler import processar_log_acesso_async
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return loop.run_until_complete(
-            processar_log_acesso_async(
-                input_data, output_file, is_file, batch_size, period,
-                cache_file, incremental,
-                update_callback=lambda msg: add_log(msg),
-                progress_callback=progress_callback or (lambda cur, tot: None),
-                alvo=alvo, api_key=api_key
-            )
+    return run_async(
+        processar_log_acesso_async(
+            input_data, output_file, is_file, batch_size, period,
+            cache_file, incremental,
+            update_callback=lambda msg: add_log(msg),
+            progress_callback=progress_callback or (lambda cur, tot: None),
+            alvo=alvo, api_key=api_key
         )
-    finally:
-        loop.close()
+    )

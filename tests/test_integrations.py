@@ -1,13 +1,4 @@
-from unittest.mock import patch
-
 from tests.common import *
-
-# 1x1 PNG — avoids Kaleido/Chromium during PDF tests (hangs on some Windows setups)
-_MINIMAL_PNG = (
-    b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06'
-    b'\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xdb'
-    b'\x00\x00\x00\x00IEND\xaeB`\x82'
-)
 
 
 class TestAPIClient(unittest.TestCase):
@@ -68,11 +59,6 @@ class TestAuditLogger(unittest.TestCase):
 
 
 class TestReportGenerator(unittest.TestCase):
-    def setUp(self):
-        self._plotly_img = patch('plotly.io.to_image', return_value=_MINIMAL_PNG)
-        self._plotly_img.start()
-        self.addCleanup(self._plotly_img.stop)
-
     def _make_sample_df(self):
         return pd.DataFrame({
             'Ip': ['8.8.8.8', '1.1.1.1', '8.8.8.8'],
@@ -87,19 +73,15 @@ class TestReportGenerator(unittest.TestCase):
             'Periodo': ['Diurno', 'Diurno', 'Diurno'],
         })
 
-    def test_generate_basic_report(self):
-        pdf_bytes = generate_professional_report(self._make_sample_df(), 'test_target')
-        self.assertIsInstance(pdf_bytes, (bytes, bytearray))
-        self.assertGreater(len(pdf_bytes), 100)
+    def test_generate_html_report(self):
+        html_bytes = generate_html_report(self._make_sample_df(), 'test_target')
+        self.assertIsInstance(html_bytes, (bytes, bytearray))
+        self.assertGreater(len(html_bytes), 500)
+        html_text = html_bytes.decode('utf-8')
+        self.assertIn('<!DOCTYPE html>', html_text)
+        self.assertIn('test_target', html_text)
 
-    def test_basic_report_wrapper(self):
-        from helpers.pdf_report import generate_pdf_report
-
-        pdf_bytes = generate_pdf_report(self._make_sample_df(), 'test_target')
-        self.assertIsInstance(pdf_bytes, (bytes, bytearray))
-        self.assertGreater(len(pdf_bytes), 100)
-
-    def test_report_with_config(self):
+    def test_html_report_with_config(self):
         config = {
             'title': 'Test Report',
             'organization': 'Test Org',
@@ -107,21 +89,25 @@ class TestReportGenerator(unittest.TestCase):
             'analyst': 'Agent Smith',
             'classification': 'CONFIDENCIAL',
         }
-        pdf_bytes = generate_professional_report(self._make_sample_df(), 'target', config=config)
-        self.assertIsInstance(pdf_bytes, (bytes, bytearray))
+        html_bytes = generate_html_report(self._make_sample_df(), 'target', config=config)
+        html_text = html_bytes.decode('utf-8')
+        self.assertIn('CONFIDENCIAL', html_text)
+        self.assertIn('Agent Smith', html_text)
+        self.assertIn('CASE-001', html_text)
 
-    def test_report_with_analyses(self):
+    def test_html_report_with_analyses(self):
         analyses = {
             'risk_scores': pd.DataFrame({'IP': ['8.8.8.8'], 'Score': [75], 'Ip_Dono': ['Google'], 'Ip_Pais': ['US']}),
             'impossible_jumps': pd.DataFrame(),
             'vpn_heuristics': {'score': 0, 'indicators': {}, 'suspicious_ips': []},
         }
-        pdf_bytes = generate_professional_report(self._make_sample_df(), 'target', analyses=analyses)
-        self.assertGreater(len(pdf_bytes), 100)
+        html_bytes = generate_html_report(self._make_sample_df(), 'target', analyses=analyses)
+        self.assertGreater(len(html_bytes), 500)
 
-    def test_report_with_audit_hash(self):
-        pdf_bytes = generate_professional_report(self._make_sample_df(), 'target', audit_hash='abc123def456' * 5)
-        self.assertGreater(len(pdf_bytes), 100)
+    def test_html_report_with_audit_hash(self):
+        html_bytes = generate_html_report(self._make_sample_df(), 'target', audit_hash='abc123def456' * 5)
+        html_text = html_bytes.decode('utf-8')
+        self.assertIn('abc123def456', html_text)
 
 
 class TestCacheCompression(unittest.TestCase):
@@ -137,11 +123,6 @@ class TestCacheCompression(unittest.TestCase):
 
 
 class TestSmokeFlows(unittest.TestCase):
-    def setUp(self):
-        self._plotly_img = patch('plotly.io.to_image', return_value=_MINIMAL_PNG)
-        self._plotly_img.start()
-        self.addCleanup(self._plotly_img.stop)
-
     def _make_enriched_df(self):
         df = extrair_ips_do_formato_simples('8.8.8.8\n1.1.1.1', alvo='smoke')
         df['Data'] = ['2025-01-01 10:00:00', '2025-01-01 11:00:00']
@@ -157,11 +138,11 @@ class TestSmokeFlows(unittest.TestCase):
 
     def test_simple_input_report_and_xlsx_smoke(self):
         from file_handler import export_xlsx_colored
-        from helpers.pdf_report import generate_pdf_report
 
         df = self._make_enriched_df()
-        pdf_bytes = generate_pdf_report(df, 'smoke')
-        self.assertGreater(len(pdf_bytes), 100)
+        html_bytes = generate_html_report(df, 'smoke')
+        self.assertGreater(len(html_bytes), 500)
+        self.assertIn(b'<!DOCTYPE html>', html_bytes)
 
         output = io.BytesIO()
         export_xlsx_colored(df, output)

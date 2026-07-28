@@ -14,10 +14,10 @@ import logging
 from data_processor import (
     extrair_ips_de_texto, detectar_formato_log,
     FORMATO_1, FORMATO_2, FORMATO_3, FORMATO_4, FORMATO_PRESERVATION_GOOGLE,
-    FORMATO_DISCORD
+    FORMATO_DISCORD, FORMATO_TIKTOK
 )
 from audit_logger import log_audit_event
-from validators import validate_dataframe
+from validators import validate_dataframe, safe_output_path
 from helpers.shared import add_log, run_processing, save_history, extract_alvo_from_filename
 from i18n import t
 
@@ -47,6 +47,7 @@ def page_entrada():
                                      value=st.session_state.output_file, key="output_input")
         if not output_file.lower().endswith('.csv'):
             output_file = os.path.splitext(output_file)[0] + '.csv'
+        output_file = safe_output_path(output_file, default_name='resultado_logs.csv')
         st.session_state.output_file = output_file
 
     # Input tabs
@@ -120,7 +121,7 @@ def page_entrada():
                                 if 'Porta' in preview_df.columns:
                                     cols_preview.insert(1, 'Porta')
                                 available = [c for c in cols_preview if c in preview_df.columns]
-                                st.dataframe(preview_df[available].head(20), width='stretch', hide_index=True)
+                                st.dataframe(preview_df[available].head(20), use_container_width=True, hide_index=True)
                             else:
                                 st.warning(t('entrada.no_ip_html'))
                         # Store HTML content + platform for processing
@@ -168,6 +169,7 @@ def page_entrada():
                         'discord': 'Discord', 'meta': 'Meta Platforms',
                         'whatsapp': 'WhatsApp', 'google': 'Google',
                         'preservation_google': 'Preservation Google',
+                        'tiktok': 'TikTok',
                         'generico': t('entrada.format_generic')
                     }
                     st.info(f"📄 **{uploaded_file.name}** — PDF: **{format_names.get(detected_format, detected_format.upper())}**")
@@ -182,12 +184,14 @@ def page_entrada():
                                     cols_preview = ['Ip', 'Data', 'Periodo']
                                     if 'Porta' in preview_df.columns:
                                         cols_preview.insert(1, 'Porta')
+                                    if 'Evento' in preview_df.columns:
+                                        cols_preview.insert(1, 'Evento')
                                     if 'User_Agent' in preview_df.columns:
                                         cols_preview.insert(1, 'User_Agent')
                                     if 'User_ID' in preview_df.columns:
                                         cols_preview.insert(1, 'User_ID')
                                     available = [c for c in cols_preview if c in preview_df.columns]
-                                    st.dataframe(preview_df[available].head(20), width='stretch', hide_index=True)
+                                    st.dataframe(preview_df[available].head(20), use_container_width=True, hide_index=True)
                                 else:
                                     st.warning(t('entrada.no_ip_pdf'))
                         except Exception as e:
@@ -205,12 +209,14 @@ def page_entrada():
                             cols_preview = ['Ip', 'Data', 'Periodo']
                             if 'Porta' in preview_df.columns:
                                 cols_preview.insert(1, 'Porta')
+                            if 'Evento' in preview_df.columns:
+                                cols_preview.insert(1, 'Evento')
                             if 'User_Agent' in preview_df.columns:
                                 cols_preview.insert(1, 'User_Agent')
                             if 'User_ID' in preview_df.columns:
                                 cols_preview.insert(1, 'User_ID')
                             available = [c for c in cols_preview if c in preview_df.columns]
-                            st.dataframe(preview_df[available].head(20), width='stretch', hide_index=True)
+                            st.dataframe(preview_df[available].head(20), use_container_width=True, hide_index=True)
                         else:
                             st.warning(t('entrada.no_ip_file'))
             except Exception as e:
@@ -224,7 +230,8 @@ def page_entrada():
             "WhatsApp": FORMATO_3,
             "Google": FORMATO_4,
             "Preservation Google": FORMATO_PRESERVATION_GOOGLE,
-            "Discord": FORMATO_DISCORD
+            "Discord": FORMATO_DISCORD,
+            "TikTok": FORMATO_TIKTOK
         }
 
         def _on_example_change():
@@ -235,7 +242,7 @@ def page_entrada():
             t('entrada.load_example'),
             [t('entrada.select_placeholder'), "Genérico (Lista de IPs)",
              "Meta Platforms (Instagram/Facebook)", "WhatsApp", "Google",
-             "Preservation Google", "Discord"],
+             "Preservation Google", "Discord", "TikTok"],
             key="example_select",
             on_change=_on_example_change
         )
@@ -258,12 +265,14 @@ def page_entrada():
                     cols_preview = ['Ip', 'Data', 'Periodo']
                     if 'Porta' in preview_df.columns:
                         cols_preview.insert(1, 'Porta')
+                    if 'Evento' in preview_df.columns:
+                        cols_preview.insert(1, 'Evento')
                     if 'User_Agent' in preview_df.columns:
                         cols_preview.insert(1, 'User_Agent')
                     if 'User_ID' in preview_df.columns:
                         cols_preview.insert(1, 'User_ID')
                     available = [c for c in cols_preview if c in preview_df.columns]
-                    st.dataframe(preview_df[available].head(20), width='stretch', hide_index=True)
+                    st.dataframe(preview_df[available].head(20), use_container_width=True, hide_index=True)
                 else:
                     st.warning(t('entrada.no_ip_detected'))
 
@@ -290,6 +299,8 @@ def page_entrada():
             if input_data is None:
                 st.error(t('entrada.no_input'))
             else:
+                from helpers.job_control import JobCancelled, clear_cancel, request_cancel
+                clear_cancel()
                 alvo_val = _sanitize_alvo(st.session_state.alvo.strip()) or t('common.unknown')
                 if alvo_val == t('common.unknown'):
                     st.warning(t('entrada.no_target_warning'))
@@ -303,6 +314,7 @@ def page_entrada():
                 with st.status(t('entrada.processing_ips'), expanded=True) as status:
                     try:
                         st.write(t('entrada.extracting_ips'))
+                        st.caption(t('entrada.cancel_hint'))
                         progress_bar = st.progress(0, text=t('entrada.starting_label'))
 
                         def update_progress(current, total, total_records=0):
@@ -322,6 +334,13 @@ def page_entrada():
 
                         if result is not None and not result.empty:
                             st.session_state.df_resultado = result
+                            try:
+                                from helpers.persistence import save_dataframe
+                                save_dataframe(result, name='current')
+                                if alvo_val:
+                                    save_dataframe(result, name=alvo_val)
+                            except Exception as persist_err:
+                                logger.debug(f"Persistência opcional ignorada: {persist_err}")
                             add_log(t('entrada.completed', count=len(result)))
                             save_history(alvo_val, len(result), output, detected_format or t('common.unknown'))
                             status.update(label=t('entrada.records_processed', count=len(result)), state="complete")
@@ -353,12 +372,18 @@ def page_entrada():
                         else:
                             st.warning(t('entrada.no_valid_ip'))
                             status.update(label=t('entrada.no_ip_found'), state="error")
+                    except JobCancelled as e:
+                        st.warning(str(e))
+                        add_log(str(e))
+                        status.update(label="Cancelado", state="error")
+                        log_audit_event('processing_cancelled', {'alvo': alvo_val})
                     except Exception as e:
                         st.error(t('entrada.error_label', error=str(e)))
                         add_log(f"Erro: {str(e)}")
                         status.update(label=t('entrada.error_processing'), state="error")
                     finally:
                         st.session_state.processing = False
+                        clear_cancel()
                         if is_file_input and input_data and os.path.exists(str(input_data)):
                             try:
                                 os.remove(input_data)
@@ -366,6 +391,10 @@ def page_entrada():
                                 logger.warning(f"Erro ao remover arquivo temporário: {e}")
 
     with col_btn2:
+        if st.button(t('entrada.request_cancel'), key="btn_request_cancel"):
+            from helpers.job_control import request_cancel
+            request_cancel()
+            st.toast(t('entrada.cancel_requested'))
         if st.session_state.df_resultado is not None and os.path.exists(st.session_state.output_file):
             with open(st.session_state.output_file, 'rb') as f:
                 st.download_button(t('entrada.download_csv'), data=f,
@@ -376,6 +405,11 @@ def page_entrada():
         if st.button(t('entrada.clear_btn')):
             st.session_state.df_resultado = None
             st.session_state.log_messages = []
+            try:
+                from helpers.persistence import clear_dataframe
+                clear_dataframe('current')
+            except Exception:
+                pass
             st.rerun()
 
     # Log
@@ -387,7 +421,7 @@ def page_entrada():
     if st.session_state.history:
         with st.expander(t('entrada.history_title'), expanded=False):
             hist_df = pd.DataFrame(st.session_state.history)
-            st.dataframe(hist_df, width='stretch', hide_index=True)
+            st.dataframe(hist_df, use_container_width=True, hide_index=True)
 
     # Load existing result
     output_file = st.session_state.output_file

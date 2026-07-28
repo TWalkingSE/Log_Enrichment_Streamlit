@@ -67,19 +67,22 @@ from audit_logger import (
 from data_processor import (
     COLUNAS_EXPORT,
     COLUNAS_EXPORT_META,
+    COLUNAS_EXPORT_TIKTOK,
     COLUNAS_MODELO,
     FORMATO_4,
+    FORMATO_TIKTOK,
     convert_utc_to_local,
     detectar_formato_log,
     extrair_ips_do_formato_google,
     extrair_ips_do_formato_meta,
     extrair_ips_do_formato_simples,
+    extrair_ips_do_formato_tiktok,
     extrair_ips_do_formato_whatsapp,
     format_iso_date,
     get_periodo,
     parse_meta_ip_port,
 )
-from report_generator import generate_professional_report
+from html_report_generator import generate_html_report
 from validators import (
     sanitize_csv_value,
     validate_dataframe,

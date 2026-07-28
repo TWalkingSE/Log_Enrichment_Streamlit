@@ -122,3 +122,301 @@ class TestInputSanitization(unittest.TestCase):
         safe = _sanitize_alvo('user<script>')
         self.assertNotIn('<', safe)
         self.assertNotIn('>', safe)
+
+
+class TestCsvDataframeSanitize(unittest.TestCase):
+    def test_sanitize_dataframe_for_csv(self):
+        from validators import sanitize_dataframe_for_csv
+
+        df = pd.DataFrame({
+            'a': ['=CMD()', 'ok', '+1'],
+            'b': [1, 2, 3],
+        })
+        out = sanitize_dataframe_for_csv(df)
+        self.assertTrue(str(out.loc[0, 'a']).startswith("'"))
+        self.assertEqual(out.loc[1, 'a'], 'ok')
+        self.assertTrue(str(out.loc[2, 'a']).startswith("'"))
+
+
+class TestSafeOutputPath(unittest.TestCase):
+    def test_safe_output_path_blocks_traversal(self):
+        from validators import safe_output_path
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            p = safe_output_path('../../etc/passwd', default_name='out.csv', base_dir=tmp)
+            self.assertTrue(Path(p).resolve().is_relative_to(Path(tmp).resolve()) or str(p).startswith(tmp))
+            self.assertTrue(p.endswith('.csv') or Path(p).name.endswith('.csv'))
+
+
+class TestPopupXssEscape(unittest.TestCase):
+    def test_build_rich_popup_escapes_html(self):
+        from helpers.geo import build_rich_popup
+
+        row = {
+            'Ip': '1.2.3.4',
+            'Ip_Dono': '<script>alert(1)</script>',
+            'Ip_AS': 'AS1',
+            'Ip_Pais': 'BR',
+            'Ip_Pais_Codigo': 'BR',
+            'Ip_Regiao': 'SP',
+            'Ip_Cidade': 'Sao Paulo',
+            'Data': '2024-01-01',
+            'Periodo': 'Diurno',
+            'Ip_Proxy': False,
+            'Ip_Hospedagem': False,
+            'Ip_Movel': False,
+            'Ip_Lat': -23.5,
+            'Ip_Lon': -46.6,
+        }
+        html = build_rich_popup(row)
+        self.assertNotIn('<script>', html)
+        self.assertIn('&lt;script&gt;', html)
+
+
+class TestIncrementalDedup(unittest.TestCase):
+    def test_dedup_columns_include_format_keys(self):
+        from file_handler import _incremental_dedup_columns
+
+        df = pd.DataFrame(columns=['Ip', 'Data', 'Porta', 'User_ID'])
+        cols = _incremental_dedup_columns(df)
+        self.assertIn('Ip', cols)
+        self.assertIn('Porta', cols)
+        self.assertIn('User_ID', cols)
+
+
+class TestRunAsync(unittest.TestCase):
+    def test_run_async_simple_coro(self):
+        from helpers.shared import run_async
+
+        async def _add(a, b):
+            return a + b
+
+        self.assertEqual(run_async(_add(2, 3)), 5)
+
+
+class TestEnrichService(unittest.TestCase):
+    def test_collect_unique_ips_filters_invalid(self):
+        from enrich_service import collect_unique_ips
+
+        df = pd.DataFrame({'Ip': ['8.8.8.8', 'not-an-ip', '8.8.8.8', '192.168.0.1']})
+        ips = collect_unique_ips(df, 'Ip')
+        self.assertIn('8.8.8.8', ips)
+        self.assertNotIn('not-an-ip', ips)
+        self.assertEqual(ips.count('8.8.8.8'), 1)
+
+    def test_enrich_ips_empty(self):
+        from helpers.shared import run_async
+        from enrich_service import enrich_ips
+
+        results, client = run_async(enrich_ips([], cache_file=None, save_cache=False))
+        self.assertEqual(results, {})
+        self.assertIsNotNone(client)
+
+
+class TestAuditHmac(unittest.TestCase):
+    def test_hmac_signed_when_secret_set(self):
+        import audit_logger
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trail = Path(tmp) / 'audit_trail.jsonl'
+            with patch.object(audit_logger, 'AUDIT_LOG_FILE', str(trail)), \
+                 patch.object(audit_logger, 'AUDIT_LOG_DIR', tmp), \
+                 patch.object(audit_logger, 'AUDIT_HMAC_SECRET', 'test-secret-key'):
+                event = audit_logger.log_audit_event('unit_test', details={'ok': True})
+                self.assertIn('event_hash', event)
+                self.assertIn('event_hmac', event)
+                self.assertEqual(len(event['event_hmac']), 64)
+                result = audit_logger.verify_audit_integrity()
+                self.assertEqual(result['invalid'], 0)
+                self.assertEqual(result['hmac_failures'], 0)
+
+
+class TestPersistence(unittest.TestCase):
+    def test_save_load_roundtrip(self):
+        from helpers import persistence
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(persistence, 'DATA_DIR', Path(tmp)):
+                df = pd.DataFrame({'Ip': ['1.1.1.1'], 'Data': ['2024-01-01']})
+                path = persistence.save_dataframe(df, name='unit')
+                self.assertIsNotNone(path)
+                loaded = persistence.load_dataframe('unit')
+                self.assertIsNotNone(loaded)
+                self.assertEqual(list(loaded['Ip']), ['1.1.1.1'])
+                persistence.clear_dataframe('unit')
+                self.assertIsNone(persistence.load_dataframe('unit'))
+
+
+class TestAirGappedClient(unittest.TestCase):
+    def test_air_gapped_no_http(self):
+        from helpers.shared import run_async
+        from api_client import IPAPIClient
+        from unittest.mock import MagicMock
+        import time
+
+        client = IPAPIClient(api_key='k', cache_file=None, air_gapped=True)
+        client.cache['8.8.8.8'] = {
+            'Ip_Dono': 'Google', 'Ip_AS': 'AS1', 'Ip_Cidade': 'X',
+            'Ip_Pais': 'US', 'Ip_Pais_Codigo': 'US', 'Ip_Regiao': 'CA',
+            'Ip_Movel': False, 'Ip_Proxy': False, 'Ip_Hospedagem': False,
+            'Ip_Lat': 1.0, 'Ip_Lon': 2.0, '_cached_at': time.time(),
+        }
+        session = MagicMock()
+        hit = run_async(client.consultar_ip(session, '8.8.8.8'))
+        self.assertEqual(hit['Ip_Dono'], 'Google')
+        miss = run_async(client.consultar_ip(session, '1.1.1.1'))
+        self.assertIn('Air-gapped', miss['Ip_Dono'])
+        session.get.assert_not_called()
+
+
+class TestRetention(unittest.TestCase):
+    def test_prune_jsonl_and_cache(self):
+        from helpers.retention import prune_jsonl_by_age_and_lines, prune_ip_cache
+        import tempfile
+        import json
+        import time
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trail = Path(tmp) / 'audit.jsonl'
+            old_ts = '2000-01-01T00:00:00'
+            new_ts = '2099-01-01T00:00:00'
+            trail.write_text(
+                json.dumps({'timestamp': old_ts, 'action': 'old'}) + '\n'
+                + json.dumps({'timestamp': new_ts, 'action': 'new'}) + '\n',
+                encoding='utf-8',
+            )
+            r = prune_jsonl_by_age_and_lines(trail, max_age_days=30, max_lines=100)
+            self.assertEqual(r['removed'], 1)
+            remaining = trail.read_text(encoding='utf-8')
+            self.assertIn('new', remaining)
+            self.assertNotIn('"old"', remaining)
+
+            cache = Path(tmp) / 'ip_cache.json'
+            cache.write_text(json.dumps({
+                '1.1.1.1': {'_cached_at': 1, 'Ip_Dono': 'old'},
+                '8.8.8.8': {'_cached_at': time.time(), 'Ip_Dono': 'fresh'},
+            }), encoding='utf-8')
+            cr = prune_ip_cache(cache, max_age_days=7)
+            self.assertEqual(cr['removed'], 1)
+            data = json.loads(cache.read_text(encoding='utf-8'))
+            self.assertIn('8.8.8.8', data)
+            self.assertNotIn('1.1.1.1', data)
+
+
+class TestDomainModel(unittest.TestCase):
+    def test_enriched_ip_roundtrip(self):
+        from domain.ip_models import EnrichedIP
+
+        raw = {
+            'Ip_Dono': 'Org', 'Ip_AS': 'AS1', 'Ip_Cidade': 'SP',
+            'Ip_Regiao': 'SP', 'Ip_Pais': 'BR', 'Ip_Pais_Codigo': 'BR',
+            'Ip_Movel': False, 'Ip_Proxy': True, 'Ip_Hospedagem': False,
+            'Ip_Lat': -23.5, 'Ip_Lon': -46.6, 'status': 'success',
+        }
+        model = EnrichedIP.from_api_dict('1.2.3.4', raw)
+        self.assertEqual(model.ip, '1.2.3.4')
+        self.assertTrue(model.proxy)
+        back = model.to_api_dict()
+        self.assertEqual(back['Ip_Dono'], 'Org')
+
+
+class TestStixIocExport(unittest.TestCase):
+    def test_stix_bundle_and_ioc_list(self):
+        from export_ioc import build_stix_bundle, export_ioc_list, export_stix_json
+
+        df = pd.DataFrame({
+            'Ip': ['1.1.1.1', '1.1.1.1', '2001:db8::1'],
+            'Ip_Dono': ['Cloudflare', 'Cloudflare', 'Example'],
+            'Ip_AS': ['AS13335', 'AS13335', 'AS1'],
+            'Ip_Cidade': ['SF', 'SF', 'X'],
+            'Ip_Pais': ['US', 'US', 'ZZ'],
+            'Ip_Proxy': [False, False, True],
+            'Ip_Hospedagem': [True, True, False],
+            'Ip_Movel': [False, False, False],
+        })
+        txt = export_ioc_list(df)
+        self.assertIn('1.1.1.1', txt)
+        self.assertIn('2001:db8::1', txt)
+        bundle = build_stix_bundle(df, name='Unit')
+        self.assertEqual(bundle['type'], 'bundle')
+        types = {o['type'] for o in bundle['objects']}
+        self.assertIn('indicator', types)
+        self.assertIn('ipv4-addr', types)
+        self.assertIn('ipv6-addr', types)
+        raw = export_stix_json(df, only_suspicious=True)
+        self.assertIn('ipv6-addr:value', raw)
+
+
+class TestJobCancel(unittest.TestCase):
+    def test_cancel_token_flag(self):
+        from helpers.job_control import CancelToken, JobCancelled
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            token = CancelToken(flag_path=Path(tmp) / 'cancel.flag')
+            token.clear()
+            self.assertFalse(token.is_cancelled())
+            token.request_cancel()
+            self.assertTrue(token.is_cancelled())
+            with self.assertRaises(JobCancelled):
+                token.check()
+            token.clear()
+            self.assertFalse(token.is_cancelled())
+
+
+class TestPeriodCompare(unittest.TestCase):
+    def test_compare_two_periods(self):
+        from helpers.period_compare import compare_periods, date_bounds
+        from datetime import date
+
+        df = pd.DataFrame({
+            'Ip': ['1.1.1.1', '2.2.2.2', '1.1.1.1', '3.3.3.3'],
+            'Data': ['2024-01-01', '2024-01-02', '2024-02-01', '2024-02-15'],
+            'Ip_Dono': ['A', 'B', 'A', 'C'],
+            'Ip_Pais': ['BR', 'US', 'BR', 'BR'],
+            'Ip_Cidade': ['SP', 'NY', 'SP', 'RJ'],
+            'Ip_Proxy': [False, True, False, False],
+            'Ip_Hospedagem': [False, False, False, True],
+            'Ip_Movel': [False, False, True, False],
+        })
+        bounds = date_bounds(df)
+        self.assertIsNotNone(bounds)
+        result = compare_periods(
+            df,
+            (date(2024, 1, 1), date(2024, 1, 31)),
+            (date(2024, 2, 1), date(2024, 2, 28)),
+        )
+        self.assertEqual(result['count_a'], 2)
+        self.assertEqual(result['count_b'], 2)
+        self.assertIn('1.1.1.1', result['ips_only_a'] + result['ips_only_b'] + ['1.1.1.1'])
+        self.assertEqual(result['kpis_a']['unique_ips'], 2)
+
+
+class TestSignedCache(unittest.TestCase):
+    def test_sign_and_verify(self):
+        from helpers.signed_cache import build_signed_package, verify_signed_package
+        import os
+        from unittest.mock import patch
+
+        secret = 'unit-test-secret-xyz'
+        payload = {'8.8.8.8': {'Ip_Dono': 'Google', '_cached_at': 1}}
+        with patch.dict(os.environ, {'CACHE_HMAC_SECRET': secret}):
+            pkg = build_signed_package(payload, secret=secret)
+            ok, msg, out = verify_signed_package(pkg, secret=secret)
+            self.assertTrue(ok)
+            self.assertEqual(msg, 'ok')
+            self.assertEqual(out['8.8.8.8']['Ip_Dono'], 'Google')
+            pkg['signature'] = 'deadbeef'
+            ok2, msg2, _ = verify_signed_package(pkg, secret=secret)
+            self.assertFalse(ok2)
+            self.assertEqual(msg2, 'bad_signature')

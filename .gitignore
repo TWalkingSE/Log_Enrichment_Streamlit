@@ -16,6 +16,8 @@ ip_cache.json.zst
 processing_history.json
 logs/
 output/
+data/sessions/
+data/jobs/
 
 # Environment
 .env
@@ -43,3 +45,9 @@ cache_backups/
 .reversa/
 _reversa_sdd/
 .agents/
+
+# Sensitive investigation data (never commit)
+EventsIPData.pdf
+
+# Backup files
+*.bak

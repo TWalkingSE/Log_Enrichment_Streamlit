@@ -52,7 +52,7 @@ def page_comportamento():
             c1.metric("IP Real", len(ip_conf[ip_conf['Classification'] == 'IP Real']))
             c2.metric("Incerto", len(ip_conf[ip_conf['Classification'] == 'Incerto']))
             c3.metric("Mascarado", len(ip_conf[ip_conf['Classification'] == 'IP Mascarado']))
-            st.dataframe(ip_conf, width='stretch', height=400, hide_index=True)
+            st.dataframe(ip_conf, use_container_width=True, height=400, hide_index=True)
 
     # ── Números Descartáveis ──
     with st.container(border=True):
@@ -64,7 +64,7 @@ def page_comportamento():
             disposable = detect_disposable_numbers(df_i, max_appearances=max_app)
             if not disposable.empty:
                 st.warning(f"**{len(disposable)}** números descartáveis")
-                st.dataframe(disposable, width='stretch', hide_index=True)
+                st.dataframe(disposable, use_container_width=True, hide_index=True)
             else:
                 st.success("✅ Nenhum número descartável detectado.")
         else:

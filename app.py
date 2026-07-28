@@ -26,9 +26,13 @@ OUTPUT_MAPAS_DIR = os.path.join(os.path.dirname(__file__), 'output', 'mapas')
 os.makedirs(OUTPUT_CSV_DIR, exist_ok=True)
 os.makedirs(OUTPUT_MAPAS_DIR, exist_ok=True)
 
-_file_handler = logging.FileHandler(
-    os.path.join(log_dir, f'log_enrichment_{datetime.now().strftime("%Y%m%d")}.log'),
-    encoding='utf-8'
+from logging.handlers import RotatingFileHandler
+
+_file_handler = RotatingFileHandler(
+    os.path.join(log_dir, 'log_enrichment.log'),
+    maxBytes=5 * 1024 * 1024,
+    backupCount=7,
+    encoding='utf-8',
 )
 _file_handler.setFormatter(logging.Formatter('%(asctime)s [%(name)s] %(levelname)s: %(message)s'))
 logging.basicConfig(level=logging.INFO, handlers=[_file_handler, logging.StreamHandler()])
@@ -155,6 +159,28 @@ if 'cache_backed_up' not in st.session_state:
 from helpers.shared import load_history
 load_history()
 
+# Restore last enriched DataFrame from disk if session is empty
+if st.session_state.get('df_resultado') is None:
+    try:
+        from helpers.persistence import load_dataframe
+        restored = load_dataframe('current')
+        if restored is not None and not restored.empty:
+            st.session_state.df_resultado = restored
+    except Exception:
+        pass
+
+# Air-gapped flag + optional retention on startup
+from helpers.runtime_flags import is_air_gapped, retention_enabled
+if 'air_gapped' not in st.session_state:
+    st.session_state.air_gapped = is_air_gapped()
+if retention_enabled() and not st.session_state.get('_retention_ran'):
+    try:
+        from helpers.retention import run_retention
+        run_retention()
+    except Exception as e:
+        logger.warning("retention on startup failed: %s", e)
+    st.session_state._retention_ran = True
+
 # ============================================================
 # PAGE IMPORTS
 # ============================================================
@@ -172,6 +198,7 @@ from pages_app.analise.geo import page_geo
 from pages_app.analise.correlacao import page_correlacao
 from pages_app.analise.comportamento import page_comportamento
 from pages_app.analise.operacional import page_operacional
+from pages_app.analise.comparacao import page_comparacao
 
 # ============================================================
 # NAVIGATION — st.navigation() with grouped sections
@@ -189,6 +216,7 @@ pages = {
         st.Page(page_overview, title=t('nav.overview'), icon=":material/dashboard:"),
         st.Page(page_risco, title=t('nav.risk_threats'), icon=":material/shield:"),
         st.Page(page_temporal, title=t('nav.temporal_patterns'), icon=":material/schedule:"),
+        st.Page(page_comparacao, title=t('nav.period_compare'), icon=":material/compare:"),
         st.Page(page_geo, title=t('nav.geolocation'), icon=":material/public:"),
         st.Page(page_correlacao, title=t('nav.correlation'), icon=":material/hub:"),
         st.Page(page_comportamento, title=t('nav.behavior'), icon=":material/fingerprint:"),

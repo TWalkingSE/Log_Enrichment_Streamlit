@@ -275,3 +275,48 @@ def sanitize_csv_value(value):
     return value
 
 
+def sanitize_dataframe_for_csv(df):
+    """Aplica sanitize_csv_value a todas as colunas object/string de um DataFrame."""
+    import pandas as pd
+
+    if df is None or getattr(df, 'empty', True):
+        return df
+    out = df.copy()
+    for col in out.columns:
+        if pd.api.types.is_object_dtype(out[col]) or pd.api.types.is_string_dtype(out[col]):
+            out[col] = out[col].map(
+                lambda v: sanitize_csv_value(v) if isinstance(v, str) else v
+            )
+    return out
+
+
+def safe_output_path(user_path, default_name='resultado_logs.csv', base_dir=None):
+    """
+    Restringe path de saída ao diretório base (default: output/csv sob o projeto).
+    Previne path traversal e escrita fora do sandbox.
+    """
+    import os
+    from pathlib import Path
+
+    project_root = Path(__file__).resolve().parent
+    if base_dir is None:
+        base = project_root / 'output' / 'csv'
+    else:
+        base = Path(base_dir).resolve()
+    base.mkdir(parents=True, exist_ok=True)
+
+    raw = (user_path or '').strip() or default_name
+    # Usar apenas o basename se houver traversal ou path absoluto suspeito
+    candidate = Path(raw)
+    name = candidate.name if candidate.name else default_name
+    if not name.lower().endswith(('.csv', '.xlsx', '.xls', '.json', '.html', '.zip')):
+        name = os.path.splitext(name)[0] + '.csv'
+
+    resolved = (base / name).resolve()
+    try:
+        resolved.relative_to(base.resolve())
+    except ValueError:
+        resolved = (base / default_name).resolve()
+    return str(resolved)
+
+

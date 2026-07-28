@@ -10,7 +10,7 @@ O **Log Enrichment** é uma aplicação web (Streamlit) que automatiza a anális
 
 ## ⚠️ Alerta de Dados Sensíveis
 
-> **Atenção:** esta ferramenta pode processar **endereços IP, portas lógicas, horários de conexão, localização aproximada, ASN/provedor e metadados correlatos** obtidos de registros de plataformas e serviços como **Google, WhatsApp, Meta, Discord** e provedores de acesso. Em muitos contextos, esses dados podem ser **sensíveis, sigilosos ou juridicamente protegidos**.
+> **Atenção:** esta ferramenta pode processar **endereços IP, portas lógicas, horários de conexão, localização aproximada, ASN/provedor e metadados correlatos** obtidos de registros de plataformas e serviços como **Google, WhatsApp, Meta, Discord, TikTok** e provedores de acesso. Em muitos contextos, esses dados podem ser **sensíveis, sigilosos ou juridicamente protegidos**.
 >
 > Quando você ativa consultas de enriquecimento ou reputação com **API Key**, parte desses dados é enviada para **serviços externos de terceiros**, como **IP-API, VirusTotal, AbuseIPDB e Shodan**, de acordo com a configuração utilizada. No caso do plano pago da IP-API, a chave é enviada no request como **query parameter `?key=`**, conforme a documentação do provedor.
 >
@@ -21,17 +21,35 @@ O **Log Enrichment** é uma aplicação web (Streamlit) que automatiza a anális
 ## ✨ Funcionalidades
 
 ### Enriquecimento de Logs de Acesso
-- **10 Formatos de Entrada**: Genérico, Meta Platforms, WhatsApp, Google, Preservation Google, **Discord (PDF)**, CSV/Excel, **HTML WhatsApp** (records.html), **HTML Meta Platforms** (Facebook/Instagram), **HTML Google** (SubscriberInfo.html)
+- **11 Formatos de Entrada**: Genérico, Meta Platforms, WhatsApp, Google, Preservation Google, **Discord (PDF)**, **TikTok (PDF)**, CSV/Excel, **HTML WhatsApp** (records.html), **HTML Meta Platforms** (Facebook/Instagram), **HTML Google** (SubscriberInfo.html)
 - **Batch API**: Consulta até 100 IPs por request via POST `/batch`, reduzindo tempo de processamento em até 10x
 - **rDNS Assíncrono**: Resolução reversa de DNS em paralelo para todos os IPs
 - **Detecção Automática de Formato**: Identifica o tipo de log automaticamente
 - **Pré-visualização**: Visualize os IPs detectados antes de processar
-- **Processamento Incremental**: Adicione novos IPs a arquivos existentes
+- **Processamento Incremental**: Adicione novos IPs a arquivos existentes (dedup por Ip+Data e colunas de contexto)
 - **Barra de Progresso Real**: Acompanhe o processamento em tempo real com percentual e contagem
+- **Cancelamento cooperativo**: botão **Solicitar cancelamento** (outra aba) interrompe entre lotes de API
 - **Filtro de IPs Privados**: IPs privados/reservados (10.x, 192.168.x, 127.x) são ignorados automaticamente
 - **Saída CSV com Reputação Colorida**: Coluna Reputação com texto colorido por categoria
+- **Sanitização anti CSV injection** em todos os exports
 - **Período com Emojis**: ☀️ Diurno / 🌙 Noturno para identificação visual rápida
 - **Normalização de Provedores**: Agrupa variantes (Claro S.A./NXT/Net → Claro; Vivo/Telefônica/GVT → Vivo)
+- **Worker headless**: `python scripts/enrich_worker.py --input logs.txt --output out.csv` (sem UI Streamlit)
+- **Modo air-gapped**: `AIR_GAPPED=true` — enriquecimento só com cache local (sem HTTP externo)
+- **Cache assinado HMAC**: export/import de pacotes offline verificáveis (`CACHE_HMAC_SECRET` / `SIGN_IP_CACHE`)
+- **Persistência de sessão**: restaura `df_resultado` de `data/sessions/` (parquet/pickle)
+- **Camada de aplicação**: pipeline principal via `application.enrich_use_case` + `enrich_service`
+- **Pacote `analysis/`**: análises modularizadas (risco, temporal, geo, correlação, etc.)
+- **Retenção automática**: limpeza de audit trail, sessions e cache (`scripts/retention_cleanup.py`)
+- **Export SIEM**: IOC (txt/csv) e bundle **STIX 2.1** na página Resultados (e no ZIP)
+- **Comparação A/B de períodos**: página dedicada em Análise (KPIs, deltas, IPs só em A/B)
+- **Audit trail com cadeia de hash** (`prev_hash`) + HMAC opcional (`AUDIT_HMAC_SECRET`)
+- **i18n**: interface pt / en / es (incluindo config, cancelamento, IOC/STIX e comparação A/B)
+- **Deploy**: guia em [`docs/DEPLOY.md`](docs/DEPLOY.md); auditoria em [`docs/AUDITORIA_TECNICA.md`](docs/AUDITORIA_TECNICA.md)
+- **Testes de regressão**: `python -m pytest tests -q` (segurança, cache, STIX, cancel, A/B, etc.)
+- **Path sandbox**: saídas restritas a `output/`
+- **XSS mitigado**: escape HTML em popups de mapa e sparklines
+- **Logs rotativos**: `RotatingFileHandler` 5MB × 7 em `logs/log_enrichment.log`
 
 ### Interceptação Telemática do WhatsApp
 - **Processamento de ZIP com 15 dias**: Suporte ao formato oficial de interceptação (ZIP de ZIPs)
@@ -131,9 +149,9 @@ O sistema classifica automaticamente cada IP em 6 categorias baseado no ASN e pr
 - **Gráficos embutidos** (provedores e tipo de conexão como imagens)
 - Download direto do PDF
 
-### Análise Avançada (7 páginas dedicadas)
+### Análise Avançada (8 páginas dedicadas)
 
-O módulo de análise avançada foi reestruturado em **7 páginas agrupadas** com seções especializadas:
+O módulo de análise avançada foi reestruturado em **8 páginas agrupadas** com seções especializadas:
 
 **📊 Visão Geral**
 - KPIs resumo (IPs únicos, score médio de risco, % VPN/proxy, provedores, saúde dos dados)
@@ -151,6 +169,11 @@ O módulo de análise avançada foi reestruturado em **7 páginas agrupadas** co
 - **Silêncio Digital**: Identifica gaps suspeitos de atividade (possível troca de dispositivo, viagem ou evasão)
 - **Validação de Fuso Horário**: Cruzamento timezone vs geolocalização vs padrão de atividade
 - **Timing Provedor**: Fingerprint temporal por provedor — distribuição horária, tipo de uso (always_on/scheduled/sporadic), detecção de padrão VPN, transições A→B→A (sandwich pattern)
+
+**⚖️ Comparação A/B de Períodos**
+- Dois intervalos de data no mesmo dataset enriquecido
+- KPIs lado a lado (registros, IPs únicos, provedores, países, % proxy/hosting/móvel) com deltas B−A
+- Top provedores por período e listas de IPs exclusivos de A ou B
 
 **🌐 Geolocalização**
 - **Histórico Geo**: Rastreamento de mudanças de geolocalização ao longo do tempo — detecta reassignação de IP
@@ -174,12 +197,17 @@ O módulo de análise avançada foi reestruturado em **7 páginas agrupadas** co
 
 ### Módulos Complementares
 - **Relatório Profissional**: Template PDF com capa, sumário executivo, metodologia, cadeia de custódia e hash SHA-256
-- **Audit Trail Forense**: Registro JSONL append-only com hash SHA-256, verificação de integridade e recibo de custódia
+- **Audit Trail Forense**: JSONL append-only com hash SHA-256, **cadeia `prev_hash`**, HMAC opcional (`AUDIT_HMAC_SECRET`), verificação de integridade e recibo de custódia
 - **Validação de Dados**: Pipeline de 3 camadas (Schema, Domain, Integrity) + prevenção de CSV injection
 - **Multi-Target**: Processamento em lote de múltiplos alvos com detecção de IPs/locais compartilhados e atividade simultânea
 - **Grafo de Rede IP** (`components/graph_view.py`): Visualização interativa de grafos IP ↔ ASN ↔ localização usando vis.js embeddido no Streamlit
 - **Mapas Modernos** (`components/modern_map.py`): Motor pydeck/deck.gl mantido como base legada/experimental para evoluções futuras
 - **Visualizações Avançadas** (`components/visualizations.py`): Gauges de saúde dos dados, comparação lado a lado de alvos, replay temporal 2D em Leaflet.js e tabela de IPs com sparklines
+- **Export IOC/STIX** (`export_ioc.py`): lista de IOCs, CSV contextual e bundle STIX 2.1 para SIEM
+- **Job control** (`helpers/job_control.py`): cancelamento cooperativo multi-aba
+- **Retenção** (`helpers/retention.py`): política de limpeza de audit/sessions/cache
+- **Cache assinado** (`helpers/signed_cache.py`): pacotes offline com HMAC-SHA256
+- **Worker CLI** (`scripts/enrich_worker.py`): enriquecimento headless / scale-out
 
 ### 🔍 Análise Investigativa
 
@@ -221,13 +249,15 @@ Módulo especializado para uso investigativo policial:
 
 ### 📦 Exportação Unificada ZIP
 - Botão **"Exportar Tudo (ZIP)"** na página Resultados
-- Gera ZIP contendo: CSV, JSON, Excel e PDF do relatório em um único download
+- Gera ZIP contendo: CSV, JSON, Excel, HTML do relatório, **IOC txt/csv** e **STIX 2.1** em um único download
 
 ### Exportação Multi-formato
 - **Excel (.xlsx)** — formatado com cores, filtros e cabeçalhos estilizados
-- **CSV (;)** — separador ponto-e-vírgula, encoding UTF-8 BOM
+- **CSV (;)** — separador ponto-e-vírgula, encoding UTF-8 BOM (sanitizado)
 - **JSON** — array de objetos
-- **PDF** — relatório formatado com gráficos
+- **PDF / HTML** — relatório formatado com gráficos
+- **IOC (txt/csv)** — indicadores para SIEM
+- **STIX 2.1** — bundle com indicators + ipv4/ipv6-addr
 - **KML** — Google Earth com pontos coloridos
 - **GeoJSON** — formato padrão GIS
 
@@ -235,47 +265,59 @@ Módulo especializado para uso investigativo policial:
 - **Autenticação com Argon2/bcrypt (recomendado)** em `AUTH_PASSWORD_HASH`; hash SHA-256 hex (64 caracteres) ainda aceito como legado
 - **Rate limit de login**: 5 tentativas, bloqueio de 5 minutos após exceder
 - **`AUTH_PASSWORD`**: apenas para dev; em produção use `AUTH_PASSWORD_HASH` gerado com `python scripts/gen_auth_password_hash.py` (ver [SECURITY.md](SECURITY.md))
+- **CSV injection**: `sanitize_dataframe_for_csv` em pipeline e downloads
+- **XSS**: escape HTML em mapas e sparklines
+- **Path sandbox**: `safe_output_path` restringe escrita a `output/`
+- **Audit chain + HMAC**: `prev_hash` e `AUDIT_HMAC_SECRET` opcional
+- **Cache assinado**: envelope HMAC para transferência air-gapped
+- **Air-gapped**: desliga HTTP da IP-API (cache-only)
 - **API Key via query parameter**: Key enviada como parâmetro GET `?key=` conforme documentação ip-api.com
 - **Arquivos temporários seguros**: Uso de `tempfile.mkstemp()` em vez de nomes previsíveis
 - **API Keys via .env**: VirusTotal, AbuseIPDB e Shodan configuráveis via variáveis de ambiente
+- Guia de deploy seguro: [`docs/DEPLOY.md`](docs/DEPLOY.md)
 
 ### 🚀 Performance e Infraestrutura
 - **Retry com backoff exponencial**: 3 tentativas automáticas com delays crescentes em falhas
 - **Batch endpoint real**: Consulta até 100 IPs por request via POST `/batch`; API paga envia até 5 batches concorrentes (500 IPs simultâneos)
 - **Cache com TTL**: Entradas expiram após 30 dias (configurável), cache antigo migrado automaticamente
-- **Processamento vetorizado**: `processar_resultados` otimizado com pandas vectorization
+- **Processamento vetorizado**: `processar_resultados` e anomalias otimizados com pandas
 - **Filtro de IPs privados**: 10.x, 192.168.x, 172.16.x, 127.x, etc. não são enviados à API
-- **Log persistente em arquivo**: Logs diários em `logs/log_enrichment_YYYYMMDD.log`
+- **Log rotativo**: `logs/log_enrichment.log` (5MB × 7 backups)
+- **Persistência**: `data/sessions/` (parquet via pyarrow, fallback pickle)
+- **Retenção**: `RETENTION_*` + `scripts/retention_cleanup.py`
+- **Worker headless**: `scripts/enrich_worker.py` para filas / multi-usuário
 - **Fuso horário configurável**: Via `TZ_OFFSET_HOURS` no `.env` (padrão: -3)
 - **Colunas de País**: `Ip_Pais` e `Ip_Pais_Codigo` adicionadas em todo o pipeline
 - **Lookup rDNS**: Função `resolve_rdns()` disponível para consulta reversa de DNS
 
-### ⚙️ Configurações (3 abas)
+### ⚙️ Configurações (4 abas)
 
 | Aba | Funcionalidade |
 |-----|---------------|
-| 🔌 **API & Cache** | Configuração de API Keys (IP-API, Shodan), toggle Tor, botão `Atualizar lista Tor`, limpeza de cache, formatos suportados |
+| 🔌 **API & Cache** | IP-API key, **air-gapped**, cache, **export/import cache assinado**, Tor, limpeza |
 | 🤖 **Assistente AI** | Configuração do Ollama (URL, modelo, tier), teste de conexão |
-| 📋 **Audit Trail** | Visualização e verificação de integridade do log forense |
+| 🎨 **Branding** | Personalização visual da interface |
+| 📋 **Audit Trail** | Visualização e verificação de integridade (cadeia + HMAC) |
 
-### 📄 Páginas da Aplicação (14 páginas em 4 grupos)
+### 📄 Páginas da Aplicação (15 páginas em 4 grupos)
 
 | Grupo | Página | Descrição |
 |-------|--------|----------|
-| 📥 **Dados** | Entrada de Dados | Upload de arquivos, colagem de texto, modo offline |
-| | Resultados | Tabela interativa com busca, filtros e reputação colorida |
+| 📥 **Dados** | Entrada de Dados | Upload, texto, offline, progresso e cancelamento cooperativo |
+| | Resultados | Tabela, filtros, reputação, exports CSV/JSON/XLSX/ZIP/IOC/STIX |
 | 📊 **Visualização** | Estatísticas | Painel operacional com spotlight por provedor, séries lineares e heatmap |
 | | Mapa | Mapa 2D com marcadores, clusters, heatmap, rota temporal e visão investigativa |
 | 🔬 **Análise** | Visão Geral | KPIs, status rápido, Top 10 IPs por risco e resumo executivo |
 | | Risco & Ameaças | Risk score, VirusTotal, AbuseIPDB, Shodan, Tor exit nodes |
 | | Padrões Temporais | Análise horária, silêncio digital, validação de fuso, timing por provedor |
+| | Comparação A/B | Dois períodos: KPIs, deltas e IPs exclusivos |
 | | Geolocalização | Histórico geo, sub-redes, padrões de vida (clustering DBSCAN) |
 | | Correlação | Correlação cruzada entre alvos, WiFi compartilhado, relay chains |
 | | Comportamento | Detecção heurística VPN/proxy, confiança de IP, números descartáveis |
 | | Operacional | Análise investigativa, comparação temporal, saúde dos dados |
 | ⚙️ **Sistema** | Interceptação | Processamento de interceptação telemática WhatsApp |
 | | Relatório | Geração de PDF profissional com gráficos embutidos |
-| | Configurações | 3 abas (API & Cache, Assistente AI, Audit Trail) |
+| | Configurações | API & Cache, AI, Branding, Audit Trail |
 
 ## 🛠️ Instalação
 
@@ -311,6 +353,19 @@ Copy-Item .env.example .env
 cp .env.example .env
 ```
 
+Principais variáveis (ver `.env.example` e [`docs/DEPLOY.md`](docs/DEPLOY.md)):
+
+| Variável | Uso |
+|----------|-----|
+| `AUTH_PASSWORD_HASH` | Auth Streamlit (Argon2 recomendado) |
+| `IPAPI_KEY` | IP-API pro (HTTPS) |
+| `AUDIT_HMAC_SECRET` | HMAC opcional do audit trail |
+| `CACHE_HMAC_SECRET` | HMAC do cache assinado (fallback: audit) |
+| `SIGN_IP_CACHE` | Grava `ip_cache.json` assinado |
+| `AIR_GAPPED` | Cache-only, sem HTTP IP-API |
+| `RETENTION_*` | Política de retenção |
+| `VIRUSTOTAL_API_KEY` / `ABUSEIPDB_API_KEY` / `SHODAN_API_KEY` | Reputação opcional |
+
 ### Executar
 
 ```bash
@@ -319,6 +374,23 @@ streamlit run app.py
 
 A aplicação abrirá automaticamente no navegador em `http://localhost:8501`.
 Se você quiser usar APIs pagas ou recursos opcionais, complete o arquivo `.env` antes de executar.
+
+### Worker headless (sem UI)
+
+```bash
+python scripts/enrich_worker.py --input logs.txt --output output/csv/out.csv
+python scripts/enrich_worker.py --input logs.txt --air-gapped
+```
+
+### Manutenção
+
+```bash
+python scripts/retention_cleanup.py
+python scripts/gen_auth_password_hash.py
+python -m pytest tests -q
+```
+
+Documentação técnica: [`docs/AUDITORIA_TECNICA.md`](docs/AUDITORIA_TECNICA.md) · Deploy: [`docs/DEPLOY.md`](docs/DEPLOY.md) · Segurança: [`SECURITY.md`](SECURITY.md)
 
 ## 📖 Uso
 
@@ -330,7 +402,10 @@ Se você quiser usar APIs pagas ou recursos opcionais, complete o arquivo `.env`
 4. O sistema detecta o formato automaticamente e mostra uma pré-visualização
 5. Configure as opções (incremental, cache, lote, período)
 6. Clique em **▶️ Iniciar Processamento** — acompanhe a barra de progresso em tempo real
-7. Visualize os resultados nas abas **📊 Resultados**, **📈 Estatísticas** e **🗺️ Mapa**
+7. Para cancelar um job longo: abra **outra aba** e use **⏹ Solicitar cancelamento** (para entre lotes)
+8. Visualize os resultados nas abas **📊 Resultados**, **📈 Estatísticas** e **🗺️ Mapa**
+9. Em **Resultados**, exporte CSV/JSON/Excel/ZIP ou **IOC / STIX 2.1** para SIEM
+10. Em **Análise → Comparação A/B**, compare dois períodos do mesmo dataset
 
 ### 2. Interceptação Telemática do WhatsApp
 
@@ -428,7 +503,23 @@ PDF gerado pelo Discord contendo dados do usuário (User ID, Username, Email) e 
 Detectado automaticamente pela presença de `Session Start (UTC)` com `User ID:` ou `Username:`.
 As colunas `User_ID`, `Username` e `Email` são extraídas e incluídas na saída.
 
-### Formato 7: Interceptação Telemática (WhatsApp HTML)
+### Formato 7: TikTok (PDF)
+```
+Events IP Data
+Date: 27/07/2026 03:04:43PM (UTC +00)
+IP: 203.0.113.45
+Event: video_play
+Country: Brazil
+Date: 27/07/2026 03:04:31PM (UTC +00)
+IP: 203.0.113.45
+Event: like
+Country: Brazil
+```
+PDF "Events IP Data" gerado pela TikTok Pte. Limited contendo registros de eventos (video_play, like, follow, publish, send_message, etc.) com data/hora UTC, IP e país.
+Detectado automaticamente pela presença de `Events IP Data` ou `TikTok Pte`.
+A coluna `Evento` é extraída e incluída na saída (após `Ip`); rodapés de página intercalados são tratados automaticamente.
+
+### Formato 8: Interceptação Telemática (WhatsApp HTML)
 Arquivo `records.html` gerado pelo WhatsApp contendo:
 - **Message Log**: Mensagens criptografadas (text, voice, image, video, sticker, etc.)
 - **Call Log**: Chamadas de áudio e vídeo (offer, accept, terminate, reject)
@@ -444,6 +535,7 @@ Suporta upload de ZIP com 15 dias de interceptação (ZIP contendo ZIPs internos
 | Alvo | Identificador (telefone ou outro) |
 | Ip | Endereço IP extraído |
 | Porta | Porta lógica (apenas Meta Platforms) |
+| Evento | Tipo de evento da conta (apenas TikTok: video_play, like, follow, etc.) |
 | User_Agent | User Agent do dispositivo (apenas Preservation Google) |
 | Data | Data/hora convertida para o fuso configurado |
 | Data_Fuso | Fuso horário configurado |
@@ -510,7 +602,7 @@ Suporta upload de ZIP com 15 dias de interceptação (ZIP contendo ZIPs internos
 | shodan | Consulta de serviços/portas (Shodan API) |
 | pydantic | Structured output para o Assistente AI |
 | matplotlib | Gráficos adicionais para relatórios |
-| pdfplumber | Parsing de PDFs (Discord) |
+| pdfplumber | Parsing de PDFs (Discord, TikTok) |
 | pytest | Framework de testes unitários |
 
 ## ⚙️ Configuração

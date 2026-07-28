@@ -7,6 +7,7 @@ Log Enrichment - UI Components for enhanced visualization
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
@@ -80,7 +81,7 @@ def render_health_gauges(health_metrics):
                 plot_bgcolor='rgba(0,0,0,0)',
                 font={'color': COLORS['text']},
             )
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, use_container_width=True)
 
     # Additional metrics as a row
     c1, c2, c3, c4 = st.columns(4)
@@ -143,7 +144,7 @@ def render_side_by_side_comparison(df1, df2, name1='Alvo 1', name2='Alvo 2'):
                     daily.columns = ['Data', 'Registros']
                     fig = px.area(daily, x='Data', y='Registros', title=name)
                     fig.update_layout(height=250, margin=dict(l=10, r=10, t=40, b=10))
-                    st.plotly_chart(fig, width='stretch')
+                    st.plotly_chart(fig, use_container_width=True)
 
     # Provider comparison
     st.subheader("🏢 Provedores")
@@ -159,7 +160,7 @@ def render_side_by_side_comparison(df1, df2, name1='Alvo 1', name2='Alvo 2'):
                 fig.update_layout(height=300, margin=dict(l=10, r=10, t=40, b=10),
                                   showlegend=False, coloraxis_showscale=False,
                                   yaxis={'categoryorder': 'total ascending'})
-                st.plotly_chart(fig, width='stretch')
+                st.plotly_chart(fig, use_container_width=True)
 
     # Convergence highlights
     st.subheader("🔗 Pontos de Convergência")
@@ -467,7 +468,7 @@ def _render_leaflet_replay(df_m, height=600):
     </body>
     </html>'''
 
-    st.iframe(html, height=height)
+    components.html(html, height=height, scrolling=False)
 
 
 # ============================================================
@@ -563,10 +564,11 @@ def render_ip_table_with_sparklines(df):
         else:
             svg = f'<span style="color:{COLORS["text_dim"]};">—</span>'
 
+        from html import escape as _he
         table_html += f'''<tr>
-            <td><code>{row["IP"]}</code></td><td>{row["Contagem"]}</td>
-            <td>{row["Provedor"]}</td><td>{row["Cidade"]}</td>
-            <td>{row["Tipo"]}</td><td>{row["Padrão"]}</td><td>{svg}</td></tr>'''
+            <td><code>{_he(str(row["IP"]))}</code></td><td>{_he(str(row["Contagem"]))}</td>
+            <td>{_he(str(row["Provedor"]))}</td><td>{_he(str(row["Cidade"]))}</td>
+            <td>{_he(str(row["Tipo"]))}</td><td>{_he(str(row["Padrão"]))}</td><td>{svg}</td></tr>'''
 
     table_html += '</table>'
     st.markdown(table_html, unsafe_allow_html=True)

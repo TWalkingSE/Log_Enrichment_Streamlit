@@ -12,7 +12,7 @@ import logging
 import pandas as pd
 from datetime import datetime
 from bs4 import BeautifulSoup
-from api_client import IPAPIClient, is_valid_ip
+from api_client import is_valid_ip
 from data_processor import TZ_LABEL, convert_utc_to_local, format_iso_date, get_periodo
 
 logger = logging.getLogger(__name__)
@@ -445,14 +445,13 @@ async def processar_interceptacao_async(zip_data, output_file, batch_size=500, p
                                          update_callback=None, progress_callback=None,
                                          api_key=None):
     """
-    Full async pipeline: parse ZIP → extract IPs → enrich via API → save CSV.
+    Full async pipeline: parse ZIP → extract IPs → enrich via shared service → save CSV.
     """
-    import aiohttp
+    from enrich_service import enrich_dataframe
 
     if update_callback:
         update_callback("Iniciando processamento de interceptação telemática...")
 
-    # Parse ZIP
     df = parse_zip_interception(zip_data, update_callback)
 
     if df.empty:
@@ -463,68 +462,25 @@ async def processar_interceptacao_async(zip_data, output_file, batch_size=500, p
     if update_callback:
         update_callback(f"Total de registros: {len(df)}")
 
-    # Get unique IPs to enrich
-    unique_ips = df['Sender IP'].dropna().unique().tolist()
-    unique_ips = [ip for ip in unique_ips if is_valid_ip(ip)]
+    df, _results = await enrich_dataframe(
+        df,
+        'Sender IP',
+        cache_file=cache_file,
+        api_key=api_key,
+        batch_size=batch_size,
+        period=period,
+        update_callback=update_callback,
+        progress_callback=progress_callback,
+        apply_results=processar_resultados_interceptacao,
+    )
 
-    if update_callback:
-        update_callback(f"IPs únicos para enriquecer: {len(unique_ips)}")
-
-    # Load cache
-    client = IPAPIClient(cache_file=cache_file, api_key=api_key)
-
-    # Filter out cached IPs
-    ips_to_query = [ip for ip in unique_ips if ip not in client.cache]
-    cached_count = len(unique_ips) - len(ips_to_query)
-
-    if cached_count > 0 and update_callback:
-        update_callback(f"{cached_count} IPs encontrados no cache")
-
-    # Apply cached results first
-    cached_results = {ip: client.cache[ip] for ip in unique_ips if ip in client.cache}
-    df = processar_resultados_interceptacao(df, cached_results)
-
-    # Query API for remaining IPs
-    if ips_to_query:
-        if update_callback:
-            update_callback(f"Consultando API para {len(ips_to_query)} IPs...")
-
-        total_batches = (len(ips_to_query) + batch_size - 1) // batch_size
-
-        async with aiohttp.ClientSession() as session:
-            for batch_num in range(total_batches):
-                start = batch_num * batch_size
-                end = min(start + batch_size, len(ips_to_query))
-                batch = ips_to_query[start:end]
-
-                if update_callback:
-                    update_callback(f"Lote {batch_num + 1}/{total_batches} ({len(batch)} IPs)")
-
-                if progress_callback:
-                    progress_callback(start, len(ips_to_query))
-
-                results = await client.consultar_lote_ips(session, batch)
-                df = processar_resultados_interceptacao(df, results)
-
-                # Wait between batches
-                if batch_num < total_batches - 1:
-                    if update_callback:
-                        update_callback(f"Aguardando {period}s antes do próximo lote...")
-                    import asyncio
-                    await asyncio.sleep(period)
-
-        # Save cache
-        client.salvar_cache()
-
-    # Adicionar coluna Reputação
     df = _add_reputacao_interceptacao(df)
 
-    # Save output as CSV
+    from validators import sanitize_dataframe_for_csv
     export_cols = [c for c in COLUNAS_EXPORT_INTERCEPTACAO if c in df.columns]
-    df_export = df[export_cols]
+    df_export = sanitize_dataframe_for_csv(df[export_cols])
     df_export.to_csv(output_file, index=False, sep=';', encoding='utf-8-sig')
 
-    # Salvar como Excel (.xlsx) com cores na coluna Reputação
     from file_handler import export_xlsx_colored
     xlsx_path = os.path.splitext(output_file)[0] + '.xlsx'
     export_xlsx_colored(df_export, xlsx_path)

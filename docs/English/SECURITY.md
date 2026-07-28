@@ -1,4 +1,4 @@
-# Security Policy
+﻿# Security Policy
 
 ## Supported Versions
 
@@ -41,6 +41,24 @@ Or use the repo script:
 ```bash
 python scripts/gen_auth_password_hash.py
 ```
+
+
+## Security controls implemented
+
+| Control | Detail |
+|---------|--------|
+| CSV injection | `sanitize_dataframe_for_csv` on exports |
+| XSS | `html.escape` on map popups and sparklines |
+| Path sandbox | `safe_output_path` under `output/` |
+| Audit trail | `prev_hash` chain + integrity verify |
+| Audit HMAC | `AUDIT_HMAC_SECRET` optional |
+| Signed cache | `CACHE_HMAC_SECRET` / `SIGN_IP_CACHE` |
+| Air-gapped | `AIR_GAPPED` cache-only |
+| Auth | Argon2/bcrypt via `AUTH_PASSWORD_HASH` |
+| Logs | Rotating file handler |
+| Retention | `RETENTION_*` + cleanup script |
+
+See [DEPLOY.md](../DEPLOY.md) and [AUDITORIA_TECNICA.md](../AUDITORIA_TECNICA.md).
 
 ## Scope Notes
 

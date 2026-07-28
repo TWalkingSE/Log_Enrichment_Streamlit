@@ -22,6 +22,11 @@ Use um canal privado do mantenedor ou, se o repositório estiver com GitHub Secu
 - Triagem inicial: até 10 dias úteis
 - Correção ou mitigação: conforme severidade e reprodutibilidade
 
+
+## Controles de segurança implementados
+
+Ver tabela completa em [`SECURITY.md`](../../SECURITY.md) na raiz (CSV injection, XSS, path sandbox, audit chain/HMAC, cache assinado, air-gapped, retenção). Deploy: [`DEPLOY.md`](../DEPLOY.md).
+
 ## Scope Notes
 
 Este projeto processa dados potencialmente sensíveis. Ao reportar problemas:

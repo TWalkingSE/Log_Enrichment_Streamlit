@@ -1,0 +1,1278 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ title }}</title>
+<style>
+:root {
+  --bg: #0f172a;
+  --surface: #1e293b;
+  --surface-elevated: #334155;
+  --text: #f1f5f9;
+  --text-muted: #94a3b8;
+  --accent: #818cf8;
+  --accent-2: #34d399;
+  --danger: #f87171;
+  --warning: #fbbf24;
+  --info: #60a5fa;
+  --border: rgba(148,163,184,0.15);
+  --shadow: 0 4px 20px rgba(0,0,0,0.35);
+  --radius: 10px;
+  --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --mono: 'Consolas','Monaco','Courier New',monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  padding-bottom: 60px;
+}
+.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+/* COVER */
+.cover {
+  text-align: center;
+  padding: 60px 20px 40px;
+  border-bottom: 2px solid var(--accent);
+  margin-bottom: 32px;
+  position: relative;
+}
+.cover .badge {
+  display: inline-block;
+  padding: 6px 18px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 20px;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+}
+.cover h1 { font-size: 2.2rem; font-weight: 800; color: var(--accent); margin-bottom: 12px; letter-spacing: -0.5px; }
+.cover .meta { color: var(--text-muted); font-size: 1rem; margin-bottom: 6px; }
+.cover .hash { font-family: var(--mono); font-size: 11px; color: var(--text-muted); margin-top: 16px; word-break: break-all; }
+
+/* CARDS / SECTIONS */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow);
+}
+.card-header {
+  display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer; user-select: none;
+}
+.card-header h2 { font-size: 1.15rem; color: var(--accent); display: flex; align-items: center; gap: 10px; }
+.card-header .toggle { font-size: 1.2rem; color: var(--text-muted); transition: transform .2s; }
+.card-header.collapsed .toggle { transform: rotate(-90deg); }
+.card-body { margin-top: 16px; }
+.card-body.collapsed { display: none; }
+
+/* METRICS */
+.metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; }
+.metric {
+  background: var(--surface-elevated);
+  border-radius: var(--radius);
+  padding: 16px;
+  text-align: center;
+  border: 1px solid var(--border);
+}
+.metric .value { font-size: 1.6rem; font-weight: 700; color: var(--accent); }
+.metric .label { font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+
+/* TABLES */
+table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--surface-elevated); color: var(--accent); font-weight: 600; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.4px; }
+tr:hover td { background: rgba(129,140,248,0.06); }
+.tbl-wrap { overflow-x: auto; margin-top: 12px; }
+.tbl-search {
+  width: 100%; max-width: 320px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 12px; font-size: 0.85rem; margin-bottom: 10px;
+}
+.tbl-search:focus { outline: none; border-color: var(--accent); }
+
+/* SCORE BADGES */
+.badge-score { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.78rem; font-weight: 700; }
+.badge-high { background: rgba(248,113,113,0.15); color: var(--danger); }
+.badge-med { background: rgba(251,191,36,0.15); color: var(--warning); }
+.badge-low { background: rgba(52,211,153,0.15); color: var(--accent-2); }
+
+/* SCORE BREAKDOWN */
+details.score-detail { margin-top: 4px; }
+details.score-detail summary {
+  cursor: pointer; font-size: 0.75rem; color: var(--text-muted);
+  list-style: none; user-select: none;
+}
+details.score-detail summary::-webkit-details-marker { display: none; }
+details.score-detail summary::before {
+  content: '▸ '; display: inline-block; transition: transform .15s;
+}
+details.score-detail[open] summary::before { content: '▾ '; }
+details.score-detail summary:hover { color: var(--accent); }
+.score-breakdown {
+  margin-top: 6px; padding: 8px 10px;
+  background: rgba(15,23,42,0.5); border-left: 2px solid var(--accent);
+  border-radius: 4px; font-size: 0.78rem;
+}
+.score-breakdown .bk-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 3px 0; border-bottom: 1px dashed var(--border);
+}
+.score-breakdown .bk-row:last-child { border-bottom: none; }
+.score-breakdown .bk-label { color: var(--text); }
+.score-breakdown .bk-detail { color: var(--text-muted); font-size: 0.72rem; margin-top: 2px; }
+.score-breakdown .bk-weight {
+  font-family: var(--mono); font-weight: 700; padding: 1px 6px; border-radius: 4px;
+  min-width: 36px; text-align: center;
+}
+.bk-weight.pos { background: rgba(248,113,113,0.15); color: var(--danger); }
+.bk-weight.neg { background: rgba(52,211,153,0.15); color: var(--accent-2); }
+
+/* GRID LAYOUTS */
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+
+/* INFO CARDS */
+.info-card { background: var(--surface-elevated); border-radius: var(--radius); padding: 14px; border-left: 3px solid var(--accent); }
+.info-card .info-label { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.info-card .info-value { font-size: 1rem; font-weight: 600; color: var(--text); margin-top: 4px; }
+
+/* MAP */
+.map-container { border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); margin-top: 12px; }
+
+/* PLOTS */
+.plot-container { margin-top: 12px; }
+
+/* FOOTER */
+.footer {
+  text-align: center; padding: 30px 20px; margin-top: 40px;
+  border-top: 1px solid var(--border); color: var(--text-muted); font-size: 0.8rem;
+}
+
+/* FLOAT BUTTONS */
+#btn-top {
+  position: fixed; bottom: 24px; right: 24px;
+  width: 44px; height: 44px; border-radius: 50%;
+  background: var(--accent); color: #fff; border: none;
+  font-size: 1.2rem; cursor: pointer; display: none;
+  box-shadow: var(--shadow); z-index: 100;
+}
+#btn-top:hover { background: #6366f1; }
+
+/* RESPONSIVE */
+@media (max-width: 600px) {
+  .cover h1 { font-size: 1.5rem; }
+  .container { padding: 14px; }
+  th, td { padding: 8px; font-size: 0.82rem; }
+}
+
+/* TOC SIDEBAR */
+#toc {
+  position: fixed; top: 80px; left: 0;
+  width: 230px; max-height: calc(100vh - 100px);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 14px 12px;
+  font-size: 0.82rem;
+  z-index: 90;
+  box-shadow: var(--shadow);
+}
+#toc .toc-title {
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--text-muted); margin-bottom: 10px; font-weight: 700;
+  padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+#toc a {
+  display: block; padding: 6px 10px; margin: 2px 0;
+  color: var(--text-muted); text-decoration: none;
+  border-radius: 6px; line-height: 1.4;
+  border-left: 2px solid transparent;
+  transition: all .15s;
+}
+#toc a:hover { background: rgba(129,140,248,0.08); color: var(--text); }
+#toc a.active {
+  background: rgba(129,140,248,0.15);
+  color: var(--accent);
+  border-left-color: var(--accent);
+}
+#toc-toggle {
+  position: fixed; top: 80px; left: 0; z-index: 95;
+  display: none;
+  background: var(--accent); color: #fff; border: none;
+  padding: 8px 10px; border-radius: 0 6px 6px 0;
+  cursor: pointer; font-size: 14px;
+}
+@media (min-width: 1280px) {
+  .container { margin-left: 250px; max-width: calc(100% - 280px); }
+}
+@media (max-width: 1279px) {
+  #toc { transform: translateX(-100%); transition: transform .25s; }
+  #toc.open { transform: translateX(0); }
+  #toc-toggle { display: block; }
+}
+@media print {
+  #toc, #toc-toggle, #btn-top { display: none !important; }
+  .container { margin-left: 0 !important; max-width: 100% !important; }
+  .card-body.collapsed { display: block !important; }
+}
+
+/* WATERMARK */
+#watermark {
+  position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%, -50%) rotate(-30deg);
+  font-size: 8rem; font-weight: 900;
+  color: rgba(248,113,113,0.06);
+  pointer-events: none; user-select: none;
+  white-space: nowrap; z-index: 1;
+  letter-spacing: 8px; text-transform: uppercase;
+}
+@media print { #watermark { color: rgba(0,0,0,0.08); } }
+
+/* LOGO */
+.cover-logo {
+  max-height: 80px; max-width: 240px;
+  margin: 0 auto 18px; display: block;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.3));
+}
+
+/* COC / SIGNATURES */
+.coc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.coc-item { background: var(--surface-elevated); border-radius: 6px; padding: 10px 12px; border-left: 2px solid var(--accent); }
+.coc-item .coc-label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.coc-item .coc-value { font-size: 0.88rem; color: var(--text); margin-top: 3px; word-break: break-all; font-family: var(--mono); }
+.coc-item .coc-value.text { font-family: var(--font); }
+.signatures { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 24px; margin-top: 36px; padding-top: 20px; }
+.signature { text-align: center; }
+.signature .line { border-top: 1px solid var(--text-muted); margin-bottom: 6px; height: 40px; }
+.signature .name { font-weight: 600; color: var(--text); font-size: 0.9rem; }
+.signature .role { color: var(--text-muted); font-size: 0.78rem; margin-top: 2px; }
+</style>
+{% if branding.primary_color or branding.accent_color %}
+<style>
+:root {
+  {% if branding.primary_color %}--accent: {{ branding.primary_color }};{% endif %}
+  {% if branding.accent_color %}--accent-2: {{ branding.accent_color }};{% endif %}
+}
+</style>
+{% endif %}
+</head>
+<body>
+
+{% if branding.watermark %}
+<div id="watermark">{{ branding.watermark }}</div>
+{% endif %}
+
+<button id="toc-toggle" onclick="document.getElementById('toc').classList.toggle('open')" title="Índice">☰</button>
+<nav id="toc" aria-label="Índice">
+  <div class="toc-title">Índice</div>
+  <div id="toc-list"></div>
+</nav>
+
+<!-- COVER -->
+<div class="cover">
+  {% if branding.logo_b64 %}
+  <img class="cover-logo" src="data:image/png;base64,{{ branding.logo_b64 }}" alt="Logo">
+  {% endif %}
+  {% if classification %}<div class="badge">{{ classification }}</div>{% endif %}
+  <h1>{{ title }}</h1>
+  <div class="meta">Alvo: <strong>{{ alvo }}</strong></div>
+  {% if case_number %}<div class="meta">Caso: {{ case_number }}</div>{% endif %}
+  {% if analyst %}<div class="meta">Analista: {{ analyst }}</div>{% endif %}
+  {% if organization %}<div class="meta">{{ organization }}</div>{% endif %}
+  <div class="meta">Gerado em {{ generated_at }}</div>
+  <div class="hash">SHA-256: {{ data_hash }}</div>
+</div>
+
+<div class="container">
+
+<!-- SUMÁRIO EXECUTIVO -->
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>📊 Sumário Executivo</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <div class="metrics-grid">
+      <div class="metric"><div class="value">{{ n_total|default(0) }}</div><div class="label">Registros</div></div>
+      <div class="metric"><div class="value">{{ n_unique_ips|default(0) }}</div><div class="label">IPs Únicos</div></div>
+      <div class="metric"><div class="value">{{ n_countries|default(0) }}</div><div class="label">Países</div></div>
+      <div class="metric"><div class="value">{{ n_providers|default(0) }}</div><div class="label">Provedores</div></div>
+      {% if dias_atividade %}<div class="metric"><div class="value">{{ dias_atividade }}</div><div class="label">Dias com Atividade</div></div>{% endif %}
+      {% if proxy_pct is not none %}<div class="metric"><div class="value">{{ "%.1f"|format(proxy_pct) }}%</div><div class="label">Proxy/VPN</div></div>{% endif %}
+      {% if hosting_pct is not none %}<div class="metric"><div class="value">{{ "%.1f"|format(hosting_pct) }}%</div><div class="label">Hosting</div></div>{% endif %}
+      {% if mobile_pct is not none %}<div class="metric"><div class="value">{{ "%.1f"|format(mobile_pct) }}%</div><div class="label">Móvel</div></div>{% endif %}
+    </div>
+
+    {% if findings %}
+    <div style="margin-top:18px;">
+      <h3 style="font-size:0.95rem;color:var(--warning);margin-bottom:8px;">⚠️ Principais Achados</h3>
+      <ul style="padding-left:20px;color:var(--text-muted);font-size:0.9rem;">
+        {% for f in findings %}<li>{{ f }}</li>{% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    {% if periodo_inicio and periodo_fim %}
+    <div style="margin-top:14px;font-size:0.9rem;color:var(--text-muted);">
+      Período analisado: <strong>{{ periodo_inicio }} a {{ periodo_fim }}</strong>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- METODOLOGIA -->
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>🔬 Metodologia</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body collapsed">
+    <p style="font-size:0.9rem;color:var(--text-muted);line-height:1.7;">
+      Este relatório foi gerado pelo sistema <strong>Log Enrichment</strong>. Os dados de log foram processados e enriquecidos utilizando a API ip-api.com para geolocalização de endereços IP. A análise inclui classificação de infraestrutura, detecção de saltos impossíveis (baseada em velocidade máxima de deslocamento), scoring de risco comportamental e heurísticas de detecção de VPN/proxy. Todos os resultados são indicativos e devem ser validados com informações adicionais.
+    </p>
+  </div>
+</div>
+
+<!-- CADEIA DE CUSTÓDIA -->
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>🔐 Cadeia de Custódia</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <div class="coc-grid">
+      {% if coc.input_file %}<div class="coc-item"><div class="coc-label">Arquivo de Entrada</div><div class="coc-value text">{{ coc.input_file }}</div></div>{% endif %}
+      {% if coc.input_hash %}<div class="coc-item"><div class="coc-label">SHA-256 Entrada</div><div class="coc-value">{{ coc.input_hash }}</div></div>{% endif %}
+      <div class="coc-item"><div class="coc-label">SHA-256 Dados Enriquecidos</div><div class="coc-value">{{ data_hash }}</div></div>
+      {% if audit_hash %}<div class="coc-item"><div class="coc-label">SHA-256 Audit Trail</div><div class="coc-value">{{ audit_hash }}</div></div>{% endif %}
+      {% if coc.receipt_hash %}<div class="coc-item"><div class="coc-label">Hash do Recibo</div><div class="coc-value">{{ coc.receipt_hash }}</div></div>{% endif %}
+      {% if coc.operator %}<div class="coc-item"><div class="coc-label">Operador</div><div class="coc-value text">{{ coc.operator }}</div></div>{% endif %}
+      {% if coc.hostname %}<div class="coc-item"><div class="coc-label">Estação</div><div class="coc-value text">{{ coc.hostname }}</div></div>{% endif %}
+      <div class="coc-item"><div class="coc-label">Gerado em (ISO)</div><div class="coc-value">{{ coc.generated_at_iso }}</div></div>
+      <div class="coc-item"><div class="coc-label">Fonte de Enriquecimento</div><div class="coc-value text">{{ coc.enrichment_source }}</div></div>
+      <div class="coc-item"><div class="coc-label">Ferramenta</div><div class="coc-value text">{{ coc.tool_version }}</div></div>
+    </div>
+    <p style="font-size:0.78rem;color:var(--text-muted);margin-top:14px;line-height:1.5;">
+      Os hashes SHA-256 acima garantem a integridade dos artefatos. Qualquer alteração posterior nos dados ou no log de auditoria invalidará a conferência desses valores.
+    </p>
+  </div>
+</div>
+
+<!-- QUALIDADE DOS DADOS -->
+{% if data_quality %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>✅ Qualidade dos Dados</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <div class="metrics-grid">
+      <div class="metric"><div class="value">{{ data_quality.total }}</div><div class="label">Registros</div></div>
+      <div class="metric"><div class="value">{{ data_quality.unique_ips }}</div><div class="label">IPs Únicos</div></div>
+      <div class="metric"><div class="value" style="color:var(--accent-2);">{{ "%.1f"|format(data_quality.with_geo_pct) }}%</div><div class="label">Com Geo</div></div>
+      <div class="metric"><div class="value" style="color:var(--accent-2);">{{ "%.1f"|format(data_quality.with_provider_pct) }}%</div><div class="label">Com Provedor</div></div>
+      {% if data_quality.missing_geo > 0 %}
+      <div class="metric"><div class="value" style="color:var(--warning);">{{ data_quality.missing_geo }}</div><div class="label">Sem Geo ({{ "%.1f"|format(data_quality.missing_geo_pct) }}%)</div></div>
+      {% endif %}
+      <div class="metric"><div class="value">{{ data_quality.with_city }}</div><div class="label">Com Cidade</div></div>
+      <div class="metric"><div class="value">{{ data_quality.with_country }}</div><div class="label">Com País</div></div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- CRITÉRIOS & THRESHOLDS -->
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>📏 Critérios &amp; Thresholds</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body collapsed">
+    <p style="font-size:0.88rem;color:var(--text-muted);margin-bottom:14px;">
+      Referência dos pesos e limites aplicados nas análises deste relatório.
+    </p>
+
+    <h3 style="font-size:0.95rem;color:var(--accent-2);margin:14px 0 8px;">Score de Risco (0–100)</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Fator</th><th>Peso</th><th>Descrição</th></tr></thead>
+        <tbody>
+          <tr><td>Proxy/VPN</td><td><span class="bk-weight pos">+40</span></td><td>IP marcado como anonimizador pela base de geo.</td></tr>
+          <tr><td>Hosting / Datacenter</td><td><span class="bk-weight pos">+25</span></td><td>Infraestrutura não residencial.</td></tr>
+          <tr><td>Local incomum</td><td><span class="bk-weight pos">+20</span></td><td>Cidade diverge da cidade dominante do alvo.</td></tr>
+          <tr><td>Baixa frequência</td><td><span class="bk-weight pos">+10</span></td><td>IP visto ≤ 2x no período.</td></tr>
+          <tr><td>Conexão móvel</td><td><span class="bk-weight neg">−5</span></td><td>IPs móveis são naturalmente dinmicos.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:0.82rem;color:var(--text-muted);margin-top:8px;">
+      Classificação: <span class="badge-score badge-low">&lt; 40 Baixo</span>
+      <span class="badge-score badge-med">40–69 Médio</span>
+      <span class="badge-score badge-high">≥ 70 Alto</span>
+    </p>
+
+    <h3 style="font-size:0.95rem;color:var(--accent-2);margin:18px 0 8px;">Saltos Impossíveis</h3>
+    <p style="font-size:0.85rem;color:var(--text-muted);">
+      Velocidade efetiva &gt; <strong>900 km/h</strong> entre eventos consecutivos do mesmo alvo é marcada como salto impossível — limite acima da maioria dos voos comerciais.
+    </p>
+
+    <h3 style="font-size:0.95rem;color:var(--accent-2);margin:18px 0 8px;">Heurística de VPN</h3>
+    <p style="font-size:0.85rem;color:var(--text-muted);">
+      Score 0–100 baseado em proporção de IPs proxy/hosting, diversidade de países, tempo curto entre trocas de geolocalização e provedores conhecidos por hospedar VPNs.
+      <span class="badge-score badge-low">&lt; 30</span> baixa,
+      <span class="badge-score badge-med">30–49</span> moderada,
+      <span class="badge-score badge-high">≥ 50</span> forte indício.
+    </p>
+
+    <h3 style="font-size:0.95rem;color:var(--accent-2);margin:18px 0 8px;">Silêncio Digital</h3>
+    <p style="font-size:0.85rem;color:var(--text-muted);">
+      Intervalos de inatividade <strong>≥ 4h</strong> em horário atípico ou seguidos de mudança de país são sinalizados; períodos <strong>≥ 12h</strong> recebem alto risco.
+    </p>
+
+    <h3 style="font-size:0.95rem;color:var(--accent-2);margin:18px 0 8px;">Confiança de IP</h3>
+    <p style="font-size:0.85rem;color:var(--text-muted);">
+      Score 0–100 indicando confiabilidade da localização: penaliza proxy/hosting/Tor, baixa frequência e dados incompletos. Quanto maior, mais confável a atribuição geogrfica.
+    </p>
+  </div>
+</div>
+
+<!-- PERFIL COMPORTAMENTAL -->
+{% if behavioral_profile and behavioral_profile.resumo %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>👤 Perfil Comportamental</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <div class="grid-3">
+      {% if behavioral_profile.provedor_principal %}
+      <div class="info-card"><div class="info-label">Provedor Principal</div><div class="info-value">{{ behavioral_profile.provedor_principal }}</div></div>
+      {% endif %}
+      {% if behavioral_profile.cidade_principal %}
+      <div class="info-card"><div class="info-label">Cidade Principal</div><div class="info-value">{{ behavioral_profile.cidade_principal }}{% if behavioral_profile.regiao_principal %}, {{ behavioral_profile.regiao_principal }}{% endif %}</div></div>
+      {% endif %}
+      {% if behavioral_profile.horario_pico %}
+      <div class="info-card"><div class="info-label">Horários de Pico</div><div class="info-value">{{ behavioral_profile.horario_pico }}</div></div>
+      {% endif %}
+      {% if behavioral_profile.padrao_atividade %}
+      <div class="info-card"><div class="info-label">Padrão de Atividade</div><div class="info-value">{{ behavioral_profile.padrao_atividade }}</div></div>
+      {% endif %}
+      {% if behavioral_profile.dias_monitorados %}
+      <div class="info-card"><div class="info-label">Dias Monitorados</div><div class="info-value">{{ behavioral_profile.dias_monitorados }}</div></div>
+      {% endif %}
+    </div>
+    {% if behavioral_profile.cidades_visitadas %}
+    <div style="margin-top:14px;font-size:0.88rem;color:var(--text-muted);">
+      <strong style="color:var(--text);">Cidades visitadas:</strong> {{ ", ".join(behavioral_profile.cidades_visitadas[:10]) }}
+    </div>
+    {% endif %}
+    {% if behavioral_profile.provedores %}
+    <div style="margin-top:8px;font-size:0.88rem;color:var(--text-muted);">
+      <strong style="color:var(--text);">Top provedores:</strong> {{ ", ".join(behavioral_profile.provedores[:5]) }}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- DISTRIBUIÇÃO GEOGRÁFICA -->
+{% if has_geo %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>🗺️ Distribuição Geográfica</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    {% if map_html %}
+    <div class="map-container">{{ map_html | safe }}</div>
+    {% endif %}
+    {% if country_table %}
+    <div class="tbl-wrap" style="margin-top:16px;">
+      <input class="tbl-search" placeholder="Buscar país..." oninput="filterTable(this)">
+      <table>
+        <thead><tr><th>País</th><th>Ocorrências</th><th>%</th></tr></thead>
+        <tbody>
+          {% for row in country_table %}
+          <tr><td>{{ row.pais }}</td><td>{{ row.ocorrencias }}</td><td>{{ "%.1f"|format(row.pct) }}%</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+    {% if region_table %}
+    <div class="tbl-wrap" style="margin-top:12px;">
+      <input class="tbl-search" placeholder="Buscar região..." oninput="filterTable(this)">
+      <table>
+        <thead><tr><th>Região</th><th>Ocorrências</th></tr></thead>
+        <tbody>
+          {% for row in region_table %}
+          <tr><td>{{ row.regiao }}</td><td>{{ row.ocorrencias }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- DISTRIBUIÇÃO DE PROVEDORES -->
+{% if provider_plot or provider_table %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>🏢 Distribuição de Provedores</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    {% if provider_plot %}<div class="plot-container">{{ provider_plot | safe }}</div>{% endif %}
+    {% if provider_table %}
+    <div class="tbl-wrap">
+      <input class="tbl-search" placeholder="Buscar provedor..." oninput="filterTable(this)">
+      <table>
+        <thead><tr><th>Provedor</th><th>Ocorrências</th><th>%</th></tr></thead>
+        <tbody>
+          {% for row in provider_table %}
+          <tr><td>{{ row.provedor }}</td><td>{{ row.ocorrencias }}</td><td>{{ "%.1f"|format(row.pct) }}%</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- TIPOS DE CONEXÃO -->
+{% if connection_plot %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>🔌 Tipos de Conexão</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <div class="plot-container">{{ connection_plot | safe }}</div>
+  </div>
+</div>
+{% endif %}
+
+<!-- PERÍODO -->
+{% if period_plot or period_table %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>🕐 Atividade por Período</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    {% if period_plot %}<div class="plot-container">{{ period_plot | safe }}</div>{% endif %}
+    {% if period_table %}
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Período</th><th>Acessos</th><th>%</th></tr></thead>
+        <tbody>
+          {% for row in period_table %}
+          <tr><td>{{ row.periodo }}</td><td>{{ row.acessos }}</td><td>{{ "%.1f"|format(row.pct) }}%</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- TIMELINE CRONOLÓGICA -->
+{% if timeline_plot %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>📅 Timeline Cronológica</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
+      Distribuição de eventos no tempo, agrupados por provedor e coloridos pelo score de risco do IP. Passe o cursor para ver detalhes.
+    </p>
+    <div class="plot-container">{{ timeline_plot | safe }}</div>
+  </div>
+</div>
+{% endif %}
+
+<!-- HEATMAP HORA × DIA -->
+{% if heatmap_plot %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>🔥 Heatmap de Atividade</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
+      Concentração de eventos por hora do dia e dia da semana — útil para identificar rotinas, horário comercial vs noturno e padrões atendendo a fusos horários.
+    </p>
+    <div class="plot-container">{{ heatmap_plot | safe }}</div>
+  </div>
+</div>
+{% endif %}
+
+<!-- SANKEY PAÍS → PROVEDOR → TIPO -->
+{% if sankey_plot %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>🌐 Fluxo de Conexões</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
+      Diagrama de fluxo País → Provedor → Tipo de Conexão. Espessura proporcional ao número de registros.
+    </p>
+    <div class="plot-container">{{ sankey_plot | safe }}</div>
+  </div>
+</div>
+{% endif %}
+
+<!-- ANÁLISE DE RISCO -->
+{% if risk_scores and risk_scores|length > 0 %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>⚠️ Análise de Risco</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <div class="metrics-grid" style="margin-bottom:14px;">
+      <div class="metric"><div class="value" style="color:var(--danger);">{{ risk_high }}</div><div class="label">Risco Alto</div></div>
+      <div class="metric"><div class="value" style="color:var(--warning);">{{ risk_med }}</div><div class="label">Risco Médio</div></div>
+      <div class="metric"><div class="value" style="color:var(--accent-2);">{{ risk_low }}</div><div class="label">Risco Baixo</div></div>
+    </div>
+    <div class="tbl-wrap">
+      <input class="tbl-search" placeholder="Buscar IP..." oninput="filterTable(this)">
+      <table>
+        <thead><tr><th>IP</th><th>Score</th><th>Classificação</th><th>Provedor</th><th>Cidade</th></tr></thead>
+        <tbody>
+          {% for row in risk_scores %}
+          <tr>
+            <td>{{ row.ip }}</td>
+            <td><span class="badge-score {% if row.score >= 70 %}badge-high{% elif row.score >= 40 %}badge-med{% else %}badge-low{% endif %}">{{ row.score }}</span></td>
+            <td>
+              {{ row.classificacao }}
+              {% if row.breakdown %}
+              <details class="score-detail">
+                <summary>ver fatores</summary>
+                <div class="score-breakdown">
+                  {% for b in row.breakdown %}
+                  <div class="bk-row">
+                    <div style="flex:1;">
+                      <div class="bk-label">{{ b.label }}</div>
+                      <div class="bk-detail">{{ b.detail }}</div>
+                    </div>
+                    <span class="bk-weight {% if b.weight >= 0 %}pos{% else %}neg{% endif %}">{{ '%+d'|format(b.weight) }}</span>
+                  </div>
+                  {% endfor %}
+                </div>
+              </details>
+              {% endif %}
+            </td>
+            <td>{{ row.provedor }}</td>
+            <td>{{ row.cidade }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- SALTOS IMPOSSÍVEIS -->
+{% if impossible_jumps and impossible_jumps|length > 0 %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>🚀 Saltos Impossíveis</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
+      Deslocamentos entre endereços IP que excedem velocidades fisicamente possíveis, sugerindo uso de VPN/proxy ou compartilhamento de conta.
+    </p>
+    <div class="tbl-wrap">
+      <input class="tbl-search" placeholder="Buscar..." oninput="filterTable(this)">
+      <table>
+        <thead><tr><th>IP Origem</th><th>IP Destino</th><th>De → Para</th><th>Distância</th><th>Tempo</th><th>Velocidade</th></tr></thead>
+        <tbody>
+          {% for row in impossible_jumps %}
+          <tr>
+            <td>{{ row.de_ip }}</td>
+            <td>{{ row.para_ip }}</td>
+            <td>{{ row.de_cidade }} → {{ row.para_cidade }}</td>
+            <td>{{ row.distancia }} km</td>
+            <td>{{ row.tempo }} h</td>
+            <td><span class="badge-score badge-high">{{ row.velocidade }} km/h</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- VPN HEURÍSTICAS -->
+{% if vpn_heuristics and vpn_heuristics.score > 0 %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>🔒 Análise Heurística de VPN</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <div class="metric" style="max-width:200px;margin-bottom:14px;">
+      <div class="value" style="{% if vpn_heuristics.score >= 50 %}color:var(--danger){% elif vpn_heuristics.score >= 25 %}color:var(--warning){% else %}color:var(--accent-2){% endif %}">{{ vpn_heuristics.score }}</div>
+      <div class="label">Score VPN / 100</div>
+    </div>
+    {% if vpn_heuristics.indicadores %}
+    <div class="grid-2" style="margin-bottom:14px;">
+      {% for k, v in vpn_heuristics.indicadores.items() %}
+      <div class="info-card" style="border-left-color:var(--warning);">
+        <div class="info-label">{{ k }}</div>
+        <div class="info-value" style="font-size:0.88rem;font-weight:400;">{{ v }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if vpn_heuristics.suspicious_ips %}
+    <div style="font-size:0.88rem;">
+      <strong style="color:var(--text);">IPs suspeitos:</strong>
+      <span style="color:var(--text-muted);font-family:var(--mono);">{{ ", ".join(vpn_heuristics.suspicious_ips[:10]) }}</span>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- CONFIANÇA DE IPs -->
+{% if ip_confidence and ip_confidence|length > 0 %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>🛡️ Confianca de IPs</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <div class="tbl-wrap">
+      <input class="tbl-search" placeholder="Buscar IP..." oninput="filterTable(this)">
+      <table>
+        <thead><tr><th>IP</th><th>Score</th><th>Classificação</th><th>Motivo</th></tr></thead>
+        <tbody>
+          {% for row in ip_confidence %}
+          <tr>
+            <td>{{ row.ip }}</td>
+            <td><span class="badge-score {% if row.score >= 60 %}badge-low{% elif row.score >= 35 %}badge-med{% else %}badge-high{% endif %}">{{ row.score }}</span></td>
+            <td>{{ row.classificacao }}</td>
+            <td>{{ row.motivo }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- LOCAIS BASE -->
+{% if base_locations and (base_locations.home or base_locations.work) %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>🏠 Locais Base Estimados</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <div class="grid-2">
+      {% if base_locations.home %}
+      <div class="info-card" style="border-left-color:var(--accent);">
+        <div class="info-label">Residência (estimada)</div>
+        <div class="info-value">{{ base_locations.home.city }}{% if base_locations.home.region %}, {{ base_locations.home.region }}{% endif %}</div>
+        <div style="font-size:0.82rem;color:var(--text-muted);margin-top:6px;">
+          Provedor: {{ base_locations.home.provider }}<br>
+          Acessos noturnos: {{ base_locations.home.count }}
+        </div>
+      </div>
+      {% endif %}
+      {% if base_locations.work %}
+      <div class="info-card" style="border-left-color:var(--accent-2);">
+        <div class="info-label">Trabalho (estimado)</div>
+        <div class="info-value">{{ base_locations.work.city }}{% if base_locations.work.region %}, {{ base_locations.work.region }}{% endif %}</div>
+        <div style="font-size:0.82rem;color:var(--text-muted);margin-top:6px;">
+          Provedor: {{ base_locations.work.provider }}<br>
+          Acessos diurnos: {{ base_locations.work.count }}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- PADRÕES DE VIDA -->
+{% if life_patterns and life_patterns.has_data %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>🧬 Padrões de Vida (Clustering)</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    {% if life_patterns.clusters %}
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Tipo</th><th>Cidade</th><th>N</th><th>Provedor</th><th>Período</th></tr></thead>
+        <tbody>
+          {% for c in life_patterns.clusters %}
+          <tr>
+            <td>{{ c.label }}</td>
+            <td>{{ c.city }}</td>
+            <td>{{ c.count }}</td>
+            <td>{{ c.provider }}</td>
+            <td>{{ c.first_seen }} - {{ c.last_seen }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+    {% if life_patterns.routine_deviations %}
+    <div style="margin-top:14px;">
+      <h3 style="font-size:0.9rem;color:var(--warning);margin-bottom:6px;">Desvios de Rotina ({{ life_patterns.routine_deviations|length }})</h3>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Data</th><th>IP</th><th>Cidade</th></tr></thead>
+          <tbody>
+            {% for d in life_patterns.routine_deviations %}
+            <tr><td>{{ d.date }}</td><td>{{ d.ip }}</td><td>{{ d.city }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- SILÊNCIO DIGITAL -->
+{% if digital_silence %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>🌑 Silêncio Digital</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
+      Períodos sem qualquer atividade registrada por mais de 24h. Útil para identificar viagens, troca de aparelho/chip ou desativação temporária.
+    </p>
+    <div class="metrics-grid" style="margin-bottom:14px;">
+      <div class="metric"><div class="value">{{ digital_silence.total_silences }}</div><div class="label">Silêncios</div></div>
+      <div class="metric"><div class="value">{{ digital_silence.longest_gap_hours }}h</div><div class="label">Maior Gap</div></div>
+      <div class="metric"><div class="value">{{ digital_silence.silence_ratio }}%</div><div class="label">Do Período Total</div></div>
+      <div class="metric"><div class="value" style="color:var(--danger);">{{ digital_silence.high_risk_periods }}</div><div class="label">Alto Risco</div></div>
+      {% if digital_silence.country_changes %}
+      <div class="metric"><div class="value" style="color:var(--warning);">{{ digital_silence.country_changes }}</div><div class="label">Mudanças de País</div></div>
+      {% endif %}
+    </div>
+    {% if digital_silence.periods %}
+    <div class="tbl-wrap">
+      <input class="tbl-search" placeholder="Buscar..." oninput="filterTable(this)">
+      <table>
+        <thead><tr><th>Início</th><th>Fim</th><th>Duração</th><th>IP Antes</th><th>IP Depois</th><th>Indicadores</th><th>Risco</th></tr></thead>
+        <tbody>
+          {% for p in digital_silence.periods %}
+          <tr>
+            <td>{{ p.start }}</td>
+            <td>{{ p.end }}</td>
+            <td>{{ p.gap_hours }}h ({{ p.gap_days }}d)</td>
+            <td style="font-family:var(--mono);font-size:0.8rem;">{{ p.ip_before }}</td>
+            <td style="font-family:var(--mono);font-size:0.8rem;">{{ p.ip_after }}</td>
+            <td style="font-size:0.82rem;">{{ p.indicators | join('; ') }}</td>
+            <td><span class="badge-score {% if p.risk_level == 'Alto' %}badge-high{% elif p.risk_level == 'Médio' %}badge-med{% else %}badge-low{% endif %}">{{ p.risk_level }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- SUBNET /24 -->
+{% if subnet_patterns %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>🧩 Consistência de Subnets</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
+      Agrupamento de IPs por subnet /24 (IPv4) ou /48 (IPv6). Subnets com múltiplos IPs distintos do mesmo provedor podem indicar pool dinâmico ou rede compartilhada.
+    </p>
+    <div class="metrics-grid" style="margin-bottom:14px;">
+      <div class="metric"><div class="value">{{ subnet_patterns.total_subnets }}</div><div class="label">Subnets Únicas</div></div>
+      {% if subnet_patterns.dominant_subnets %}
+      <div class="metric"><div class="value">{{ subnet_patterns.dominant_subnets|length }}</div><div class="label">Dominantes</div></div>
+      {% endif %}
+    </div>
+    {% if subnet_patterns.subnets %}
+    <div class="tbl-wrap">
+      <input class="tbl-search" placeholder="Buscar subnet..." oninput="filterTable(this)">
+      <table>
+        <thead><tr><th>Subnet</th><th>IPs</th><th>Registros</th><th>Provedores</th><th>Cidades</th><th>Período</th></tr></thead>
+        <tbody>
+          {% for s in subnet_patterns.subnets %}
+          <tr>
+            <td style="font-family:var(--mono);font-size:0.82rem;">{{ s.subnet }}</td>
+            <td><span class="badge-score {% if s.ip_count >= 5 %}badge-high{% elif s.ip_count >= 2 %}badge-med{% else %}badge-low{% endif %}">{{ s.ip_count }}</span></td>
+            <td>{{ s.record_count }}</td>
+            <td style="font-size:0.82rem;">{{ s.providers | join(', ') }}</td>
+            <td style="font-size:0.82rem;">{{ s.cities | join(', ') }}</td>
+            <td style="font-size:0.82rem;">{% if s.date_range %}{{ s.date_range[0] }} → {{ s.date_range[1] }}{% else %}—{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- TIMEZONE CONSISTENCY -->
+{% if tz_consistency %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>🌐 Validação de Fuso Horário</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
+      Acessos cujo timestamp, quando convertido para o fuso local do IP geolocalizado, cai em horário de sono detectado — sinal de mascaramento de localização.
+    </p>
+    <div class="metrics-grid" style="margin-bottom:14px;">
+      <div class="metric"><div class="value" style="color:var(--warning);">{{ tz_consistency.total_inconsistencies }}</div><div class="label">Inconsistências</div></div>
+      <div class="metric"><div class="value">{{ tz_consistency.total_records }}</div><div class="label">Registros Analisados</div></div>
+      <div class="metric"><div class="value">{{ tz_consistency.countries_seen|length }}</div><div class="label">Países Vistos</div></div>
+    </div>
+    {% if tz_consistency.inconsistencies %}
+    <div class="tbl-wrap">
+      <input class="tbl-search" placeholder="Buscar..." oninput="filterTable(this)">
+      <table>
+        <thead><tr><th>Timestamp</th><th>IP</th><th>País</th><th>Fuso IP</th><th>Hora Local no IP</th><th>Inconsistência</th><th>Severidade</th></tr></thead>
+        <tbody>
+          {% for i in tz_consistency.inconsistencies %}
+          <tr>
+            <td>{{ i.timestamp }}</td>
+            <td style="font-family:var(--mono);font-size:0.8rem;">{{ i.ip }}</td>
+            <td>{{ i.ip_country }}</td>
+            <td>{{ i.ip_timezone }}</td>
+            <td>{{ i.local_hour_at_ip }}</td>
+            <td style="font-size:0.82rem;">{{ i.issue }}</td>
+            <td><span class="badge-score {% if i.severity == 'Alta' %}badge-high{% else %}badge-med{% endif %}">{{ i.severity }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- PROVIDER TIMING -->
+{% if provider_timing %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>⏱️ Padrão Temporal por Provedor</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
+      Classificação de cada provedor por padrão de uso (always-on, agendado, esporádico). Compara horários de provedores residenciais vs infraestrutura (proxy/hosting) para detectar uso programado de VPN.
+    </p>
+    {% if provider_timing.vpn_schedule and provider_timing.vpn_schedule.detected %}
+    <div class="info-card" style="border-left-color:var(--danger);margin-bottom:14px;">
+      <div class="info-label" style="color:var(--danger);">⚠️ VPN com Uso Programado Detectado</div>
+      <div style="font-size:0.88rem;margin-top:6px;">
+        Horas exclusivas de VPN (sem atividade residencial): <strong>{{ provider_timing.vpn_schedule.exclusive_vpn_hours | join(', ') }}h</strong><br>
+        Provedores VPN: {{ provider_timing.vpn_schedule.vpn_providers | join(', ') }}<br>
+        Provedores residenciais: {{ provider_timing.vpn_schedule.residential_providers | join(', ') }}
+      </div>
+    </div>
+    {% endif %}
+    {% if provider_timing.providers %}
+    <div class="tbl-wrap">
+      <input class="tbl-search" placeholder="Buscar provedor..." oninput="filterTable(this)">
+      <table>
+        <thead><tr><th>Provedor</th><th>Tipo de Uso</th><th>Registros</th><th>Horas Ativas/24</th><th>Sessão Média</th><th>Pico</th></tr></thead>
+        <tbody>
+          {% for p in provider_timing.providers %}
+          <tr>
+            <td>{{ p.provedor }}</td>
+            <td><span class="badge-score {% if p.tipo_uso == 'always_on' %}badge-high{% elif p.tipo_uso == 'scheduled' %}badge-med{% else %}badge-low{% endif %}">{{ p.tipo_uso }}</span></td>
+            <td>{{ p.registros }}</td>
+            <td>{{ p.horas_ativas }}</td>
+            <td>{{ p.sessao_min }} min</td>
+            <td>{{ p.pico }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- GEO CHANGES (cache history) -->
+{% if geo_changes %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>🛰️ Mudanças Geográficas Históricas</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
+      IPs que mudaram de localização ou provedor ao longo do tempo no cache de enriquecimento. Indica reatribuição de IP, mudança de ISP ou degradação de precisão geográfica.
+    </p>
+    <div class="metrics-grid" style="margin-bottom:14px;">
+      <div class="metric"><div class="value">{{ geo_changes.total_changes }}</div><div class="label">Mudanças Totais</div></div>
+      <div class="metric"><div class="value" style="color:var(--danger);">{{ geo_changes.country_changes }}</div><div class="label">Mudanças de País</div></div>
+      <div class="metric"><div class="value" style="color:var(--warning);">{{ geo_changes.city_changes }}</div><div class="label">Mudanças de Cidade</div></div>
+      <div class="metric"><div class="value">{{ geo_changes.isp_changes }}</div><div class="label">Mudanças de ISP</div></div>
+    </div>
+    {% if geo_changes.changed_ips %}
+    <div class="tbl-wrap">
+      <input class="tbl-search" placeholder="Buscar IP..." oninput="filterTable(this)">
+      <table>
+        <thead><tr><th>IP</th><th>De (cidade)</th><th>Para (cidade)</th><th>De (ISP)</th><th>Para (ISP)</th><th>Distância</th><th>Há</th><th>Severidade</th></tr></thead>
+        <tbody>
+          {% for c in geo_changes.changed_ips %}
+          <tr>
+            <td style="font-family:var(--mono);font-size:0.8rem;">{{ c.ip }}</td>
+            <td>{{ c.old_city }}{% if c.old_country %} ({{ c.old_country }}){% endif %}</td>
+            <td>{{ c.new_city }}{% if c.new_country %} ({{ c.new_country }}){% endif %}</td>
+            <td style="font-size:0.82rem;">{{ c.old_isp }}</td>
+            <td style="font-size:0.82rem;">{{ c.new_isp }}</td>
+            <td>{{ c.distance_km }} km</td>
+            <td>{{ c.days_since }}d</td>
+            <td><span class="badge-score {% if c.severity == 'Crítico' %}badge-high{% elif c.severity == 'Alto' %}badge-med{% else %}badge-low{% endif %}">{{ c.severity }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- SHARED WIFI (cross-target) -->
+{% if shared_wifi %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>📡 WiFi Compartilhado entre Alvos</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
+      Alvos diferentes acessando exatamente o mesmo IP no mesmo instante — forte indício de localização física compartilhada (residência, trabalho ou local público).
+    </p>
+    <div class="tbl-wrap">
+      <input class="tbl-search" placeholder="Buscar..." oninput="filterTable(this)">
+      <table>
+        <thead><tr><th>Alvo 1</th><th>Alvo 2</th><th>IP</th><th>Ocorrências Simultâneas</th><th>Avaliação</th></tr></thead>
+        <tbody>
+          {% for s in shared_wifi %}
+          <tr>
+            <td>{{ s.alvo_1 }}</td>
+            <td>{{ s.alvo_2 }}</td>
+            <td style="font-family:var(--mono);font-size:0.82rem;">{{ s.ip }}</td>
+            <td><span class="badge-score {% if s.simultaneous_count >= 3 %}badge-high{% else %}badge-med{% endif %}">{{ s.simultaneous_count }}</span></td>
+            <td style="font-size:0.85rem;">{{ s.assessment }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- CROSS-TARGET CORRELATION -->
+{% if cross_correlation %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>🔗 Correlação entre Alvos</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
+      IPs presentes em múltiplos alvos armazenados — possível indício de comunicação, infraestrutura comum ou compartilhamento de dispositivo.
+    </p>
+    <div class="tbl-wrap">
+      <input class="tbl-search" placeholder="Buscar IP ou alvo..." oninput="filterTable(this)">
+      <table>
+        <thead><tr><th>IP</th><th>Alvos</th><th>Ocorrências</th><th>Provedor</th><th>País</th><th>Cidade</th></tr></thead>
+        <tbody>
+          {% for r in cross_correlation %}
+          <tr>
+            <td style="font-family:var(--mono);font-size:0.82rem;">{{ r.ip }}</td>
+            <td style="font-size:0.85rem;">{{ r.alvos }}</td>
+            <td>{{ r.ocorrencias }}</td>
+            <td style="font-size:0.85rem;">{{ r.provedor }}</td>
+            <td>{{ r.pais }}</td>
+            <td>{{ r.cidade }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- IPs MAIS RECORRENTES -->
+{% if top_ips and top_ips|length > 0 %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>📌 IPs Mais Recorrentes</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body">
+    <div class="tbl-wrap">
+      <input class="tbl-search" placeholder="Buscar IP..." oninput="filterTable(this)">
+      <table>
+        <thead><tr><th>IP</th><th>N</th><th>Provedor</th><th>País</th><th>Cidade</th></tr></thead>
+        <tbody>
+          {% for row in top_ips %}
+          <tr><td>{{ row.ip }}</td><td>{{ row.count }}</td><td>{{ row.provedor }}</td><td>{{ row.pais }}</td><td>{{ row.cidade }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- DADOS BRUTOS -->
+{% if raw_data and raw_data|length > 0 %}
+<div class="card">
+  <div class="card-header" onclick="toggle(this)">
+    <h2>📋 Dados Brutos (Amostra)</h2>
+    <span class="toggle">▼</span>
+  </div>
+  <div class="card-body collapsed">
+    <div class="tbl-wrap">
+      <input class="tbl-search" placeholder="Buscar..." oninput="filterTable(this)">
+      <table>
+        <thead><tr>{% for h in raw_headers %}<th>{{ h }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for row in raw_data %}
+          <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+</div><!-- /container -->
+
+<!-- FOOTER -->
+<div class="footer">
+  {% if signatures %}
+  <div class="signatures">
+    {% for s in signatures %}
+    <div class="signature">
+      <div class="line"></div>
+      <div class="name">{{ s.name or '—' }}</div>
+      <div class="role">{{ s.role or '' }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <p style="margin-top:22px;">Log Enrichment — Relatório gerado automaticamente em {{ generated_at }}</p>
+  <p style="margin-top:6px;max-width:700px;margin-left:auto;margin-right:auto;">
+    Este relatório foi gerado automaticamente. Os resultados são indicativos e devem ser corroborados com outras fontes de informação. O hash SHA-256 garante a integridade dos dados originais utilizados na análise.
+  </p>
+  {% if audit_hash %}
+  <p style="font-family:var(--mono);font-size:11px;margin-top:8px;word-break:break-all;">Audit Hash: {{ audit_hash }}</p>
+  {% endif %}
+</div>
+
+<button id="btn-top" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Voltar ao topo">▲</button>
+
+<script>
+function toggle(header) {
+  const body = header.nextElementSibling;
+  header.classList.toggle('collapsed');
+  body.classList.toggle('collapsed');
+}
+function filterTable(input) {
+  const term = input.value.toLowerCase();
+  const table = input.nextElementSibling;
+  if (!table) return;
+  const rows = table.querySelectorAll('tbody tr');
+  rows.forEach(row => {
+    const text = row.textContent.toLowerCase();
+    row.style.display = text.includes(term) ? '' : 'none';
+  });
+}
+window.addEventListener('scroll', () => {
+  document.getElementById('btn-top').style.display = window.scrollY > 400 ? 'block' : 'none';
+});
+
+// Auto-build TOC from h2 of each .card
+(function buildTOC() {
+  const list = document.getElementById('toc-list');
+  if (!list) return;
+  const cards = document.querySelectorAll('.container > .card');
+  const links = [];
+  cards.forEach((card, i) => {
+    const h2 = card.querySelector('.card-header h2');
+    if (!h2) return;
+    const text = h2.textContent.trim();
+    const slug = 'sec-' + (text.toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || ('card-' + i));
+    card.id = slug;
+    const a = document.createElement('a');
+    a.href = '#' + slug;
+    a.textContent = text;
+    a.addEventListener('click', () => {
+      if (window.innerWidth < 1280) document.getElementById('toc').classList.remove('open');
+    });
+    list.appendChild(a);
+    links.push({ a, card });
+  });
+  // Scroll spy
+  const onScroll = () => {
+    let current = null;
+    const y = window.scrollY + 120;
+    for (const { a, card } of links) {
+      if (card.offsetTop <= y) current = a;
+    }
+    links.forEach(({ a }) => a.classList.toggle('active', a === current));
+  };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+})();
+</script>
+</body>
+</html>

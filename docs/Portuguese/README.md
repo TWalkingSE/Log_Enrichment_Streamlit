@@ -1,4 +1,6 @@
-# Log Enrichment v5.2 Pro
+﻿# Log Enrichment v5.2 Pro
+
+> **Atualização (auditoria Lotes 1–8):** air-gapped, retenção, worker headless, export IOC/STIX 2.1, cancelamento cooperativo, comparação A/B de períodos, cache assinado HMAC, pipeline via `application.enrich_use_case`, i18n residual, deploy em [`docs/DEPLOY.md`](../DEPLOY.md) e relatório em [`docs/AUDITORIA_TECNICA.md`](../AUDITORIA_TECNICA.md). Documentação completa de produto: [`README.md`](../../README.md) na raiz.
 
 Ferramenta profissional para extração, análise forense e enriquecimento de endereços IP em logs de acesso e interceptação telemática, utilizando múltiplas fontes de inteligência (IP-API, VirusTotal, AbuseIPDB).
 
@@ -8,7 +10,7 @@ O **Log Enrichment** é uma aplicação web (Streamlit) que automatiza a anális
 
 ## ⚠️ Alerta de Dados Sensíveis
 
-> **Atenção:** esta ferramenta pode processar **endereços IP, portas lógicas, horários de conexão, localização aproximada, ASN/provedor e metadados correlatos** obtidos de registros de plataformas e serviços como **Google, WhatsApp, Meta, Discord** e provedores de acesso. Em muitos contextos, esses dados podem ser **sensíveis, sigilosos ou juridicamente protegidos**.
+> **Atenção:** esta ferramenta pode processar **endereços IP, portas lógicas, horários de conexão, localização aproximada, ASN/provedor e metadados correlatos** obtidos de registros de plataformas e serviços como **Google, WhatsApp, Meta, Discord, TikTok** e provedores de acesso. Em muitos contextos, esses dados podem ser **sensíveis, sigilosos ou juridicamente protegidos**.
 >
 > Quando você ativa consultas de enriquecimento ou reputação com **API Key**, parte desses dados é enviada para **serviços externos de terceiros**, como **IP-API, VirusTotal, AbuseIPDB e Shodan**, de acordo com a configuração utilizada. No caso do plano pago da IP-API, a chave é enviada no request como **query parameter `?key=`**, conforme a documentação do provedor.
 >
@@ -19,7 +21,7 @@ O **Log Enrichment** é uma aplicação web (Streamlit) que automatiza a anális
 ## ✨ Funcionalidades
 
 ### Enriquecimento de Logs de Acesso
-- **10 Formatos de Entrada**: Genérico, Meta Platforms, WhatsApp, Google, Preservation Google, **Discord (PDF)**, CSV/Excel, **HTML WhatsApp** (records.html), **HTML Meta Platforms** (Facebook/Instagram), **HTML Google** (SubscriberInfo.html)
+- **11 Formatos de Entrada**: Genérico, Meta Platforms, WhatsApp, Google, Preservation Google, **Discord (PDF)**, **TikTok (PDF)**, CSV/Excel, **HTML WhatsApp** (records.html), **HTML Meta Platforms** (Facebook/Instagram), **HTML Google** (SubscriberInfo.html)
 - **Batch API**: Consulta até 100 IPs por request via POST `/batch`, reduzindo tempo de processamento em até 10x
 - **rDNS Assíncrono**: Resolução reversa de DNS em paralelo para todos os IPs
 - **Detecção Automática de Formato**: Identifica o tipo de log automaticamente
@@ -129,9 +131,9 @@ O sistema classifica automaticamente cada IP em 6 categorias baseado no ASN e pr
 - **Gráficos embutidos** (provedores e tipo de conexão como imagens)
 - Download direto do PDF
 
-### Análise Avançada (7 páginas dedicadas)
+### Análise Avançada (8 páginas dedicadas)
 
-O módulo de análise avançada foi reestruturado em **7 páginas agrupadas** com seções especializadas:
+O módulo de análise avançada foi reestruturado em **8 páginas agrupadas** com seções especializadas:
 
 **📊 Visão Geral**
 - KPIs resumo (IPs únicos, score médio de risco, % VPN/proxy, provedores, saúde dos dados)
@@ -419,7 +421,23 @@ PDF gerado pelo Discord contendo dados do usuário (User ID, Username, Email) e 
 Detectado automaticamente pela presença de `Session Start (UTC)` com `User ID:` ou `Username:`.
 As colunas `User_ID`, `Username` e `Email` são extraídas e incluídas na saída.
 
-### Formato 7: Interceptação Telemática (WhatsApp HTML)
+### Formato 7: TikTok (PDF)
+```
+Events IP Data
+Date: 27/07/2026 03:04:43PM (UTC +00)
+IP: 203.0.113.45
+Event: video_play
+Country: Brazil
+Date: 27/07/2026 03:04:31PM (UTC +00)
+IP: 203.0.113.45
+Event: like
+Country: Brazil
+```
+PDF "Events IP Data" gerado pela TikTok Pte. Limited contendo registros de eventos (video_play, like, follow, publish, send_message, etc.) com data/hora UTC, IP e país.
+Detectado automaticamente pela presença de `Events IP Data` ou `TikTok Pte`.
+A coluna `Evento` é extraída e incluída na saída (após `Ip`); rodapés de página intercalados são tratados automaticamente.
+
+### Formato 8: Interceptação Telemática (WhatsApp HTML)
 Arquivo `records.html` gerado pelo WhatsApp contendo:
 - **Message Log**: Mensagens criptografadas (text, voice, image, video, sticker, etc.)
 - **Call Log**: Chamadas de áudio e vídeo (offer, accept, terminate, reject)
@@ -501,7 +519,7 @@ Suporta upload de ZIP com 15 dias de interceptação (ZIP contendo ZIPs internos
 | shodan | Consulta de serviços/portas (Shodan API) |
 | pydantic | Structured output para o Assistente AI |
 | matplotlib | Gráficos adicionais para relatórios |
-| pdfplumber | Parsing de PDFs (Discord) |
+| pdfplumber | Parsing de PDFs (Discord, TikTok) |
 | pytest | Framework de testes unitários |
 
 ## ⚙️ Configuração

@@ -14,7 +14,7 @@
 
 ## ⚠️ Aviso Importante sobre Confidencialidad y Servicios Externos
 
-Antes de usar la herramienta con datos reales, considere que puede manipular **IPs, puertos, horarios, ASN/proveedor, ubicación aproximada y otros metadatos** extraídos de registros de **Google, WhatsApp, Meta, Discord** y proveedores de acceso. Estos elementos pueden ser **sensibles, protegidos por confidencialidad** y sujetos a reglas legales e institucionales específicas.
+Antes de usar la herramienta con datos reales, considere que puede manipular **IPs, puertos, horarios, ASN/proveedor, ubicación aproximada y otros metadatos** extraídos de registros de **Google, WhatsApp, Meta, Discord, TikTok** y proveedores de acceso. Estos elementos pueden ser **sensibles, protegidos por confidencialidad** y sujetos a reglas legales e institucionales específicas.
 
 Cuando la app consulta **IP-API, VirusTotal, AbuseIPDB o Shodan**, los identificadores procesados se envían a **servicios externos de terceros**.
 
@@ -62,4 +62,4 @@ R: No, la herramienta funciona con la API gratuita de IP-API (45 req/min). Una k
 R: Las consultas de enriquecimiento se envían a APIs externas cuando están habilitadas. El asistente AI (Ollama) corre localmente.
 
 **P: ¿Qué formatos de archivo son soportados?**
-R: TXT, CSV, XLSX, XLS, PDF, HTML, HTM — con detección automática de formato para WhatsApp, Meta, Google, Discord y listas genéricas de IP.
+R: TXT, CSV, XLSX, XLS, PDF, HTML, HTM — con detección automática de formato para WhatsApp, Meta, Google, Discord, TikTok y listas genéricas de IP.

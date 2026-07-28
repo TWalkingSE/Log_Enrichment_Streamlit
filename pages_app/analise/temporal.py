@@ -15,6 +15,31 @@ from analysis import (
 from i18n import t
 
 
+@st.cache_data(show_spinner=False)
+def _cached_time_patterns(df):
+    return analyze_time_patterns(df)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_digital_silence(df, min_gap_hours):
+    return detect_digital_silence(df, min_gap_hours=min_gap_hours)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_tz_consistency(df):
+    return validate_timezone_consistency(df)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_provider_timing(df, min_records):
+    return analyze_provider_timing(df, min_records=min_records)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_provider_transitions(df, window_minutes):
+    return detect_provider_transitions(df, window_minutes=window_minutes)
+
+
 def page_temporal():
     from styles.components import section_header, empty_state
     section_header(t('temporal.title'), divider="blue")
@@ -26,13 +51,13 @@ def page_temporal():
 
     # ── Padrões Temporais ──
     with st.container(border=True):
-        st.subheader("🕐 Análise de Padrões Temporais")
-        patterns = analyze_time_patterns(df)
+        st.subheader(t('temporal.patterns_title'))
+        patterns = _cached_time_patterns(df)
         if patterns['hourly_counts'] is not None:
             c1, c2 = st.columns(2)
-            c1.metric("Score de Rotina", f"{patterns['routine_score']}%")
+            c1.metric(t('temporal.routine_score'), f"{patterns['routine_score']}%")
             hours_str = ', '.join([f"{h}h" for h in patterns['most_active_hours'][:3]])
-            c2.metric("Horários Mais Ativos", hours_str)
+            c2.metric(t('temporal.most_active_hours'), hours_str)
             hourly_df = pd.DataFrame({'Hora': patterns['hourly_counts'].index,
                                       'Acessos': patterns['hourly_counts'].values})
             fig = px.bar(hourly_df, x='Hora', y='Acessos',
@@ -40,41 +65,41 @@ def page_temporal():
             fig.update_layout(height=300, showlegend=False, coloraxis_showscale=False)
             st.plotly_chart(fig, key='hourly_pattern')
             if patterns['activity_gaps']:
-                st.warning(f"⚠️ **{len(patterns['activity_gaps'])}** dias sem atividade")
+                st.warning(t('temporal.days_without_activity', count=len(patterns['activity_gaps'])))
 
     # ── Silêncio Digital ──
     with st.container(border=True):
-        st.subheader("🔇 Silêncio Digital")
-        with st.popover("⚙️ Configurar"):
-            min_gap = st.slider("Gap mínimo (horas)", 12, 168, 24, key="silence_gap")
-        result = detect_digital_silence(df, min_gap_hours=min_gap)
+        st.subheader(t('temporal.silence_title'))
+        with st.popover("⚙️"):
+            min_gap = st.slider(t('temporal.silence_gap_label'), 12, 168, 24, key="silence_gap")
+        result = _cached_digital_silence(df, min_gap)
         silences = result.get('periods', [])
         if silences:
-            st.warning(f"🔇 **{len(silences)}** período(s) de silêncio!")
+            st.warning(t('temporal.silence_found', count=len(silences)))
             for s in silences:
                 st.markdown(f"**{s.get('start', '')}** → **{s.get('end', '')}** ({s.get('gap_hours', 0):.0f}h)")
         else:
-            st.success("✅ Nenhum silêncio digital significativo.")
+            st.success(t('temporal.no_silence'))
 
     # ── Validação TZ ──
     with st.container(border=True):
-        st.subheader("🕐 Validação de Fuso Horário")
-        tz_result = validate_timezone_consistency(df)
+        st.subheader(t('temporal.tz_title'))
+        tz_result = _cached_tz_consistency(df)
         if tz_result.get('analyzed'):
             inconsistent = tz_result.get('inconsistencies', [])
             if inconsistent:
-                st.warning(f"⚠️ **{len(inconsistent)}** inconsistência(s)!")
-                st.dataframe(pd.DataFrame(inconsistent), width='stretch', hide_index=True)
+                st.warning(f"⚠️ **{len(inconsistent)}**")
+                st.dataframe(pd.DataFrame(inconsistent), use_container_width=True, hide_index=True)
             else:
-                st.success("✅ Todos consistentes.")
+                st.success("✅")
 
     # ── Timing por Provedor ──
     with st.container(border=True):
-        st.subheader("⏱️ Fingerprint de Timing por Provedor")
-        with st.popover("⚙️ Configurar"):
-            min_records = st.slider("Mínimo de registros por provedor", 2, 20, 5, key="timing_min")
+        st.subheader(t('temporal.timing_title'))
+        with st.popover("⚙️"):
+            min_records = st.slider("min", 2, 20, 5, key="timing_min")
 
-        timing = analyze_provider_timing(df, min_records=min_records)
+        timing = _cached_provider_timing(df, min_records)
         providers = timing.get('providers', {})
         vpn_sched = timing.get('vpn_schedule', {})
 
@@ -107,16 +132,16 @@ def page_temporal():
 
     # ── Transições entre Provedores ──
     with st.container(border=True):
-        st.subheader("🔄 Transições entre Provedores")
-        with st.popover("⚙️ Configurar"):
-            window = st.slider("Janela de transição (min)", 10, 120, 30, key="timing_window")
-        trans = detect_provider_transitions(df, window_minutes=window)
+        st.subheader(t('temporal.transitions_title'))
+        with st.popover("⚙️"):
+            window = st.slider("window (min)", 10, 120, 30, key="timing_window")
+        trans = _cached_provider_transitions(df, window)
         sandwiches = trans.get('sandwich_patterns', [])
         if sandwiches:
             st.warning(f"🔄 **{len(sandwiches)}** padrão(ões) sandwich (A→B→A) detectado(s)!")
-            st.dataframe(pd.DataFrame(sandwiches), width='stretch', hide_index=True)
+            st.dataframe(pd.DataFrame(sandwiches), use_container_width=True, hide_index=True)
         transitions = trans.get('transitions', [])
         if transitions:
-            st.dataframe(pd.DataFrame(transitions[:10]), width='stretch', hide_index=True)
+            st.dataframe(pd.DataFrame(transitions[:10]), use_container_width=True, hide_index=True)
         elif not sandwiches:
             st.success("✅ Nenhuma transição suspeita.")

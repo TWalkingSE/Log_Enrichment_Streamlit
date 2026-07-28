@@ -299,7 +299,7 @@ def page_estatisticas():
                     accent='#d4d4d8',
                     tickangle=-35,
                 )
-                st.plotly_chart(fig, width='stretch', key='stats_spotlight_provider')
+                st.plotly_chart(fig, use_container_width=True, key='stats_spotlight_provider')
             else:
                 st.info('Nao ha dados suficientes para destacar um provedor.')
 
@@ -307,7 +307,7 @@ def page_estatisticas():
         with st.container(border=True):
             mix_fig = _build_connection_mix_chart(df)
             if mix_fig is not None:
-                st.plotly_chart(mix_fig, width='stretch', key='stats_connection_mix')
+                st.plotly_chart(mix_fig, use_container_width=True, key='stats_connection_mix')
             else:
                 st.info('Sem dados suficientes para classificar o tipo de conexao.')
 
@@ -329,7 +329,7 @@ def page_estatisticas():
                     accent='#e5e7eb',
                     tickangle=-45,
                 )
-                st.plotly_chart(fig, width='stretch', key='stats_hourly')
+                st.plotly_chart(fig, use_container_width=True, key='stats_hourly')
             else:
                 st.info('Sem datas validas para montar a serie horaria.')
 
@@ -349,7 +349,7 @@ def page_estatisticas():
                     'Concentracao operacional por dia observado',
                     accent=COLORS['primary'],
                 )
-                st.plotly_chart(fig, width='stretch', key='stats_weekday')
+                st.plotly_chart(fig, use_container_width=True, key='stats_weekday')
             else:
                 st.info('Sem datas validas para montar a serie semanal.')
 
@@ -375,7 +375,7 @@ def page_estatisticas():
                     accent=COLORS['accent'],
                 )
                 fig.update_xaxes(tickformat='%d/%m')
-                st.plotly_chart(fig, width='stretch', key='stats_daily_timeline')
+                st.plotly_chart(fig, use_container_width=True, key='stats_daily_timeline')
             else:
                 st.info('Sem datas validas para montar a timeline diaria.')
 
@@ -385,7 +385,7 @@ def page_estatisticas():
                 region_df = df['Ip_Regiao'].fillna('Nao informado').value_counts().head(8).reset_index()
                 region_df.columns = ['Regiao', 'Qtd']
                 fig = _build_horizontal_bar_chart(region_df, 'Regiao', 'Qtd', 'Regioes Mais Ativas', COLORS['secondary'])
-                st.plotly_chart(fig, width='stretch', key='stats_regions')
+                st.plotly_chart(fig, use_container_width=True, key='stats_regions')
             else:
                 st.info('Sem dados de regiao para o ranking territorial.')
 
@@ -397,7 +397,7 @@ def page_estatisticas():
                 top_ips_df = df['Ip'].value_counts().head(12).reset_index()
                 top_ips_df.columns = ['IP', 'Ocorrencias']
                 fig = _build_horizontal_bar_chart(top_ips_df, 'IP', 'Ocorrencias', 'Top 12 IPs Mais Recorrentes', COLORS['info'], height=360)
-                st.plotly_chart(fig, width='stretch', key='stats_top_ips')
+                st.plotly_chart(fig, use_container_width=True, key='stats_top_ips')
             else:
                 st.info('Sem coluna de IP para montar o ranking.')
 
@@ -412,7 +412,7 @@ def page_estatisticas():
                     categories=[DAY_NAME_PT[item] for item in DAY_ORDER_EN],
                     ordered=True,
                 )
-                heat_pivot = heat_df.groupby(['DiaSemana', 'Hora']).size().reset_index(name='Acessos')
+                heat_pivot = heat_df.groupby(['DiaSemana', 'Hora'], observed=True).size().reset_index(name='Acessos')
                 heat_pivot = heat_pivot.pivot_table(index='DiaSemana', columns='Hora', values='Acessos', fill_value=0, observed=False)
 
                 fig = go.Figure(data=go.Heatmap(
@@ -437,7 +437,7 @@ def page_estatisticas():
                     xaxis=dict(tickfont=dict(color=COLORS['text_muted'])),
                     yaxis=dict(tickfont=dict(color=COLORS['text_muted'])),
                 )
-                st.plotly_chart(fig, width='stretch', key='stats_heatmap')
+                st.plotly_chart(fig, use_container_width=True, key='stats_heatmap')
             else:
                 st.info('Sem datas validas para gerar o mapa de calor.')
 
@@ -445,7 +445,7 @@ def page_estatisticas():
     anomalies = detect_anomalies(df)
     if anomalies:
         st.warning(f'**{len(anomalies)}** IPs com localizacao incomum detectados.')
-        st.dataframe(pd.DataFrame(anomalies), width='stretch', hide_index=True)
+        st.dataframe(pd.DataFrame(anomalies), use_container_width=True, hide_index=True)
     else:
         st.success('Nenhuma anomalia detectada no conjunto atual.')
 
@@ -458,4 +458,4 @@ def page_estatisticas():
             Regioes=('Ip_Regiao', lambda values: ', '.join(values.dropna().astype(str).unique()[:3])),
         ).sort_values('Total', ascending=False).reset_index()
         provider_table.columns = ['Provedor', 'Total', 'Unicos', 'Cidades', 'Regioes']
-        st.dataframe(provider_table, width='stretch', height=380, hide_index=True)
+        st.dataframe(provider_table, use_container_width=True, height=380, hide_index=True)

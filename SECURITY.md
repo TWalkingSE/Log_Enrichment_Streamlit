@@ -44,6 +44,25 @@ Ou, com o script do repositório:
 python scripts/gen_auth_password_hash.py
 ```
 
+
+## Controles de segurança implementados
+
+| Controle | Detalhe |
+|----------|---------|
+| CSV injection | `sanitize_dataframe_for_csv` em exports e pipeline |
+| XSS | `html.escape` em popups de mapa e sparklines |
+| Path sandbox | `safe_output_path` — saídas sob `output/` |
+| Audit trail | cadeia `prev_hash` + verificação de integridade |
+| Audit HMAC | `AUDIT_HMAC_SECRET` → campo `event_hmac` opcional |
+| Cache assinado | `CACHE_HMAC_SECRET` / `SIGN_IP_CACHE` (envelope HMAC) |
+| Air-gapped | `AIR_GAPPED` — sem HTTP externo à IP-API |
+| Auth | Argon2/bcrypt em `AUTH_PASSWORD_HASH` (ver acima) |
+| Logs | `RotatingFileHandler` (5MB × 7) em `logs/` |
+| Retenção | `RETENTION_*` + `scripts/retention_cleanup.py` |
+
+Deploy seguro (HTTPS, proxy, checklist): [`docs/DEPLOY.md`](docs/DEPLOY.md).  
+Relatório de auditoria: [`docs/AUDITORIA_TECNICA.md`](docs/AUDITORIA_TECNICA.md).
+
 ## Scope Notes
 
 Este projeto processa dados potencialmente sensíveis. Ao reportar problemas:
