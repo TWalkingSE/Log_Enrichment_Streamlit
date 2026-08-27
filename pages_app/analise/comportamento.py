@@ -4,7 +4,6 @@ VPN/Proxy, Confiança IP, Números Descartáveis.
 """
 
 import streamlit as st
-import pandas as pd
 
 from analysis import (
     detect_vpn_heuristics, compute_ip_confidence,

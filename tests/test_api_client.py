@@ -1,6 +1,7 @@
 """Unit tests for api_client helpers and IPAPIClient (no real HTTP)."""
 
 import json
+import os
 import tempfile
 import time
 import unittest
@@ -145,3 +146,66 @@ class TestIPAPIClientConsultar(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result['Ip_Cidade'], 'Sao Paulo')
             self.assertEqual(client.cache_misses, 1)
             self.assertIn('1.1.1.1', client.cache)
+
+
+class TestCacheDurability(unittest.TestCase):
+    """Garantias do cache de enriquecimento: idade, atomicidade e concorrência."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.cache_file = os.path.join(self.dir, 'ip_cache.json')
+        self.now = time.time()
+
+    def _write(self, payload):
+        with open(self.cache_file, 'w', encoding='utf-8') as f:
+            json.dump(payload, f)
+
+    def test_unknown_age_entries_expire(self):
+        """Entradas de idade desconhecida não podem sobreviver.
+
+        Regressão: `_cached_at: 0` explícito passava pelo ramo `ts == 0` sem ser
+        recarimbado, tornando a entrada imortal — geolocalização de vintage
+        indeterminado servida indefinidamente num laudo.
+        """
+        self._write({
+            'zero': {'Ip_Dono': 'A', '_cached_at': 0},
+            'ausente': {'Ip_Dono': 'B'},
+            'antiga': {'Ip_Dono': 'C', '_cached_at': self.now - 99e6},
+            'valida': {'Ip_Dono': 'D', '_cached_at': self.now},
+        })
+        client = IPAPIClient(cache_file=self.cache_file)
+        self.assertEqual(set(client.cache), {'valida'})
+
+    def test_failed_write_preserves_existing_cache(self):
+        """Uma escrita que falha no meio não pode destruir o cache anterior.
+
+        O padrão antigo truncava o arquivo antes de serializar; o carregamento
+        seguinte começava do zero e descartava milhares de IPs enriquecidos.
+        """
+        self._write({'bom': {'Ip_Dono': 'PRESERVAR', '_cached_at': self.now}})
+        client = IPAPIClient(cache_file=self.cache_file)
+        client.cache['ruim'] = {'Ip_Dono': object(), '_cached_at': self.now}
+        client.salvar_cache()  # falha na serialização, sem propagar
+
+        with open(self.cache_file, encoding='utf-8') as f:
+            survived = json.load(f)
+        self.assertIn('bom', survived)
+        self.assertFalse([n for n in os.listdir(self.dir) if n.startswith('.tmp_cache_')])
+
+    def test_concurrent_saves_are_additive(self):
+        """Dois runs concorrentes devem somar entradas, não sobrescrever.
+
+        Cada execução cria seu próprio IPAPIClient com um snapshot privado; sem
+        fusão com o disco, o último a salvar apagava o trabalho do outro.
+        """
+        self._write({})
+        run_a = IPAPIClient(cache_file=self.cache_file)
+        run_b = IPAPIClient(cache_file=self.cache_file)
+        run_a.cache['10.0.0.1'] = {'Ip_Dono': 'runA', '_cached_at': self.now}
+        run_b.cache['10.0.0.2'] = {'Ip_Dono': 'runB', '_cached_at': self.now}
+        run_a.salvar_cache()
+        run_b.salvar_cache()
+
+        with open(self.cache_file, encoding='utf-8') as f:
+            final = json.load(f)
+        self.assertEqual(set(final), {'10.0.0.1', '10.0.0.2'})

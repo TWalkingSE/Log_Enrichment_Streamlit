@@ -214,6 +214,18 @@ A ferramenta aceita múltiplas fontes de dados:
 
 **Formatos de log detectados automaticamente:** Genérico, Meta Platforms, WhatsApp, Google, Preservation Google, Discord (PDF), TikTok (PDF), HTML WhatsApp, HTML Meta Platforms, HTML Google.
 
+#### Confira o total de IPs contra o documento original
+
+Nos `records.html` da Meta e do WhatsApp, um campo pode ser **partido pela virada de
+página**: o rótulo `IP Address` (ou `Time`) fica no fim de uma página e o valor
+aparece só na página seguinte, depois da tarja azul ou verde. A ferramenta remenda
+essa quebra e lê o registro inteiro.
+
+Vale, mesmo assim, conferir a contagem: o número de registros importados deve bater
+com o de IPs do documento. Se não bater, o log da aplicação (`logs/`) registra o
+motivo de cada descarte — IP inválido ou par IP/horário incompleto. Num laudo, um
+total que não confere com a fonte é problema de conteúdo, não de conferência.
+
 ---
 
 ### 📊 2. Resultados e Estatísticas
@@ -361,12 +373,35 @@ Módulo especializado para investigação policial:
 | Formato | Uso |
 |---------|-----|
 | **CSV** | Formato principal de saída (reputação colorida na interface) |
+| **Excel (colorido)** | Planilha com cada linha pintada pela reputação do IP |
 | **JSON** | Integração com sistemas |
 | **PDF** | Relatório profissional com gráficos |
 | **KML** | Visualização no Google Earth |
 | **KML Animado** | Rota temporal animada no Google Earth Pro |
 | **GeoJSON** | Integração com GIS |
-| **ZIP** | Download completo (CSV + JSON + PDF) |
+| **ZIP** | Download completo (CSV + JSON + Excel + PDF + IOC/STIX) |
+
+#### Por que existe o botão "Preparar"
+
+Em bases grandes, gerar um arquivo de download leva tempo e memória. Se isso
+acontecesse a cada clique na página, a sessão cairia. Por isso, acima de 50 mil
+linhas, os downloads passam a ter dois passos: **Preparar** gera o arquivo (com barra
+de progresso), e só então aparece o botão de download. Passe o cursor sobre o botão
+Preparar: ele informa quantas linhas serão exportadas e uma estimativa de tempo.
+
+#### O Excel colorido em bases grandes
+
+- **Não há limite de linhas por parte da ferramenta.** O limite é do próprio formato
+  Excel, que aceita no máximo **1.048.576 linhas por planilha**.
+- Se o resultado passar disso, ele **continua em outras abas** — `Resultado`,
+  `Resultado (2)`, `Resultado (3)`… Ao abrir a planilha, confira as abas na parte de
+  baixo: **a primeira aba não é o resultado inteiro**. A interface informa o total de
+  linhas gravadas e em quantas abas logo abaixo do botão de download.
+- Uma base de 200 mil linhas leva cerca de **dois minutos** para gerar. É normal.
+- **O CSV é sempre gerado**, mesmo que o Excel falhe. Se algo der errado com a
+  planilha, o processamento não é perdido: o CSV fica salvo e o motivo da falha é
+  exibido. Para conferência e para carregar em outra ferramenta, use o CSV; o Excel
+  colorido é para leitura visual.
 
 ---
 

@@ -8,7 +8,7 @@ import re
 import logging
 import pandas as pd
 from datetime import datetime
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString
 from data_processor import (
     TZ_LABEL, convert_utc_to_local, format_iso_date, get_periodo,
     COLUNAS_MODELO
@@ -16,6 +16,97 @@ from data_processor import (
 from api_client import is_valid_ip
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# LEITURA DE SEÇÕES COM QUEBRA DE PÁGINA
+# ============================================================
+
+def _campos_da_secao(secao):
+    """Campos (rótulo, valor) da seção, com as quebras de página remendadas.
+
+    Meta e WhatsApp partem um campo ao meio na virada de página: o rótulo fica
+    no fim de uma página com o valor **vazio**, e o valor reaparece na página
+    seguinte num bloco **sem rótulo**, embrulhado num invólucro novo:
+
+        <div class="t i">IP Address<div class="m"><div></div></div></div>
+        <div class="pageBreak">Business Record Page 4</div>
+        <div class="t i"><div class="m"><div>            <- invólucro
+          <div class="t i"><div class="m"><div>203.0.113.7:12538</div></div></div>
+
+    Lido ingenuamente, o rótulo órfão fica com valor vazio, o valor órfão é
+    descartado por não ter rótulo conhecido, e o registro inteiro some do
+    artefato. Numa ferramenta pericial isso é perda de prova, não defeito
+    cosmético — daí o remendo aqui, no ponto onde a estrutura ainda existe.
+    """
+    brutos = []
+    for div in secao.find_all('div', class_='t i'):
+        # Blocos que contêm outros blocos são invólucros — inclusive o que a
+        # Meta abre logo depois de cada quebra. O texto deles é a concatenação
+        # de tudo que vem dentro e não corresponde a campo nenhum.
+        if div.find('div', class_='t i'):
+            continue
+        rotulo = ''
+        if div.contents and isinstance(div.contents[0], NavigableString):
+            rotulo = str(div.contents[0]).strip()
+        m_div = div.find('div', class_='m')
+        valor = m_div.get_text(strip=True) if m_div else ''
+        brutos.append((rotulo, valor))
+
+    campos = []
+    aguardando = None   # índice do campo cujo valor ficou na página seguinte
+    orfaos = 0
+    for rotulo, valor in brutos:
+        if rotulo:
+            campos.append([rotulo, valor])
+            # Só um rótulo sem valor pode reclamar a continuação da página
+            # seguinte; qualquer rótulo novo cancela a espera.
+            aguardando = None if valor else len(campos) - 1
+        elif valor:
+            if aguardando is None:
+                orfaos += 1
+                continue
+            campos[aguardando][1] = valor
+            aguardando = None
+
+    if orfaos:
+        logger.warning(
+            "%d valor(es) sem rótulo correspondente na seção — possível quebra "
+            "de página em formato não previsto", orfaos)
+    return [(rotulo, valor) for rotulo, valor in campos]
+
+
+def _pares_ip_tempo(secao, plataforma=''):
+    """Pares (timestamp, ip_bruto) da seção de IPs.
+
+    O par fecha quando os dois lados chegam, em qualquer ordem: a Meta emite
+    `IP Address` -> `Time` e o WhatsApp emite `Time` -> `IP Address`.
+    """
+    pares = []
+    ip = tempo = None
+    incompletos = 0
+
+    for rotulo, valor in _campos_da_secao(secao):
+        if rotulo.startswith('IP Address'):
+            if ip is not None:
+                incompletos += 1
+            ip = valor
+        elif rotulo.startswith('Time'):
+            if tempo is not None:
+                incompletos += 1
+            tempo = valor
+        else:
+            continue
+        if ip is not None and tempo is not None:
+            pares.append((tempo, ip))
+            ip = tempo = None
+
+    if ip is not None or tempo is not None:
+        incompletos += 1
+    if incompletos:
+        logger.warning("%s: %d registro(s) de IP sem par IP/Time completo",
+                       plataforma or 'HTML', incompletos)
+    return pares
 
 
 # ============================================================
@@ -57,26 +148,38 @@ def parse_whatsapp_html(html_content, alvo='desconhecido', update_callback=None)
         return pd.DataFrame(columns=COLUNAS_MODELO)
 
     pairs = []
-    current_time = None
-
-    for div in ips_section.find_all('div', class_='t i'):
-        if not div.contents:
+    invalidos = 0
+    com_porta = False
+    for ts_str, ip_raw in _pares_ip_tempo(ips_section, 'WhatsApp'):
+        # Hoje o WhatsApp entrega o IP sozinho, mas a Meta já entrega
+        # `IP:porta` e a tendência é o WhatsApp seguir. Separar antes de
+        # validar deixa o parser pronto sem mudar nada enquanto a porta não
+        # vier: `_split_ip_port` devolve porta vazia num IP puro. Validar o
+        # valor bruto, ao contrário, reprovaria `203.0.113.7:12538` e
+        # descartaria o registro inteiro no dia da virada — justamente a porta
+        # que identifica o assinante atrás de CGNAT.
+        ip, porta = _split_ip_port(ip_raw)
+        if not ip or not is_valid_ip(ip):
+            # Descartar em silêncio é como a quebra de página passou
+            # despercebida: o total do artefato não batia com o do documento.
+            invalidos += 1
+            logger.warning("WhatsApp: IP inválido descartado: %r", ip_raw)
             continue
-        text = str(div.contents[0]).strip()
-        m_div = div.find('div', class_='m')
-        value = m_div.get_text(strip=True) if m_div else ''
+        com_porta = com_porta or bool(porta)
+        pairs.append((ts_str, ip_raw))
 
-        if text.startswith('Time'):
-            current_time = value
-        elif text.startswith('IP Address') and current_time:
-            if value and is_valid_ip(value):
-                pairs.append((current_time, value))
-            current_time = None
-
+    if invalidos:
+        logger.warning("WhatsApp: %d registro(s) descartados por IP inválido", invalidos)
+    if com_porta:
+        # Mudança de formato do provedor merece registro: o laudo passa a ter
+        # uma coluna que os anteriores não tinham.
+        logger.info("WhatsApp: registro traz porta lógica — coluna Porta incluída")
     if update_callback:
         update_callback(f"WhatsApp: {len(pairs)} pares Time/IP encontrados")
 
-    return _build_dataframe(pairs, alvo, has_port=False)
+    # A coluna Porta só entra quando o documento de fato traz porta. Incluí-la
+    # sempre acrescentaria uma coluna vazia a todo laudo de WhatsApp de hoje.
+    return _build_dataframe(pairs, alvo, has_port=com_porta)
 
 
 # ============================================================
@@ -87,8 +190,8 @@ def parse_meta_html(html_content, alvo='desconhecido', update_callback=None):
     """
     Extrai IPs e timestamps do HTML do Meta Platforms Business Record.
     Formato: seção #property-ip_addresses com pares IP Address → Time em divs.
-    IPs podem ter porta (Instagram: 187.68.195.77:1135) ou não (Facebook).
-    IPv6 vem entre brackets: [2804:29b8:...]:porta
+    IPs podem ter porta (Instagram: 198.51.100.19:1135) ou não (Facebook).
+    IPv6 vem entre brackets: [2001:db8:...]:porta
     """
     if update_callback:
         update_callback("Parsing HTML da Meta Platforms...")
@@ -100,22 +203,7 @@ def parse_meta_html(html_content, alvo='desconhecido', update_callback=None):
         logger.warning("Seção 'ip_addresses' não encontrada no HTML da Meta")
         return pd.DataFrame(columns=COLUNAS_MODELO)
 
-    pairs = []
-    current_ip_raw = None
-
-    for div in ips_section.find_all('div', class_='t i'):
-        if not div.contents:
-            continue
-        text = str(div.contents[0]).strip()
-        m_div = div.find('div', class_='m')
-        value = m_div.get_text(strip=True) if m_div else ''
-
-        if text.startswith('IP Address'):
-            current_ip_raw = value
-        elif text.startswith('Time') and current_ip_raw:
-            if current_ip_raw:
-                pairs.append((value, current_ip_raw))
-            current_ip_raw = None
+    pairs = _pares_ip_tempo(ips_section, 'Meta')
 
     if update_callback:
         update_callback(f"Meta: {len(pairs)} pares Time/IP encontrados")
@@ -236,9 +324,12 @@ def _build_dataframe(pairs, alvo, has_port=False, tz_suffix='UTC'):
             periodo = '☀️ Diurno'
             iso_date = None
 
-        row = {
-            'Alvo': alvo,
-            'Ip': ip,
+        # Porta logo depois de Ip, na mesma posição em que a Meta a entrega —
+        # o dict preserva a ordem de inserção e ela vira a ordem das colunas.
+        row = {'Alvo': alvo, 'Ip': ip}
+        if has_port:
+            row['Porta'] = porta
+        row.update({
             'Data': data,
             'Data_Fuso': TZ_LABEL,
             'Ip_Dono': None, 'Ip_AS': None,
@@ -247,9 +338,7 @@ def _build_dataframe(pairs, alvo, has_port=False, tz_suffix='UTC'):
             'Ip_Movel': False, 'Ip_Proxy': False, 'Ip_Hospedagem': False,
             'Ip_Lat': None, 'Ip_Lon': None,
             'Periodo': periodo, 'ISO_Date': iso_date,
-        }
-        if has_port:
-            row['Porta'] = porta
+        })
         resultados.append(row)
 
     return pd.DataFrame(resultados)
@@ -258,11 +347,20 @@ def _build_dataframe(pairs, alvo, has_port=False, tz_suffix='UTC'):
 def _build_dataframe_meta(pairs, alvo):
     """Constrói DataFrame para Meta (com separação IP/Porta)."""
     resultados = []
+    invalidos = 0
+    sem_data = 0
     for ts_str, ip_raw in pairs:
         ip, porta = _split_ip_port(ip_raw)
 
         if not ip or not is_valid_ip(ip):
+            # Descartar em silêncio é como a quebra de página passou
+            # despercebida: o total do artefato não batia com o do documento.
+            invalidos += 1
+            logger.warning("Meta: IP inválido descartado: %r", ip_raw)
             continue
+
+        if not ts_str.strip():
+            sem_data += 1
 
         dt = _parse_timestamp(ts_str)
         if dt:
@@ -288,27 +386,38 @@ def _build_dataframe_meta(pairs, alvo):
             'Periodo': periodo, 'ISO_Date': iso_date,
         })
 
+    if invalidos:
+        logger.warning("Meta: %d registro(s) descartados por IP inválido", invalidos)
+    if sem_data:
+        logger.warning("Meta: %d registro(s) sem timestamp — verifique quebras "
+                       "de página no documento de origem", sem_data)
     return pd.DataFrame(resultados)
 
 
 def _split_ip_port(ip_raw):
     """
     Separa IP e porta do formato Meta Platforms.
-    Formatos: '187.68.195.77:1135', '[2804:29b8:...]:63629', '187.68.195.77' (sem porta)
+    Formatos: '198.51.100.19:1135', '[2001:db8:...]:63629', '198.51.100.19' (sem porta)
     """
     ip_raw = ip_raw.strip()
 
-    # IPv6 entre brackets: [2804:...]:porta
+    # IPv6 entre brackets: [2001:db8:...]:porta
     match_v6 = re.match(r'^\[([^\]]+)\]:?(\d+)?$', ip_raw)
     if match_v6:
         ip = match_v6.group(1)
         porta = match_v6.group(2) or ''
         return ip, porta
 
-    # IPv4 com porta: 187.68.195.77:1135
+    # IPv4 com porta: 198.51.100.19:1135
     if re.match(r'^(\d{1,3}\.){3}\d{1,3}:\d+$', ip_raw):
         parts = ip_raw.rsplit(':', 1)
         return parts[0], parts[1]
 
-    # IPv4 sem porta ou IPv6 sem brackets
+    # IPv4 sem porta, ou IPv6 sem brackets.
+    #
+    # Um IPv6 sem brackets é ambíguo por construção: em `2001:db8:7002::1:37229`
+    # não há como saber se o último grupo é porta ou parte do endereço, porque
+    # os dois usam `:`. Meta e WhatsApp colocam brackets sempre que há porta,
+    # então a leitura conservadora é tratar o valor inteiro como endereço.
+    # Chutar uma porta aqui inventaria dado que o documento não afirma.
     return ip_raw, ''

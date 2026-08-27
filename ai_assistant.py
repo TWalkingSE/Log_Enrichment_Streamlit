@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Optional, Tuple, List
 
 from api_client import is_cgnat_ip
+from validators import as_bool, bool_series, parse_data
 
 logger = logging.getLogger(__name__)
 
@@ -360,7 +361,7 @@ def build_user_prompt(
     n_dia_fato = 0
     if 'Data' in df_scored.columns and dt_fato:
         try:
-            dt_series = pd.to_datetime(df_scored['Data'], format='mixed', errors='coerce')
+            dt_series = parse_data(df_scored['Data'])
             fato_date = dt_fato.date() if hasattr(dt_fato, 'date') else dt_fato
             n_dia_fato = (dt_series.dt.date == fato_date).sum()
         except Exception:
@@ -369,7 +370,7 @@ def build_user_prompt(
     # Proxy/CGNAT counts
     n_proxy = 0
     if 'Ip_Proxy' in df_scored.columns:
-        n_proxy = df_scored['Ip_Proxy'].apply(lambda x: str(x).lower() == 'true').sum()
+        n_proxy = bool_series(df_scored, 'Ip_Proxy').sum()
     n_cgnat = 0
     if ip_col in df_scored.columns:
         n_cgnat = df_scored[ip_col].apply(lambda ip: is_cgnat_ip(str(ip))).sum()
@@ -398,7 +399,7 @@ def build_user_prompt(
         prov = str(row.get('Ip_Dono', ''))[:25]
         cidade = str(row.get('Ip_Cidade', ''))
         score = row.get('Score', 0)
-        proxy = 'Sim' if str(row.get('Ip_Proxy', '')).lower() == 'true' else 'Não'
+        proxy = 'Sim' if as_bool(row.get('Ip_Proxy'), field='Ip_Proxy') else 'Não'
         cgnat = 'Sim' if is_cgnat_ip(ip) else 'Não'
         ip_lines += f"| {ip} | {tipo} | {data} | {prov} | {cidade} | {score:.0f} | {proxy} | {cgnat} |\n"
 

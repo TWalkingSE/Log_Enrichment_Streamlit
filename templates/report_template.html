@@ -847,9 +847,21 @@ details.score-detail summary:hover { color: var(--accent); }
       </table>
     </div>
     {% endif %}
+    {% if life_patterns.coord_precision_note %}
+    <p style="font-size:0.8rem;color:var(--text-muted);margin-top:10px;">
+      &#9432; {{ life_patterns.coord_precision_note }}
+    </p>
+    {% endif %}
     {% if life_patterns.routine_deviations %}
     <div style="margin-top:14px;">
-      <h3 style="font-size:0.9rem;color:var(--warning);margin-bottom:6px;">Desvios de Rotina ({{ life_patterns.routine_deviations|length }})</h3>
+      <h3 style="font-size:0.9rem;color:var(--warning);margin-bottom:6px;">Desvios de Rotina
+        ({% if life_patterns.routine_deviations_truncated %}{{ life_patterns.routine_deviations|length }} de {{ life_patterns.routine_deviations_total }} exibidos{% else %}{{ life_patterns.routine_deviations_total or life_patterns.routine_deviations|length }}{% endif %})</h3>
+      {% if life_patterns.routine_deviations_truncated %}
+      <p style="font-size:0.8rem;color:var(--warning);margin-bottom:6px;">
+        &#9888; Lista truncada aos {{ life_patterns.routine_deviations|length }} desvios mais antigos.
+        O total detectado foi de {{ life_patterns.routine_deviations_total }}.
+      </p>
+      {% endif %}
       <div class="tbl-wrap">
         <table>
           <thead><tr><th>Data</th><th>IP</th><th>Cidade</th></tr></thead>

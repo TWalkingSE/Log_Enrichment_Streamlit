@@ -15,6 +15,10 @@ from analysis import (
 from components.visualizations import render_side_by_side_comparison
 from i18n import t
 
+# Teto de alvos mantidos em memória para correlação cruzada.
+# Cada um é uma cópia integral do DataFrame do alvo.
+MAX_STORED_TARGETS = 5
+
 OUTPUT_CSV_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'output', 'csv')
 
 
@@ -47,9 +51,25 @@ def page_correlacao():
                     st.success(f"**{len(corr)}** IPs em comum!")
                     st.dataframe(corr, use_container_width=True, hide_index=True)
         if st.session_state.alvo and df is not None:
-            if st.button(f"💾 Salvar resultado atual para correlação", key="save_target"):
-                st.session_state.stored_targets[st.session_state.alvo] = df.copy()
-                st.success(f"Armazenado ({len(st.session_state.stored_targets)} alvos)")
+            if st.button("💾 Salvar resultado atual para correlação", key="save_target"):
+                stored_now = st.session_state.stored_targets
+                # Cada alvo guarda uma cópia integral do DataFrame. Sem teto,
+                # dez alvos de 200k linhas ficam residentes ao mesmo tempo — e
+                # relatorio.py relê todos de uma vez ao gerar o HTML.
+                evicted = []
+                while len(stored_now) >= MAX_STORED_TARGETS and \
+                        st.session_state.alvo not in stored_now:
+                    evicted.append(next(iter(stored_now)))
+                    stored_now.pop(evicted[-1])
+                stored_now[st.session_state.alvo] = df.copy()
+                if evicted:
+                    # Descartar um alvo em silêncio numa correlação multi-alvo
+                    # falsearia o resultado; o analista precisa saber.
+                    st.warning(
+                        f"Limite de {MAX_STORED_TARGETS} alvos atingido — "
+                        f"removido(s): {', '.join(evicted)}. "
+                        "Salve novamente se precisar deles na correlação.")
+                st.success(f"Armazenado ({len(stored_now)} alvos)")
         if len(st.session_state.stored_targets) >= 2:
             st.divider()
             if st.button("🔍 Correlacionar alvos armazenados", key="corr_stored"):

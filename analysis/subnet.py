@@ -1,12 +1,7 @@
 """analysis.subnet — split from analysis monolith."""
 import pandas as pd
-import numpy as np
-import os
-import json
-import shutil
-import glob
 import logging
-from datetime import datetime
+from validators import parse_data
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +64,7 @@ def analyze_subnet_patterns(df, ipv4_mask=24, ipv6_mask=48, ip_col=None):
         date_range = None
         if dates:
             try:
-                parsed = pd.to_datetime(dates, format='mixed', errors='coerce').dropna()
+                parsed = parse_data(dates).dropna()
                 if len(parsed) > 0:
                     date_range = (parsed.min().strftime('%Y-%m-%d'), parsed.max().strftime('%Y-%m-%d'))
             except Exception:
@@ -152,7 +147,7 @@ def compute_subnet_consistency(df, ipv4_mask=24, ipv6_mask=48, ip_col=None, date
 
     df_work = df.copy()
     if date_col in df_work.columns:
-        df_work['_dt'] = pd.to_datetime(df_work[date_col], format='mixed', errors='coerce')
+        df_work['_dt'] = parse_data(df_work[date_col])
         df_work = df_work.dropna(subset=['_dt']).sort_values('_dt')
 
     subnets_seen = []

@@ -1,16 +1,11 @@
 """analysis.risk — split from analysis monolith."""
 import pandas as pd
 import numpy as np
-import os
-import json
-import shutil
-import glob
 import logging
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 from analysis._config import _vpn_config
-from analysis.infrastructure import classify_infrastructure
+from validators import bool_series, parse_data
 
 def calculate_risk_scores(df, ip_col='Ip'):
     """
@@ -165,8 +160,8 @@ def detect_vpn_heuristics(df, date_col='Data'):
     if 'Ip_Pais' in df_work.columns and 'Ip_Proxy' in df_work.columns:
         # Filter to non-proxy, non-hosting IPs (residential)
         residential = df_work[
-            ~df_work['Ip_Proxy'].apply(lambda x: str(x).lower() == 'true') &
-            ~df_work.get('Ip_Hospedagem', pd.Series(False, index=df_work.index)).apply(lambda x: str(x).lower() == 'true')
+            ~bool_series(df_work, 'Ip_Proxy') &
+            ~bool_series(df_work, 'Ip_Hospedagem')
         ]
         if len(residential) >= 2:
             prev_row = None
@@ -190,7 +185,7 @@ def detect_vpn_heuristics(df, date_col='Data'):
 
     # 4. Provider mix — residential + datacenter from same "user"
     if 'Ip_Hospedagem' in df_work.columns:
-        hosting_count = df_work['Ip_Hospedagem'].apply(lambda x: str(x).lower() == 'true').sum()
+        hosting_count = bool_series(df_work, 'Ip_Hospedagem').sum()
         total = len(df_work)
         if total > 0:
             hosting_pct = hosting_count / total * 100
@@ -255,7 +250,7 @@ def compute_ip_confidence(df, date_col='Data'):
 
         # Temporal consistency
         if date_col in ip_data.columns:
-            dates = pd.to_datetime(ip_data[date_col], format='mixed', errors='coerce').dropna()
+            dates = parse_data(ip_data[date_col]).dropna()
             if len(dates) >= 3:
                 hours = dates.dt.hour
                 hour_std = hours.std()

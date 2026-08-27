@@ -1,16 +1,12 @@
 """analysis.geo — split from analysis monolith."""
 import pandas as pd
 import numpy as np
-import os
-import json
-import shutil
-import glob
 import logging
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 from analysis._config import _analysis_config
 from analysis.movement import detect_base_locations
+from validators import as_bool
 
 def check_geofence(df, center_lat, center_lon, radius_km, lat_col='Ip_Lat', lon_col='Ip_Lon'):
     """
@@ -63,10 +59,32 @@ def check_geofence(df, center_lat, center_lon, radius_km, lat_col='Ip_Lat', lon_
     return inside, outside
 
 
+# Teto de coordenadas distintas enviadas ao DBSCAN. Acima disto as coordenadas
+# são arredondadas (e o arredondamento é reportado no relatório, nunca silencioso).
+MAX_UNIQUE_COORDS = 20000
+# Máximo de desvios de rotina listados; o total real é sempre reportado à parte.
+MAX_DEVIATIONS = 20
+
+
 def detect_life_patterns(df, date_col='Data', lat_col='Ip_Lat', lon_col='Ip_Lon'):
     """
     Detecta padrões de vida usando DBSCAN clustering geoespacial.
     Identifica automaticamente locais frequentados (casa, trabalho, lazer).
+
+    O clustering é feito sobre as coordenadas DISTINTAS, com `sample_weight`
+    igual ao número de registros em cada coordenada. Isso é matematicamente
+    equivalente a clusterizar todos os registros: pontos duplicados estão a
+    distância 0 entre si, portanto sempre dentro da vizinhança-eps um do outro,
+    e o sklearn define núcleo por `soma(sample_weight[vizinhos]) >= min_samples`.
+    Nenhum registro é descartado e `min_samples` não precisa de ajuste.
+
+    A geolocalização por IP produz poucas coordenadas distintas (ordem de
+    dezenas para milhares de IPs), enquanto o DBSCAN tem custo de memória
+    O(n^2): sem esta agregação, um dataset de 200k linhas esgota a memória.
+
+    Efeito colateral positivo: pontos de fronteira entre dois clusters deixam de
+    ser atribuídos conforme a ordem de iteração, removendo uma não-determinação
+    do DBSCAN clássico.
 
     Returns:
         dict com clusters, classificação e desvios de rotina.
@@ -78,17 +96,31 @@ def detect_life_patterns(df, date_col='Data', lat_col='Ip_Lat', lon_col='Ip_Lon'
     result = {
         'clusters': [],
         'routine_deviations': [],
+        'routine_deviations_total': 0,
+        'routine_deviations_truncated': False,
+        'coord_precision_note': '',
         'has_data': False,
     }
 
-    df_lp = df.copy()
-    df_lp[lat_col] = pd.to_numeric(df_lp[lat_col], errors='coerce')
-    df_lp[lon_col] = pd.to_numeric(df_lp[lon_col], errors='coerce')
-    df_lp['_dt'] = pd.to_datetime(df_lp.get(date_col, pd.Series(dtype='object')), errors='coerce')
-    df_lp = df_lp.dropna(subset=[lat_col, lon_col, '_dt'])
-    df_lp = df_lp[(df_lp[lat_col] != 0) | (df_lp[lon_col] != 0)]
+    if df is None or len(df) == 0 or lat_col not in df.columns or lon_col not in df.columns:
+        return result
 
-    if len(df_lp) < min_samples:
+    # Projeção estreita: copiar o DataFrame inteiro custa centenas de MB em
+    # datasets grandes, e só estas colunas são usadas aqui.
+    work = pd.DataFrame({
+        'lat': pd.to_numeric(df[lat_col], errors='coerce').values,
+        'lon': pd.to_numeric(df[lon_col], errors='coerce').values,
+        '_dt': pd.to_datetime(df[date_col], errors='coerce').values
+        if date_col in df.columns else pd.NaT,
+    })
+    for extra in ('Ip', 'Sender IP', 'Ip_Cidade', 'Ip_Dono', 'Ip_Regiao'):
+        if extra in df.columns:
+            work[extra] = df[extra].values
+
+    work = work.dropna(subset=['lat', 'lon', '_dt'])
+    work = work[(work['lat'] != 0) | (work['lon'] != 0)]
+
+    if len(work) < min_samples:
         return result
 
     result['has_data'] = True
@@ -111,19 +143,48 @@ def detect_life_patterns(df, date_col='Data', lat_col='Ip_Lat', lon_col='Ip_Lon'
             })
         return result
 
-    # Convert to radians for DBSCAN with haversine
-    coords = np.radians(df_lp[[lat_col, lon_col]].values)
+    # -- Agrega para coordenadas distintas (sort=True garante determinismo) --
+    uniq = work.groupby(['lat', 'lon'], sort=True).size().reset_index(name='_w')
+    n_unique_original = len(uniq)
+    result['n_rows'] = int(len(work))
+    result['n_unique_coords'] = int(n_unique_original)
+
+    # Segunda barreira: se ainda assim houver coordenadas distintas demais para
+    # o custo O(n^2) do DBSCAN, arredonda -- e informa a precisão ao analista.
+    if n_unique_original > MAX_UNIQUE_COORDS:
+        for decimals, metros in ((4, '~11 m'), (3, '~110 m'), (2, '~1,1 km')):
+            work['lat'] = work['lat'].round(decimals)
+            work['lon'] = work['lon'].round(decimals)
+            uniq = work.groupby(['lat', 'lon'], sort=True).size().reset_index(name='_w')
+            result['coord_precision_note'] = (
+                'Coordenadas arredondadas a {} casas decimais ({}) para viabilizar a '
+                'clusterização de {} coordenadas distintas.'.format(
+                    decimals, metros, '{:,}'.format(n_unique_original).replace(',', '.'))
+            )
+            if len(uniq) <= MAX_UNIQUE_COORDS:
+                break
+        logger.info("detect_life_patterns: %d coordenadas distintas reduzidas para %d",
+                    n_unique_original, len(uniq))
+
+    logger.info("detect_life_patterns: DBSCAN sobre %d coordenadas distintas (%d registros)",
+                len(uniq), len(work))
+
+    coords = np.radians(uniq[['lat', 'lon']].to_numpy())
     eps_rad = eps_km / 6371.0  # Earth radius
 
     clustering = DBSCAN(eps=eps_rad, min_samples=min_samples, metric='haversine')
-    df_lp['_cluster'] = clustering.fit_predict(coords)
+    uniq['_cluster'] = clustering.fit_predict(coords, sample_weight=uniq['_w'].to_numpy())
+
+    # Rótulos de volta às linhas: as estatísticas por cluster devem ser
+    # ponderadas por ocorrência, não por coordenada.
+    work = work.merge(uniq[['lat', 'lon', '_cluster']], on=['lat', 'lon'], how='left')
 
     # Analyze each cluster
-    for cluster_id in sorted(df_lp['_cluster'].unique()):
+    for cluster_id in sorted(work['_cluster'].dropna().unique()):
         if cluster_id == -1:
             continue  # noise
 
-        cluster_data = df_lp[df_lp['_cluster'] == cluster_id]
+        cluster_data = work[work['_cluster'] == cluster_id]
         hours = cluster_data['_dt'].dt.hour
 
         # Classify by time pattern
@@ -157,8 +218,8 @@ def detect_life_patterns(df, date_col='Data', lat_col='Ip_Lat', lon_col='Ip_Lon'
             'id': int(cluster_id),
             'label': cluster_label,
             'type': cluster_type,
-            'lat': float(cluster_data[lat_col].mean()),
-            'lon': float(cluster_data[lon_col].mean()),
+            'lat': float(cluster_data['lat'].mean()),
+            'lon': float(cluster_data['lon'].mean()),
             'city': city,
             'region': cluster_data['Ip_Regiao'].mode().iloc[0] if 'Ip_Regiao' in cluster_data.columns and not cluster_data['Ip_Regiao'].mode().empty else '',
             'count': len(cluster_data),
@@ -172,18 +233,25 @@ def detect_life_patterns(df, date_col='Data', lat_col='Ip_Lat', lon_col='Ip_Lon'
             'last_seen': cluster_data['_dt'].max().strftime('%Y-%m-%d'),
         })
 
-    # Detect routine deviations (noise points = out of pattern)
-    noise = df_lp[df_lp['_cluster'] == -1]
+    # Detect routine deviations (noise points = out of pattern).
+    # O total real é reportado à parte: exibir apenas a lista truncada como se
+    # fosse o total seria uma afirmação incorreta num documento pericial.
+    noise = work[work['_cluster'] == -1]
+    result['routine_deviations_total'] = int(len(noise))
     if len(noise) > 0 and len(result['clusters']) > 0:
-        for _, row in noise.iterrows():
+        head = noise.sort_values('_dt').head(MAX_DEVIATIONS)
+        ip_key = 'Ip' if 'Ip' in head.columns else ('Sender IP' if 'Sender IP' in head.columns else None)
+        for _, row in head.iterrows():
+            ip_val = row[ip_key] if ip_key else ''
+            city_val = row['Ip_Cidade'] if 'Ip_Cidade' in head.columns else ''
             result['routine_deviations'].append({
-                'ip': row.get('Ip', row.get('Sender IP', '')),
+                'ip': '' if pd.isna(ip_val) else str(ip_val),
                 'date': row['_dt'].strftime('%Y-%m-%d %H:%M'),
-                'city': row.get('Ip_Cidade', ''),
-                'lat': float(row[lat_col]),
-                'lon': float(row[lon_col]),
+                'city': '' if pd.isna(city_val) else str(city_val),
+                'lat': float(row['lat']),
+                'lon': float(row['lon']),
             })
-        result['routine_deviations'] = result['routine_deviations'][:20]
+        result['routine_deviations_truncated'] = len(noise) > MAX_DEVIATIONS
 
     return result
 
@@ -247,9 +315,9 @@ def compute_geo_precision(row):
     Calcula indicador de precisão da geolocalização para um IP.
     Retorna dict com precision_level e precision_label.
     """
-    is_mobile = str(row.get('Ip_Movel', '')).lower() == 'true'
-    is_proxy = str(row.get('Ip_Proxy', '')).lower() == 'true'
-    is_hosting = str(row.get('Ip_Hospedagem', '')).lower() == 'true'
+    is_mobile = as_bool(row.get('Ip_Movel'), field='Ip_Movel')
+    is_proxy = as_bool(row.get('Ip_Proxy'), field='Ip_Proxy')
+    is_hosting = as_bool(row.get('Ip_Hospedagem'), field='Ip_Hospedagem')
     ip = str(row.get('Ip', ''))
     is_v6 = ':' in ip
 

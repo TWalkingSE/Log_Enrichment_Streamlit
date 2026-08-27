@@ -5,6 +5,7 @@ Geração de relatório HTML standalone com análises avançadas.
 
 import streamlit as st
 import logging
+import time
 from datetime import datetime
 
 from analysis import (
@@ -33,6 +34,20 @@ def _try(fn, *args, **kwargs):
     except Exception as exc:
         logger.warning(f"Análise {getattr(fn, '__name__', fn)} falhou: {exc}")
         return None
+
+
+def _stage(name, rows, fn, *args, **kwargs):
+    """Executa uma etapa do relatório registrando início, fim e duração.
+
+    A ordem destes registros no log é o que permite localizar em qual análise
+    uma falha ou travamento ocorreu — sem eles, um MemoryError vindo de uma
+    extensão C/C++ não deixa rastro utilizável.
+    """
+    logger.info("relatorio.stage.start %s rows=%d", name, rows)
+    t0 = time.perf_counter()
+    result = fn(*args, **kwargs)
+    logger.info("relatorio.stage.done %s %.1fs", name, time.perf_counter() - t0)
+    return result
 
 
 def page_relatorio():
@@ -97,21 +112,21 @@ def page_relatorio():
         with st.spinner("Gerando relatório HTML interativo com análises..."):
             try:
                 analyses = {}
+                n_rows = len(df)
                 ip_col = 'Sender IP' if 'Sender IP' in df.columns else 'Ip'
-                analyses['risk_scores'] = calculate_risk_scores(df, ip_col=ip_col)
-                analyses['impossible_jumps'] = detect_impossible_jumps(df)
-                analyses['base_locations'] = detect_base_locations(df)
-                analyses['behavioral_profile'] = generate_behavioral_profile(df, alvo=alvo)
-                analyses['vpn_heuristics'] = detect_vpn_heuristics(df)
-                analyses['ip_confidence'] = compute_ip_confidence(df)
-                analyses['life_patterns'] = detect_life_patterns(df)
+                analyses['risk_scores'] = _stage('risk_scores', n_rows, calculate_risk_scores, df, ip_col=ip_col)
+                analyses['impossible_jumps'] = _stage('impossible_jumps', n_rows, detect_impossible_jumps, df)
+                analyses['base_locations'] = _stage('base_locations', n_rows, detect_base_locations, df)
+                analyses['behavioral_profile'] = _stage('behavioral_profile', n_rows, generate_behavioral_profile, df, alvo=alvo)
+                analyses['vpn_heuristics'] = _stage('vpn_heuristics', n_rows, detect_vpn_heuristics, df)
+                analyses['ip_confidence'] = _stage('ip_confidence', n_rows, compute_ip_confidence, df)
+                analyses['life_patterns'] = _stage('life_patterns', n_rows, detect_life_patterns, df)
 
                 # ── Análises adicionais (Fase 1) ──
-                _safe_call = lambda fn, *a, **kw: _try(fn, *a, **kw)
-                analyses['digital_silence'] = _safe_call(detect_digital_silence, df)
-                analyses['subnet_patterns'] = _safe_call(analyze_subnet_patterns, df)
-                analyses['timezone_consistency'] = _safe_call(validate_timezone_consistency, df)
-                analyses['provider_timing'] = _safe_call(analyze_provider_timing, df)
+                analyses['digital_silence'] = _try(detect_digital_silence, df)
+                analyses['subnet_patterns'] = _try(analyze_subnet_patterns, df)
+                analyses['timezone_consistency'] = _try(validate_timezone_consistency, df)
+                analyses['provider_timing'] = _try(analyze_provider_timing, df)
 
                 # Carrega cache para detectar mudanças geográficas históricas
                 cache_path = os.path.join(
@@ -125,7 +140,7 @@ def page_relatorio():
                     except Exception as ce:
                         logger.warning(f'Falha ao ler ip_cache.json: {ce}')
                 if cache_data:
-                    analyses['geo_changes'] = _safe_call(detect_geo_changes, df, cache_data)
+                    analyses['geo_changes'] = _try(detect_geo_changes, df, cache_data)
 
                 # Análises cross-target (somente se houver múltiplos alvos armazenados)
                 stored = st.session_state.get('stored_targets', {}) or {}
@@ -134,8 +149,8 @@ def page_relatorio():
                 if alvo and alvo not in multi_targets:
                     multi_targets[alvo] = df
                 if len(multi_targets) >= 2:
-                    analyses['shared_wifi'] = _safe_call(detect_shared_wifi, multi_targets)
-                    analyses['cross_correlation'] = _safe_call(cross_target_correlation, multi_targets)
+                    analyses['shared_wifi'] = _try(detect_shared_wifi, multi_targets)
+                    analyses['cross_correlation'] = _try(cross_target_correlation, multi_targets)
 
                 receipt = generate_integrity_receipt(
                     input_file=None, output_file=None,
@@ -175,11 +190,11 @@ def page_relatorio():
 
                 html_bytes = generate_html_report(
                     df, alvo, config=config, analyses=analyses,
-                    audit_hash=receipt.get('sha256', ''))
+                    audit_hash=receipt.get('receipt_hash', ''))
 
                 log_audit_event('report_generated', {
                     'alvo': alvo, 'type': 'html_professional',
-                    'records': len(df), 'sha256': receipt.get('sha256', ''),
+                    'records': len(df), 'sha256': receipt.get('receipt_hash', ''),
                 })
 
                 filename = f"relatorio_{alvo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
@@ -194,6 +209,12 @@ def page_relatorio():
 
                 with st.expander("🔒 Recibo de Integridade"):
                     st.json(receipt)
+            except MemoryError:
+                logger.exception("Falha de memória ao gerar relatório HTML (%d registros)", len(df))
+                st.error(
+                    f"Memória insuficiente para gerar o relatório com {len(df):,} registros. "
+                    .replace(',', '.') +
+                    "Filtre o período ou o provedor na página de Resultados e tente novamente.")
             except Exception as e:
-                logger.error(f"Erro ao gerar relatório HTML: {e}")
+                logger.exception("Erro ao gerar relatório HTML")
                 st.error(f"Erro ao gerar relatório HTML: {e}")

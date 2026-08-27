@@ -46,8 +46,7 @@ cache_backups/
 _reversa_sdd/
 .agents/
 
-# Sensitive investigation data (never commit)
-EventsIPData.pdf
-
-# Backup files
+# Artefatos de build/refactor
 *.bak
+.tmp_cache_*.part
+*.parquet.part

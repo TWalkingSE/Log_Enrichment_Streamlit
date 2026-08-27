@@ -10,6 +10,101 @@ from ipaddress import ip_address
 
 logger = logging.getLogger(__name__)
 
+# ============================================================
+# Coerção de tipos vinda de fontes heterogêneas
+# ============================================================
+# Os dados chegam de JSON da API (bool nativo), de CSV (strings '1'/'0' ou
+# 'True'/'False') e de Excel pt-BR ('VERDADEIRO'/'FALSO'). O idioma antigo
+# `str(x).lower() == 'true'` classificava tudo que não fosse literalmente
+# 'true' como False — um proxy vindo de CSV aparecia como residencial no
+# laudo. Estes helpers centralizam a conversão e tornam o caso desconhecido
+# audível no log em vez de silencioso.
+
+_TRUE_TOKENS = {'true', 't', '1', 'yes', 'y', 'sim', 's', 'verdadeiro', 'v'}
+_FALSE_TOKENS = {'false', 'f', '0', 'no', 'n', 'nao', 'não', 'falso'}
+# Ausentes convertidos em texto: devem respeitar o `default`, como o NaN real,
+# em vez de virar False — a diferença importa quando o chamador pede default=True.
+_MISSING_TOKENS = {'', 'nan', 'none', 'null', '<na>', 'nat'}
+_unknown_bool_tokens = set()
+
+DATA_FMT = '%Y-%m-%d %H:%M:%S'
+
+
+def as_bool(value, default: bool = False, *, field: str = '') -> bool:
+    """Converte um valor heterogêneo em bool.
+
+    Tokens não reconhecidos retornam `default` e emitem UM aviso por token —
+    numa ferramenta pericial, uma classificação errada precisa deixar rastro.
+    """
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    try:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if value != value:  # NaN
+                return default
+            return bool(value)
+    except TypeError:
+        pass
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    token = str(value).strip().lower()
+    if token in _MISSING_TOKENS:
+        return default
+    if token in _TRUE_TOKENS:
+        return True
+    if token in _FALSE_TOKENS:
+        return False
+    key = (field, token)
+    if key not in _unknown_bool_tokens:
+        _unknown_bool_tokens.add(key)
+        logger.warning("Valor booleano não reconhecido em %s: %r — assumindo %s",
+                       field or '<campo>', value, default)
+    return default
+
+
+def bool_series(df, col: str, default: bool = False):
+    """Versão vetorizada de `as_bool` para uma coluna de DataFrame.
+
+    Retorna uma Series booleana alinhada ao índice de `df`; colunas ausentes
+    produzem uma Series constante com o valor `default`.
+    """
+    if df is None or col not in getattr(df, 'columns', ()):
+        idx = getattr(df, 'index', None)
+        return pd.Series(default, index=idx, dtype=bool) if idx is not None \
+            else pd.Series([], dtype=bool)
+    s = df[col]
+    if pd.api.types.is_bool_dtype(s):
+        return s.fillna(default).astype(bool)
+    if pd.api.types.is_numeric_dtype(s):
+        return s.fillna(int(default)).astype(bool)
+    return s.map(lambda v: as_bool(v, default, field=col)).astype(bool)
+
+
+def parse_data(series):
+    """Converte a coluna de data usando o formato canônico do pipeline.
+
+    O pipeline grava sempre '%Y-%m-%d %H:%M:%S'. `format='mixed'` cai no
+    parser por elemento do dateutil e é ~50x mais lento — proibitivo em
+    200k linhas. Aqui o caminho rápido cobre o caso normal e o fallback
+    trata apenas os valores divergentes (arquivos importados de fora),
+    registrando quantos foram.
+    """
+    if series is None or len(series) == 0:
+        return pd.to_datetime(pd.Series([], dtype='object'), errors='coerce')
+    out = pd.to_datetime(series, format=DATA_FMT, errors='coerce')
+    missing = out.isna() & series.notna()
+    if missing.any():
+        out.loc[missing] = pd.to_datetime(series[missing], format='mixed', errors='coerce')
+        logger.info("parse_data: %d de %d valores fora do formato canônico",
+                    int(missing.sum()), len(series))
+    return out
+
+
 
 class ValidationResult:
     """Resultado de validação com detalhes por camada."""
@@ -263,31 +358,75 @@ def validate_dataframe(df, mode='standard'):
 
 def sanitize_csv_value(value):
     """
-    Sanitiza valor para exportação CSV, prevenindo CSV injection.
+    Sanitiza valor para exportação CSV/Excel, prevenindo fórmula injetada.
     Prefixos perigosos: =, +, -, @, |, \\t, \\r, \\n
+
+    O caso do `-` é o delicado: `-38.5044` é uma longitude legítima e não pode
+    ganhar aspa, mas `-2+3` é uma fórmula que a planilha avalia — e
+    `-2+3+cmd|' /C calc'!A0` é o bypass clássico da regra ingênua de "traço
+    seguido de dígito é número". O critério aqui é ser um número por inteiro:
+    se `float()` aceita a string toda, é dado; qualquer outra coisa é escapada.
     """
-    if not isinstance(value, str):
+    if not isinstance(value, str) or not value:
         return value
-    if value and value[0] in ('=', '+', '@', '|', '\t', '\r', '\n'):
+    if value[0] in ('=', '+', '@', '|', '\t', '\r', '\n'):
         return f"'{value}"
-    if value and value[0] == '-' and (len(value) == 1 or not value[1].isdigit()):
-        return f"'{value}"
+    if value[0] == '-':
+        try:
+            float(value)
+        except ValueError:
+            return f"'{value}"
     return value
 
 
 def sanitize_dataframe_for_csv(df):
-    """Aplica sanitize_csv_value a todas as colunas object/string de um DataFrame."""
+    """Aplica sanitize_csv_value a todas as colunas object/string de um DataFrame.
+
+    O DataFrame de entrada nunca é modificado. A cópia é **preguiçosa**: só
+    nasce quando alguma célula realmente precisa ser escapada, e copia apenas
+    as colunas afetadas. Num caso real de 202 mil linhas a cópia incondicional
+    custava ~50 MB de pico — pagos duas vezes no pipeline, já que o CSV
+    sanitiza o frame e o export do Excel sanitiza de novo. Com a cópia
+    preguiçosa a segunda passagem, que por idempotência não muda nada, sai de
+    graça.
+    """
     import pandas as pd
 
     if df is None or getattr(df, 'empty', True):
         return df
-    out = df.copy()
-    for col in out.columns:
-        if pd.api.types.is_object_dtype(out[col]) or pd.api.types.is_string_dtype(out[col]):
-            out[col] = out[col].map(
-                lambda v: sanitize_csv_value(v) if isinstance(v, str) else v
-            )
-    return out
+
+    # Pré-filtro vetorizado: só as células realmente perigosas passam pelo
+    # sanitizador Python. Em 200k linhas isso troca N*M chamadas por M regex.
+    # `^-` sem restrição: quem decide se um valor com traço é número ou fórmula
+    # é o `sanitize_csv_value`. Um pré-filtro mais estreito deixaria passar
+    # `-2+3` e faria o caminho vetorizado divergir do por célula.
+    dangerous = r'^[=+@|\t\r\n]|^-'
+
+    out = None
+    for col in df.columns:
+        if not (pd.api.types.is_object_dtype(df[col])
+                or pd.api.types.is_string_dtype(df[col])):
+            continue
+        serie = df[col]
+        mask = serie.astype('string').str.match(dangerous, na=False)
+        if not mask.any():
+            continue
+        suspeitos = serie[mask]
+        escapados = suspeitos.map(
+            lambda v: sanitize_csv_value(v) if isinstance(v, str) else v
+        )
+        # O pré-filtro é deliberadamente largo — `^-` pega toda longitude
+        # negativa em coluna de texto. Só quem de fato mudou justifica a cópia.
+        if escapados.equals(suspeitos):
+            continue
+        if out is None:
+            out = df.copy(deep=False)
+        # Coluna nova e exclusiva: escrever em `serie` alcançaria o frame do
+        # chamador, que compartilha os mesmos blocos com a cópia rasa.
+        limpa = serie.copy()
+        limpa.loc[mask] = escapados
+        out[col] = limpa
+    return df if out is None else out
 
 
 def safe_output_path(user_path, default_name='resultado_logs.csv', base_dir=None):

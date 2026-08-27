@@ -28,6 +28,30 @@ class TestValidators(unittest.TestCase):
         self.assertTrue(sanitize_csv_value('+1+cmd|calc').startswith("'"))
         self.assertTrue(sanitize_csv_value('@SUM(A1:A10)').startswith("'"))
 
+    def test_sanitize_traco_seguido_de_digito(self):
+        """`-2+3` é fórmula, não número negativo.
+
+        A regra antiga liberava qualquer traço seguido de dígito, o que deixava
+        passar o payload DDE clássico: a planilha avalia e o valor exibido
+        deixa de ser o do log.
+        """
+        for payload in ('-2+3', "-2+3+cmd|' /C calc'!A0", '-1+1', '-abc', '-'):
+            with self.subTest(payload=payload):
+                self.assertTrue(sanitize_csv_value(payload).startswith("'"))
+
+    def test_sanitize_preserva_numeros_negativos(self):
+        """Longitude e latitude são negativas neste país inteiro — uma aspa
+        aqui corromperia o dado no artefato entregue."""
+        for numero in ('-1', '-1.5', '-38.5044', '-1e5'):
+            with self.subTest(numero=numero):
+                self.assertEqual(sanitize_csv_value(numero), numero)
+
+    def test_sanitize_e_idempotente(self):
+        """O pipeline sanitiza o frame e o export sanitiza de novo; a segunda
+        passagem não pode acrescentar uma segunda aspa."""
+        uma = sanitize_csv_value('=CMD("calc")')
+        self.assertEqual(sanitize_csv_value(uma), uma)
+
 
 class TestZIPSecurity(unittest.TestCase):
     def test_safe_zip_entry_rejects_traversal(self):
@@ -136,6 +160,57 @@ class TestCsvDataframeSanitize(unittest.TestCase):
         self.assertTrue(str(out.loc[0, 'a']).startswith("'"))
         self.assertEqual(out.loc[1, 'a'], 'ok')
         self.assertTrue(str(out.loc[2, 'a']).startswith("'"))
+
+
+class TestCsvSanitizeNaoMutaEntrada(unittest.TestCase):
+    """A cópia é preguiçosa; o frame do chamador precisa sair intacto."""
+
+    def _df(self):
+        return pd.DataFrame({
+            'texto': ['=CMD()', 'ok', '-2+3', None],
+            'lon': ['-38.5044', '-1.5', '-1', '-0.5'],
+            'num': [1, 2, 3, 4],
+        })
+
+    def test_frame_de_entrada_nao_e_modificado(self):
+        from validators import sanitize_dataframe_for_csv
+
+        df = self._df()
+        antes = {c: df[c].tolist() for c in df.columns}
+        out = sanitize_dataframe_for_csv(df)
+
+        self.assertTrue(str(out.loc[0, 'texto']).startswith("'"))
+        self.assertTrue(str(out.loc[2, 'texto']).startswith("'"))
+        for col, valores in antes.items():
+            with self.subTest(coluna=col):
+                self.assertEqual(df[col].tolist(), valores)
+
+    def test_sem_nada_perigoso_nao_copia(self):
+        """Uma cópia incondicional custava ~50 MB de pico em 202 mil linhas."""
+        from validators import sanitize_dataframe_for_csv
+
+        limpo = pd.DataFrame({'a': ['x', 'y'], 'b': [1, 2]})
+        self.assertIs(sanitize_dataframe_for_csv(limpo), limpo)
+
+    def test_numero_negativo_nao_dispara_copia(self):
+        """`^-` no pré-filtro pega toda longitude; só mudança real copia."""
+        from validators import sanitize_dataframe_for_csv
+
+        so_negativos = pd.DataFrame({'lon': ['-38.5044', '-1.5', '-1']})
+        self.assertIs(sanitize_dataframe_for_csv(so_negativos), so_negativos)
+
+    def test_segunda_passagem_e_gratuita(self):
+        """O pipeline sanitiza para o CSV e o export do Excel sanitiza de novo."""
+        from validators import sanitize_dataframe_for_csv
+
+        uma = sanitize_dataframe_for_csv(self._df())
+        self.assertIs(sanitize_dataframe_for_csv(uma), uma)
+
+    def test_dtypes_preservados(self):
+        from validators import sanitize_dataframe_for_csv
+
+        df = self._df()
+        self.assertEqual(list(sanitize_dataframe_for_csv(df).dtypes), list(df.dtypes))
 
 
 class TestSafeOutputPath(unittest.TestCase):
@@ -312,23 +387,6 @@ class TestRetention(unittest.TestCase):
             self.assertNotIn('1.1.1.1', data)
 
 
-class TestDomainModel(unittest.TestCase):
-    def test_enriched_ip_roundtrip(self):
-        from domain.ip_models import EnrichedIP
-
-        raw = {
-            'Ip_Dono': 'Org', 'Ip_AS': 'AS1', 'Ip_Cidade': 'SP',
-            'Ip_Regiao': 'SP', 'Ip_Pais': 'BR', 'Ip_Pais_Codigo': 'BR',
-            'Ip_Movel': False, 'Ip_Proxy': True, 'Ip_Hospedagem': False,
-            'Ip_Lat': -23.5, 'Ip_Lon': -46.6, 'status': 'success',
-        }
-        model = EnrichedIP.from_api_dict('1.2.3.4', raw)
-        self.assertEqual(model.ip, '1.2.3.4')
-        self.assertTrue(model.proxy)
-        back = model.to_api_dict()
-        self.assertEqual(back['Ip_Dono'], 'Org')
-
-
 class TestStixIocExport(unittest.TestCase):
     def test_stix_bundle_and_ioc_list(self):
         from export_ioc import build_stix_bundle, export_ioc_list, export_stix_json
@@ -420,3 +478,67 @@ class TestSignedCache(unittest.TestCase):
             ok2, msg2, _ = verify_signed_package(pkg, secret=secret)
             self.assertFalse(ok2)
             self.assertEqual(msg2, 'bad_signature')
+
+
+class TestBooleanCoercion(unittest.TestCase):
+    """Booleanos chegam de JSON (bool), CSV ('1'/'0') e Excel pt-BR
+    ('VERDADEIRO'). Classificar um proxy como residencial por causa do
+    formato de origem é erro de conteúdo num laudo, não cosmético."""
+
+    def test_recognized_tokens(self):
+        from validators import as_bool
+        for valor in (True, 1, '1', 'true', 'TRUE', 'sim', 'VERDADEIRO', 'v', 2.5):
+            self.assertTrue(as_bool(valor), repr(valor))
+        for valor in (False, 0, '0', 'false', 'FALSO', 'nao', 'não', '', None):
+            self.assertFalse(as_bool(valor), repr(valor))
+
+    def test_missing_values_use_default(self):
+        from validators import as_bool
+        for vazio in (float('nan'), None, pd.NA, 'nan', 'none'):
+            self.assertFalse(as_bool(vazio))
+            self.assertTrue(as_bool(vazio, default=True))
+
+    def test_unknown_token_warns_and_defaults(self):
+        """Um token não reconhecido não pode falhar em silêncio."""
+        import validators
+        validators._unknown_bool_tokens.clear()
+        with self.assertLogs('validators', level='WARNING') as log:
+            self.assertFalse(validators.as_bool('talvez', field='Ip_Proxy'))
+        self.assertIn('talvez', ''.join(log.output))
+
+    def test_bool_series_handles_each_dtype(self):
+        from validators import bool_series
+        df = pd.DataFrame({
+            'texto': ['1', '0', 'VERDADEIRO', 'false'],
+            'numerico': [1, 0, 1, 0],
+            'nativo': [True, False, True, False],
+        })
+        esperado = [True, False, True, False]
+        for col in ('texto', 'numerico', 'nativo'):
+            self.assertEqual(bool_series(df, col).tolist(), esperado, col)
+        # coluna ausente vira constante, sem levantar
+        self.assertEqual(bool_series(df, 'inexistente').tolist(), [False] * 4)
+
+    def test_parse_data_falls_back_for_foreign_formats(self):
+        from validators import parse_data
+        out = parse_data(pd.Series(['2025-01-01 10:00:00', '01/02/2025 08:30', 'lixo']))
+        self.assertEqual(out.iloc[0], pd.Timestamp('2025-01-01 10:00:00'))
+        self.assertEqual(out.iloc[1], pd.Timestamp('2025-01-02 08:30:00'))
+        self.assertTrue(pd.isna(out.iloc[2]))
+
+
+class TestCsvSanitizerVectorized(unittest.TestCase):
+    def test_matches_per_cell_implementation(self):
+        """O pré-filtro vetorizado deve produzir exatamente a mesma saída."""
+        from validators import sanitize_csv_value, sanitize_dataframe_for_csv
+        vals = ['=cmd', '+1', '-1', '-abc', '-', '@x', '|y', chr(9) + 'z',
+                chr(10) + 'w', 'normal', '', '1.5', '-1.5', '--x', 'a=b',
+                None, 3, True]
+        df = pd.DataFrame({'a': vals, 'b': vals[::-1]})
+
+        esperado = df.copy()
+        for col in esperado.columns:
+            esperado[col] = esperado[col].map(
+                lambda v: sanitize_csv_value(v) if isinstance(v, str) else v)
+
+        self.assertTrue(esperado.equals(sanitize_dataframe_for_csv(df)))

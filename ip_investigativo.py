@@ -19,14 +19,9 @@ from styles.theme import COLORS
 # ============================================================
 
 def _parse_bool(val):
-    """Converte string 'True'/'False' ou booleano para bool."""
-    if isinstance(val, bool):
-        return val
-    if isinstance(val, str):
-        return val.strip().lower() == 'true'
-    if isinstance(val, (int, float)):
-        return bool(val)
-    return False
+    """Converte valor heterogêneo em bool (delega a validators.as_bool)."""
+    from validators import as_bool
+    return as_bool(val)
 
 
 def _safe_datetime(dt_series):
@@ -61,7 +56,7 @@ def _get_ipv6_prefix64(ip_str):
         if addr.version != 6:
             return None
         # /64 = primeiros 64 bits = primeiros 4 grupos de 16 bits
-        full = addr.exploded  # ex: 2804:0018:10b9:9855:0920:db70:2b33:5c08
+        full = addr.exploded  # ex: 2001:0db8:10b9:9855:0920:db70:2b33:5c08
         parts = full.split(':')
         return ':'.join(parts[:4]) + '::/64'
     except Exception:

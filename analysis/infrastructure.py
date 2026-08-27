@@ -1,15 +1,9 @@
 """analysis.infrastructure — split from analysis monolith."""
-import pandas as pd
-import numpy as np
-import os
-import json
-import shutil
-import glob
 import logging
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 from analysis._config import DATACENTER_VPN_KEYWORDS, CLOUD_KEYWORDS
+from validators import as_bool
 
 def classify_infrastructure(row):
     """
@@ -22,9 +16,9 @@ def classify_infrastructure(row):
         - icon: Emoji icon
         - alert: Whether to show alert
     """
-    is_proxy = str(row.get('Ip_Proxy', False)).lower() == 'true'
-    is_hosting = str(row.get('Ip_Hospedagem', False)).lower() == 'true'
-    is_mobile = str(row.get('Ip_Movel', False)).lower() == 'true'
+    is_proxy = as_bool(row.get('Ip_Proxy'), field='Ip_Proxy')
+    is_hosting = as_bool(row.get('Ip_Hospedagem'), field='Ip_Hospedagem')
+    is_mobile = as_bool(row.get('Ip_Movel'), field='Ip_Movel')
 
     asn = str(row.get('Ip_AS', '')).lower()
     provider = str(row.get('Ip_Dono', '')).lower()
@@ -104,21 +98,80 @@ def format_reputacao(row):
     return f"{classification['icon']} {classification['label']}"
 
 
+# Colunas de que `classify_infrastructure` depende. A classificação é função
+# apenas destas — logo, combinações repetidas produzem o mesmo resultado.
+_CLASSIFY_KEYS = ('Ip_Proxy', 'Ip_Hospedagem', 'Ip_Movel', 'Ip_AS', 'Ip_Dono')
+
+_INFRA_COLUMNS = (
+    ('_infra_category', 'category'),
+    ('_infra_label', 'label'),
+    ('_infra_color', 'circle_color'),
+    ('_infra_icon', 'icon'),
+    ('_infra_alert', 'alert'),
+)
+
+
 def classify_dataframe(df):
     """
     Add infrastructure classification columns to a DataFrame.
     Adds: _infra_category, _infra_label, _infra_color, _infra_icon, _infra_alert
+
+    Classifica apenas as combinações DISTINTAS das colunas de que a
+    classificação depende e mapeia o resultado de volta. A versão anterior
+    fazia seis passadas Python sobre o frame inteiro (um `apply(axis=1)`
+    produzindo um dict por linha, mais cinco `.apply` sobre essa Series) —
+    em 200k linhas isso rodava por inteiro a cada rerun da página do mapa.
     """
     if df.empty:
         return df
 
-    classifications = df.apply(classify_infrastructure, axis=1)
+    presentes = [c for c in _CLASSIFY_KEYS if c in df.columns]
     df = df.copy()
-    df['_infra_category'] = classifications.apply(lambda x: x['category'])
-    df['_infra_label'] = classifications.apply(lambda x: x['label'])
-    df['_infra_color'] = classifications.apply(lambda x: x['circle_color'])
-    df['_infra_icon'] = classifications.apply(lambda x: x['icon'])
-    df['_infra_alert'] = classifications.apply(lambda x: x['alert'])
+
+    if not presentes:
+        # Sem nenhuma coluna de entrada, todas as linhas caem no mesmo caso.
+        unica = classify_infrastructure({})
+        for coluna, campo in _INFRA_COLUMNS:
+            df[coluna] = unica[campo]
+        return df
+
+    chaves = df[presentes]
+    rotulos = {
+        valores: classify_infrastructure(dict(zip(presentes, valores)))
+        for valores in chaves.drop_duplicates().itertuples(index=False, name=None)
+    }
+    linhas = list(chaves.itertuples(index=False, name=None))
+    for coluna, campo in _INFRA_COLUMNS:
+        df[coluna] = [rotulos[v][campo] for v in linhas]
     return df
 
 
+def add_reputacao_column(df):
+    """Adiciona a coluna 'Reputação' a partir da classificação de infraestrutura.
+
+    Implementação única compartilhada pelos dois pipelines (logs de acesso e
+    interceptação), que antes tinham cópias separadas e idênticas.
+
+    Classifica apenas as combinações distintas das colunas de entrada: o
+    `apply(format_reputacao, axis=1)` anterior fazia uma chamada Python por
+    linha, e um caso real tem ~200k linhas para algumas dezenas de combinações.
+    """
+    required = ['Ip_Proxy', 'Ip_Hospedagem', 'Ip_Movel']
+    if df is None or not all(c in df.columns for c in required):
+        return df
+    if 'Reputação' in df.columns:
+        return df
+    if df.empty:
+        df = df.copy()
+        df['Reputação'] = []
+        return df
+
+    presentes = [c for c in _CLASSIFY_KEYS if c in df.columns]
+    chaves = df[presentes]
+    rotulos = {
+        valores: format_reputacao(dict(zip(presentes, valores)))
+        for valores in chaves.drop_duplicates().itertuples(index=False, name=None)
+    }
+    df = df.copy()
+    df['Reputação'] = [rotulos[v] for v in chaves.itertuples(index=False, name=None)]
+    return df

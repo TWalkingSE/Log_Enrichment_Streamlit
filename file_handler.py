@@ -11,10 +11,26 @@ from data_processor import (COLUNAS_MODELO, COLUNAS_EXPORT, COLUNAS_EXPORT_META,
                           extrair_ips_do_formato_preservation_google,
                           TZ_LABEL, get_periodo, format_iso_date)
 from api_client import is_valid_ip
-from analysis import format_reputacao
+
+# Limite do próprio formato XLSX: 1.048.576 linhas por planilha, menos o
+# cabeçalho. Acima disso o resultado continua em abas adicionais.
+XLSX_SHEET_ROWS = 1_048_575
+# Teto de abas de continuação (~10,4 milhões de linhas). Acima disso o tempo de
+# geração — cerca de um minuto por 100 mil linhas — deixa de fazer sentido e o
+# CSV é o artefato apropriado.
+XLSX_MAX_SHEETS = 10
 
 # Configurar logger para este módulo
 logger = logging.getLogger(__name__)
+
+
+def _fmt_int(n):
+    """Formata inteiro no padrão pt-BR: 202128 -> '202.128'."""
+    try:
+        return '{:,}'.format(int(n)).replace(',', '.')
+    except (TypeError, ValueError):
+        return str(n)
+
 
 def carregar_arquivo_log(input_file, update_callback=None, alvo='desconhecido'):
     """Carrega um arquivo de log e extrai os IPs com seus dados temporais"""
@@ -439,8 +455,8 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
                 return pd.DataFrame(columns=COLUNAS_EXPORT_TIKTOK)
             return pd.DataFrame(columns=COLUNAS_EXPORT_META if is_meta else COLUNAS_EXPORT)
 
-        # Enriquecimento via application layer (use-case facade)
-        from application.enrich_use_case import enrich_ip_list
+        # Enriquecimento via serviço compartilhado (mesmo caminho de interception_parser)
+        from enrich_service import enrich_ips
 
         def _on_batch_progress(processed, total):
             if progress_callback:
@@ -449,7 +465,7 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
         if update_callback:
             update_callback(f"Enviando {total_ips} IPs para o endpoint batch...")
 
-        resultados_ips, _client = await enrich_ip_list(
+        resultados_ips, _client = await enrich_ips(
             list(ips_unicos),
             cache_file=cache_file,
             api_key=api_key,
@@ -489,14 +505,8 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
             export_cols = [c for c in COLUNAS_EXPORT_META if c in df_final.columns]
         else:
             export_cols = [c for c in COLUNAS_EXPORT if c in df_final.columns]
-        from validators import sanitize_dataframe_for_csv
-        df_export = sanitize_dataframe_for_csv(df_final[export_cols])
-
-        # Salvar como CSV
-        df_export.to_csv(output_file, index=False, sep=';', encoding='utf-8-sig')
-
-        if update_callback:
-            update_callback(f"Processamento finalizado. {len(df_export)} registros salvos em '{output_file}'")
+        salvar_exportacao(df_final, export_cols, output_file,
+                          update_callback, gerar_xlsx=False)
 
         return df_final
 
@@ -517,78 +527,266 @@ def _incremental_dedup_columns(df):
 
 
 def _add_reputacao_column(df):
-    """Adiciona coluna Reputação ao DataFrame baseada na classificação de infraestrutura."""
-    required = ['Ip_Proxy', 'Ip_Hospedagem', 'Ip_Movel']
-    if not all(c in df.columns for c in required):
-        return df
-    if 'Reputação' in df.columns:
-        return df
-    df = df.copy()
-    df['Reputação'] = df.apply(format_reputacao, axis=1)
-    return df
+    """Adiciona coluna Reputação (delega à implementação compartilhada)."""
+    from analysis import add_reputacao_column
+    return add_reputacao_column(df)
 
 
-def export_xlsx_colored(df, output):
-    """Exporta DataFrame para Excel com cores na coluna Reputação.
+def salvar_exportacao(df, export_cols, output_file, update_callback=None,
+                      gerar_xlsx=True):
+    """Sanitiza, grava o CSV e (quando viável) o Excel colorido.
+
+    Tail comum aos pipelines de log de acesso e de interceptação, que antes
+    tinham cópias separadas.
+
+    O CSV é o artefato primário: se o Excel não puder ser gerado, o
+    processamento continua e o motivo é reportado. Abortar uma execução de
+    horas por causa de um formato de conveniência seria pior.
+
+    Returns:
+        (df_export, xlsx_path or None)
+    """
+    from validators import sanitize_dataframe_for_csv
+
+    cols = [c for c in export_cols if c in df.columns]
+    df_export = sanitize_dataframe_for_csv(df[cols])
+    df_export.to_csv(output_file, index=False, sep=';', encoding='utf-8-sig')
+
+    xlsx_path = None
+    if gerar_xlsx:
+        candidato = os.path.splitext(output_file)[0] + '.xlsx'
+        progresso = None
+        if update_callback:
+            def progresso(feitas, total):
+                update_callback("Excel colorido: %s de %s linhas..."
+                                % (_fmt_int(feitas), _fmt_int(total)))
+        try:
+            export_xlsx_colored(df_export, candidato, progress_callback=progresso)
+            xlsx_path = candidato
+        except ValueError as exc:
+            logger.warning("Excel colorido não gerado: %s", exc)
+            if update_callback:
+                update_callback(f"Excel não gerado ({exc}) — CSV salvo normalmente.")
+        except Exception as exc:
+            logger.exception("Falha ao gerar Excel colorido")
+            if update_callback:
+                update_callback(f"Excel não gerado ({exc}) — CSV salvo normalmente.")
+
+    if update_callback:
+        destino = f"{output_file} e .xlsx" if xlsx_path else output_file
+        update_callback(f"Processamento finalizado. "
+                        f"{len(df_export)} registros salvos em '{destino}'")
+    return df_export, xlsx_path
+
+
+# Mapa de cores por label de reputação. Em nível de módulo porque o teste de
+# fidelidade visual e a legenda da interface se apoiam nesses valores.
+XLSX_COLOR_MAP = {
+    'Proxy / VPN / Tor': 'FECACA',   # vermelho claro
+    'Datacenter / VPN':  'FEE2E2',   # vermelho mais claro
+    'Cloud Pública':     'FEF3C7',   # amarelo claro
+    'Hospedagem':        'FFEDD5',   # laranja claro
+    'Rede Móvel':        'DBEAFE',   # azul claro
+    'Residencial':       'DCFCE7',   # verde claro
+}
+
+
+def _larguras_colunas(df, columns):
+    """Largura de cada coluna, estimada por uma amostra do topo."""
+    larguras = []
+    for col_name in columns:
+        max_len = len(str(col_name))
+        for val in df[col_name].head(100):
+            if val is not None:
+                max_len = max(max_len, len(str(val)))
+        larguras.append(min(max_len + 2, 50))
+    return larguras
+
+
+def _nova_aba(wb, titulo, columns, larguras, estilo_cabecalho):
+    """Cria uma aba com larguras e cabeçalho estilizado.
+
+    No modo write_only não existe `ws.cell()`: o cabeçalho precisa ser uma
+    lista de `WriteOnlyCell` já estilizada, escrita como primeira linha.
+    """
+    from openpyxl.cell import WriteOnlyCell
+    from openpyxl.utils import get_column_letter
+
+    ws = wb.create_sheet(titulo)
+    for col_idx, largura in enumerate(larguras, 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = largura
+
+    font, fill, align = estilo_cabecalho
+    cabecalho = []
+    for col_name in columns:
+        cell = WriteOnlyCell(ws, value=col_name)
+        cell.font = font
+        cell.fill = fill
+        cell.alignment = align
+        cabecalho.append(cell)
+    ws.append(cabecalho)
+    return ws
+
+
+def export_xlsx_colored(df, output, *, sheet_row_limit=XLSX_SHEET_ROWS,
+                        progress_callback=None):
+    """Exporta o DataFrame para Excel com cores na coluna Reputação.
+
+    Usa o modo `write_only` do openpyxl: cada linha é serializada para o XML no
+    momento do `append` e as células são descartadas em seguida, então o
+    consumo de memória não cresce com o número de linhas. O `Workbook` comum
+    mantém um objeto `Cell` vivo por célula — 622 MB de heap só para 100 mil
+    linhas x 15 colunas, medido — e era isso que impunha um teto de 100 mil.
+
+    Acima de `sheet_row_limit` o resultado continua em abas adicionais
+    (`Resultado (2)`, `Resultado (3)`, ...), porque o limite é do formato XLSX,
+    não da implementação. Nada é omitido em silêncio: o retorno informa quantas
+    linhas foram gravadas e em quantas abas, para o chamador declarar isso.
+
+    O DataFrame é sanitizado aqui dentro contra fórmula injetada — o chamador
+    não precisa (e não deve precisar) lembrar disso. O frame recebido não é
+    modificado.
 
     Args:
         df: DataFrame a exportar.
         output: Caminho do arquivo ou buffer BytesIO.
+        sheet_row_limit: Linhas de dados por aba. Só é reduzido em teste, para
+            exercitar a divisão sem gerar um milhão de linhas.
+        progress_callback: Chamado como `(feitas, total)` a cada 10 mil linhas.
+            Este módulo não importa `streamlit`; renderizar o progresso é
+            responsabilidade da página.
+
+    Returns:
+        dict: {'linhas': int, 'abas': int}
+
+    Raises:
+        ValueError: acima de `sheet_row_limit * XLSX_MAX_SHEETS` linhas.
     """
     from openpyxl import Workbook
+    from openpyxl.cell import WriteOnlyCell
     from openpyxl.styles import PatternFill, Font, Alignment
-    from openpyxl.utils import get_column_letter
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Resultado"
+    from validators import sanitize_dataframe_for_csv
 
-    # Escrever cabeçalho
+    total = 0 if df is None else len(df)
+    teto = sheet_row_limit * XLSX_MAX_SHEETS
+    if total > teto:
+        # Antes de sanitizar: não vale copiar um frame de milhões de linhas
+        # só para recusá-lo em seguida.
+        raise ValueError(
+            "Excel colorido suporta no máximo {} linhas em {} abas (recebidas "
+            "{}). Filtre os dados ou use a exportação CSV.".format(
+                _fmt_int(teto), XLSX_MAX_SHEETS, _fmt_int(total)))
+
+    # Sanitização aqui dentro, e não no chamador: uma célula iniciada por
+    # `=`, `+`, `-` ou `@` vira fórmula ao abrir a planilha, exatamente a
+    # injeção que o projeto já bloqueia no CSV. Deixar isso a cargo de quem
+    # chama é como o caminho da interface passou a exportar sem sanitizar
+    # enquanto o do pipeline sanitizava. `sanitize_csv_value` prefixa com `'`,
+    # que não está no conjunto perigoso — reaplicar sobre um frame já
+    # sanitizado é inofensivo.
+    df = sanitize_dataframe_for_csv(df)
+
     columns = list(df.columns)
-    for col_idx, col_name in enumerate(columns, 1):
-        cell = ws.cell(row=1, column=col_idx, value=col_name)
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill(start_color="2F5496", end_color="2F5496", fill_type="solid")
-        cell.alignment = Alignment(horizontal="center")
+    n_cols = len(columns)
+    larguras = _larguras_colunas(df, columns)
+    estilo_cabecalho = (
+        Font(bold=True, color="FFFFFF"),
+        PatternFill(start_color="2F5496", end_color="2F5496", fill_type="solid"),
+        Alignment(horizontal="center"),
+    )
 
-    # Mapa de cores por label de reputação
-    COLOR_MAP = {
-        'Proxy / VPN / Tor': 'FECACA',   # vermelho claro
-        'Datacenter / VPN':  'FEE2E2',   # vermelho mais claro
-        'Cloud Pública':     'FEF3C7',   # amarelo claro
-        'Hospedagem':        'FFEDD5',   # laranja claro
-        'Rede Móvel':        'DBEAFE',   # azul claro
-        'Residencial':       'DCFCE7',   # verde claro
-    }
+    wb = Workbook(write_only=True)
+    ws = _nova_aba(wb, "Resultado", columns, larguras, estilo_cabecalho)
+    abas = 1
 
-    rep_col_idx = None
+    # Um PatternFill por cor, não por linha: o laço antigo alocava um objeto
+    # novo a cada linha colorida (centenas de milhares em datasets grandes).
+    FILLS = {label: PatternFill(start_color=color, end_color=color, fill_type="solid")
+             for label, color in XLSX_COLOR_MAP.items()}
+
+    # Resolve a cor de cada linha de uma vez, vetorizado por valor distinto.
+    row_fills = None
     if 'Reputação' in columns:
-        rep_col_idx = columns.index('Reputação')
+        def _fill_for(value):
+            text = str(value)
+            for label in XLSX_COLOR_MAP:
+                if label in text:
+                    return FILLS[label]
+            return None
+        distinct = {v: _fill_for(v) for v in df['Reputação'].unique()}
+        row_fills = [distinct.get(v) for v in df['Reputação']]
 
-    # Escrever dados
-    for row_idx, (_, row) in enumerate(df.iterrows(), 2):
-        fill = None
-        if rep_col_idx is not None:
-            rep_value = str(row.iloc[rep_col_idx])
-            for label, color in COLOR_MAP.items():
-                if label in rep_value:
-                    fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
-                    break
+    # Buffers de células reutilizáveis, um por cor (seis no máximo). O `append`
+    # serializa a linha de forma síncrona, então dá para reaproveitar os mesmos
+    # objetos — o que evita alocar milhões de WriteOnlyCell num caso real.
+    buffers = {}
 
-        for col_idx, value in enumerate(row, 1):
-            cell = ws.cell(row=row_idx, column=col_idx, value=value)
-            if fill:
+    def _buffer(aba, fill):
+        chave = (id(aba), id(fill))
+        buf = buffers.get(chave)
+        if buf is None:
+            buf = [WriteOnlyCell(aba) for _ in range(n_cols)]
+            for cell in buf:
                 cell.fill = fill
+            buffers[chave] = buf
+        return buf
 
-    # Ajustar largura das colunas
-    for col_idx, col_name in enumerate(columns, 1):
-        max_len = len(str(col_name))
-        for row_idx in range(2, min(len(df) + 2, 102)):  # amostra de até 100 linhas
-            val = ws.cell(row=row_idx, column=col_idx).value
-            if val is not None:
-                max_len = max(max_len, len(str(val)))
-        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 2, 50)
+    na_aba = 0
+    for feitas, values in enumerate(df.itertuples(index=False, name=None), 1):
+        if na_aba >= sheet_row_limit:
+            abas += 1
+            ws = _nova_aba(wb, "Resultado (%d)" % abas, columns, larguras,
+                           estilo_cabecalho)
+            na_aba = 0
+
+        fill = row_fills[feitas - 1] if row_fills is not None else None
+        if fill is None:
+            # Caminho rápido do openpyxl: nenhum objeto Cell é criado.
+            ws.append(values)
+        else:
+            buf = _buffer(ws, fill)
+            for cell, val in zip(buf, values):
+                cell.value = val
+            ws.append(buf)
+        na_aba += 1
+
+        if progress_callback and feitas % 10_000 == 0:
+            progress_callback(feitas, total)
 
     wb.save(output)
+    if progress_callback:
+        progress_callback(total, total)
+    logger.info("Excel colorido: %d linhas em %d aba(s)", total, abas)
+    return {'linhas': total, 'abas': abas}
 
 
+def export_xlsx_to_disk(df, nome_base, progress_callback=None):
+    """Gera o Excel colorido em disco, sob o sandbox `output/csv/`.
+
+    Em datasets grandes o arquivo tem dezenas de MB. Mantê-lo como bytes em
+    cache de sessão e empurrá-lo pelo websocket é o que derruba a conexão do
+    Streamlit; servido de um handle de arquivo, o download é streaming.
+
+    A gravação é atômica (`.part` + `os.replace`): uma falha no meio não deixa
+    um `.xlsx` truncado com cara de export completo.
+
+    Returns:
+        (caminho, resumo) — `resumo` é o dict de `export_xlsx_colored`.
+    """
+    from validators import safe_output_path
+
+    nome = nome_base if nome_base.lower().endswith('.xlsx') else nome_base + '.xlsx'
+    destino = safe_output_path(nome, default_name='resultado_colorido.xlsx')
+    parcial = destino + '.part'
+    try:
+        resumo = export_xlsx_colored(df, parcial, progress_callback=progress_callback)
+        os.replace(parcial, destino)
+    except Exception:
+        try:
+            if os.path.exists(parcial):
+                os.remove(parcial)
+        except OSError:
+            logger.exception("Falha ao remover o parcial %s", parcial)
+        raise
+    return destino, resumo

@@ -5,7 +5,6 @@ Works across Streamlit sessions via a flag file (open another tab and cancel).
 
 from __future__ import annotations
 
-import os
 import threading
 from pathlib import Path
 from typing import Optional

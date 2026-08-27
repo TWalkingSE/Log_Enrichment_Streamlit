@@ -94,7 +94,7 @@
     "title": "📥 Entrada de Datos",
     "subtitle": "Suba archivos o pegue texto para enriquecimiento de IPs",
     "target": "🎯 Objetivo",
-    "target_placeholder": "Ej: 557996393334",
+    "target_placeholder": "Ej: 5511999999999",
     "output_file": "💾 Archivo de salida (.csv)",
     "tab_file": "📁 Subir Archivo",
     "tab_text": "📋 Pegar Texto",

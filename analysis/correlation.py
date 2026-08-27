@@ -1,12 +1,7 @@
 """analysis.correlation — split from analysis monolith."""
 import pandas as pd
-import numpy as np
-import os
-import json
-import shutil
-import glob
 import logging
-from datetime import datetime
+from validators import parse_data
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +72,7 @@ def cross_correlation_temporal(dataframes_dict, date_col='Data', window_hours=24
         if ip_col not in df.columns or date_col not in df.columns:
             continue
         df_t = df.copy()
-        df_t['_dt'] = pd.to_datetime(df_t[date_col], format='mixed', errors='coerce')
+        df_t['_dt'] = parse_data(df_t[date_col])
         df_t = df_t.dropna(subset=['_dt'])
 
         for _, row in df_t.iterrows():

@@ -4,7 +4,6 @@ Streamlit-native components using the design system tokens.
 """
 
 import streamlit as st
-from styles.theme import COLORS
 from i18n import t
 
 

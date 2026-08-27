@@ -9,6 +9,94 @@ from html import escape as _html_escape
 from analysis import classify_infrastructure
 
 
+# ============================================================
+# CAMADAS DE FUNDO DO MAPA
+# ============================================================
+#
+# A CARTO passou a exigir chave de API nos tiles dela. A requisição continua
+# devolvendo 200 e uma imagem — só que carimbada com "API KEY REQUIRED" por
+# cima do mapa inteiro. Nada disso tem a ver com os dados do caso: os IPs são
+# plotados por cima, a partir do próprio DataFrame; o que a chave cobre é
+# apenas o desenho de fundo. Todas as fontes abaixo servem sem chave, e todas
+# foram conferidas respondendo `200 image/*`.
+#
+# `url` usa o gabarito do Leaflet. O ArcGIS serve como {z}/{y}/{x} (linha
+# antes de coluna), que é o oposto do padrão XYZ — trocar a ordem devolve
+# tiles de outro lugar do mundo, sem erro nenhum.
+
+_ATTR_OSM = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+_ATTR_ESRI = 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ, HERE, ' + _ATTR_OSM
+_ARCGIS = 'https://server.arcgisonline.com/ArcGIS/rest/services/%s/MapServer/tile/{z}/{y}/{x}'
+
+# Fundos com rótulos próprios: podem ser trocados livremente num seletor de
+# camadas, porque cada um já traz os nomes de cidade embutidos.
+TILE_SOURCES = {
+    'OpenStreetMap': {
+        'url': 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        'attr': _ATTR_OSM,
+        'labels': None,
+    },
+    'Ruas (Esri)': {
+        'url': _ARCGIS % 'World_Street_Map',
+        'attr': _ATTR_ESRI,
+        'labels': None,
+    },
+    'Satélite': {
+        'url': _ARCGIS % 'World_Imagery',
+        'attr': 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics',
+        'labels': None,
+    },
+    'Relevo': {
+        'url': 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
+        'attr': 'Map data: ' + _ATTR_OSM + ', SRTM | Style: &copy; OpenTopoMap (CC-BY-SA)',
+        'labels': None,
+    },
+    # Os dois fundos cinza vêm sem rótulo — os nomes de lugar estão numa
+    # camada separada, que só pode ser sobreposta quando há um fundo ativo
+    # por vez. Servem para a página de Mapa, não para o seletor do relatório.
+    'Claro': {
+        'url': _ARCGIS % 'Canvas/World_Light_Gray_Base',
+        'attr': _ATTR_ESRI,
+        'labels': _ARCGIS % 'Canvas/World_Light_Gray_Reference',
+    },
+    'Escuro': {
+        'url': _ARCGIS % 'Canvas/World_Dark_Gray_Base',
+        'attr': _ATTR_ESRI,
+        'labels': _ARCGIS % 'Canvas/World_Dark_Gray_Reference',
+    },
+}
+
+# Estilos oferecidos num seletor de camadas: só os que trazem rótulo próprio,
+# porque a camada de rótulos do Esri é feita para um fundo específico e ficaria
+# ilegível sobre outro.
+TILE_SOURCES_COM_ROTULO = ('OpenStreetMap', 'Ruas (Esri)', 'Satélite')
+
+DEFAULT_TILE = 'Escuro'
+DEFAULT_TILE_RELATORIO = 'OpenStreetMap'
+
+
+def add_base_layer(fmap, style=DEFAULT_TILE, control=False):
+    """Aplica um fundo (e seus rótulos, quando separados) a um mapa folium.
+
+    Devolve o nome do estilo efetivamente aplicado — um estilo desconhecido
+    cai no padrão em vez de deixar o mapa sem fundo nenhum.
+    """
+    import folium
+
+    nome = style if style in TILE_SOURCES else DEFAULT_TILE
+    fonte = TILE_SOURCES[nome]
+    folium.TileLayer(
+        tiles=fonte['url'], attr=fonte['attr'], name=nome,
+        overlay=False, control=control,
+    ).add_to(fmap)
+    if fonte['labels']:
+        folium.TileLayer(
+            tiles=fonte['labels'], attr=fonte['attr'], name='Rótulos',
+            overlay=True, control=control,
+        ).add_to(fmap)
+    return nome
+
+
 def _esc(val):
     """Escape untrusted values for HTML popups."""
     if val is None:

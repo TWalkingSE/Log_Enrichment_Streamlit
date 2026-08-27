@@ -14,13 +14,44 @@ from interception_parser import (
     processar_interceptacao_async, COLUNAS_EXPORT_INTERCEPTACAO,
     processar_resultados_interceptacao, _add_reputacao_interceptacao
 )
-from file_handler import export_xlsx_colored
+from file_handler import export_xlsx_colored, export_xlsx_to_disk
 from helpers.shared import run_async
 from validators import safe_output_path
+from helpers.large_data import (
+    estimate_xlsx_seconds, fmt_duracao, prepare_button, show_truncation,
+    PREVIEW_ROWS, XLSX_DISK_THRESHOLD, fmt,
+)
 
 from i18n import t
 
 logger = logging.getLogger(__name__)
+
+
+def _xlsx_grande_interceptacao(df_exp, nome_base):
+    """Excel colorido em disco, com progresso, revalidado contra o arquivo.
+
+    Mesmo padrão da página de Resultados: o estado guarda um caminho, então
+    precisa ser conferido no disco a cada rerun em vez de ficar em cache.
+    """
+    chave = (nome_base, len(df_exp), tuple(df_exp.columns))
+    estado = st.session_state.get('_xlsx_disco_int')
+    if estado and estado['key'] == chave and os.path.exists(estado['caminho']):
+        return estado['caminho'], estado['resumo']
+
+    barra = st.progress(0.0, text="Gerando Excel colorido...")
+
+    def _progresso(feitas, total):
+        barra.progress(min(feitas / max(total, 1), 1.0),
+                       text=f"Gerando Excel colorido: {fmt(feitas)} de {fmt(total)} linhas")
+
+    try:
+        caminho, resumo = export_xlsx_to_disk(df_exp, nome_base, _progresso)
+    finally:
+        barra.empty()
+
+    st.session_state['_xlsx_disco_int'] = {
+        'key': chave, 'caminho': caminho, 'resumo': resumo}
+    return caminho, resumo
 
 
 async def _enrich_df_async(df, output_file, batch_size, period, update_callback, api_key=None):
@@ -183,25 +214,53 @@ def page_interceptacao():
         export_cols = [c for c in COLUNAS_EXPORT_INTERCEPTACAO if c in df_i.columns]
         df_display = df_i[export_cols]
 
-        st.dataframe(df_display, height=400, hide_index=True, use_container_width=True)
+        preview = df_display.head(PREVIEW_ROWS)
+        st.dataframe(preview, height=400, hide_index=True, use_container_width=True)
+        show_truncation(len(preview), len(df_display))
 
         st.subheader("📥 Downloads")
+        # Estes três eram gerados a CADA rerun da página, sem cache: em 200k
+        # linhas são centenas de MB serializados por interação.
         df_exp = df_i[export_cols]
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            csv_data = df_exp.to_csv(index=False, sep=';').encode('utf-8-sig')
-            st.download_button("📥 CSV", csv_data, output_intercept, "text/csv")
+            if prepare_button("⚙️ Preparar CSV", df_exp, 'int_csv'):
+                st.download_button("📥 CSV",
+                                   df_exp.to_csv(index=False, sep=';').encode('utf-8-sig'),
+                                   output_intercept, "text/csv")
         with c2:
-            json_data = df_exp.to_json(orient='records', force_ascii=False, indent=2)
-            st.download_button("📥 JSON", json_data, "interceptacao.json", "application/json")
+            if prepare_button("⚙️ Preparar JSON", df_exp, 'int_json'):
+                st.download_button("📥 JSON",
+                                   df_exp.to_json(orient='records', force_ascii=False, indent=2),
+                                   "interceptacao.json", "application/json")
         with c3:
-            xlsx_buf = io.BytesIO()
-            export_xlsx_colored(df_exp, xlsx_buf)
-            xlsx_buf.seek(0)
-            xlsx_filename = os.path.splitext(output_intercept)[0] + '.xlsx'
-            st.download_button("📥 Excel (colorido)", xlsx_buf.getvalue(),
-                xlsx_filename,
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            _est = fmt_duracao(estimate_xlsx_seconds(len(df_exp), len(export_cols)))
+            if prepare_button("⚙️ Preparar Excel", df_exp, 'int_xlsx',
+                              help=f"{fmt(len(df_exp))} linhas — {_est} de geração"):
+                nome_xlsx = os.path.splitext(os.path.basename(output_intercept))[0]
+                if len(df_exp) <= XLSX_DISK_THRESHOLD:
+                    xlsx_buf = io.BytesIO()
+                    export_xlsx_colored(df_exp, xlsx_buf)
+                    xlsx_buf.seek(0)
+                    st.download_button(
+                        "📥 Excel (colorido)", xlsx_buf.getvalue(),
+                        nome_xlsx + '.xlsx',
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                else:
+                    # Acima do limiar o arquivo vai para o disco: dezenas de MB
+                    # em memória e no websocket derrubam a sessão.
+                    caminho, resumo = _xlsx_grande_interceptacao(df_exp, nome_xlsx)
+                    with open(caminho, 'rb') as fh:
+                        st.download_button(
+                            "📥 Excel (colorido)", fh, os.path.basename(caminho),
+                            "application/vnd.openxmlformats-officedocument."
+                            "spreadsheetml.sheet", key="dl_int_xlsx_grande")
+                    if resumo.get('abas', 1) > 1:
+                        st.caption(f"✅ {fmt(resumo['linhas'])} linhas gravadas em "
+                                   f"{resumo['abas']} abas — o formato XLSX não aceita "
+                                   f"mais de 1.048.575 linhas por planilha.")
+                    else:
+                        st.caption(f"✅ {fmt(resumo['linhas'])} linhas gravadas (total).")
         with c4:
             if os.path.exists(output_intercept):
                 with open(output_intercept, 'rb') as f:

@@ -144,9 +144,9 @@ class TestAIAssistant(unittest.TestCase):
                 'registros_total': 50,
                 'percentual_cobertura': 60.0,
                 'ips_selecionados': [
-                    {'ip': '2804:18::1', 'tipo': 'IPv6', 'data': '2026-01-15', 'provedor': 'Vivo', 'score': 90, 'motivo': 'Ancora'},
-                    {'ip': '2804:18::2', 'tipo': 'IPv6', 'data': '2026-01-15', 'provedor': 'Vivo', 'score': 85, 'motivo': 'Dia do fato'},
-                    {'ip': '2804:18::3', 'tipo': 'IPv6', 'data': '2026-01-16', 'provedor': 'Vivo', 'score': 80, 'motivo': 'Ultimo'},
+                    {'ip': '2001:db8:18::1', 'tipo': 'IPv6', 'data': '2026-01-15', 'provedor': 'Vivo', 'score': 90, 'motivo': 'Ancora'},
+                    {'ip': '2001:db8:18::2', 'tipo': 'IPv6', 'data': '2026-01-15', 'provedor': 'Vivo', 'score': 85, 'motivo': 'Dia do fato'},
+                    {'ip': '2001:db8:18::3', 'tipo': 'IPv6', 'data': '2026-01-16', 'provedor': 'Vivo', 'score': 80, 'motivo': 'Ultimo'},
                 ],
                 'justificativa': 'Provedor dominante com IPv6',
             }],
@@ -156,7 +156,7 @@ class TestAIAssistant(unittest.TestCase):
             'confianca': 'alta',
             'motivo_confianca': 'Dados consistentes',
         }
-        df = pd.DataFrame({'Ip': ['2804:18::1', '2804:18::2', '2804:18::3']})
+        df = pd.DataFrame({'Ip': ['2001:db8:18::1', '2001:db8:18::2', '2001:db8:18::3']})
         is_valid, warnings = validate_ai_response(response, df)
         self.assertTrue(is_valid)
         self.assertEqual(len(warnings), 0)
@@ -239,9 +239,9 @@ class TestAIAssistant(unittest.TestCase):
                     'registros_total': 2,
                     'percentual_cobertura': 100.0,
                     'ips_selecionados': [
-                        {'ip': '2804:18::1', 'tipo': 'IPv6', 'data': '2026-01-15 10:00', 'provedor': 'Vivo', 'score': 95, 'motivo': 'Primeiro'},
-                        {'ip': '2804:18::2', 'tipo': 'IPv6', 'data': '2026-01-15 11:00', 'provedor': 'Vivo', 'score': 90, 'motivo': 'Ultimo'},
-                        {'ip': '2804:18::3', 'tipo': 'IPv6', 'data': '2026-01-15 12:00', 'provedor': 'Vivo', 'score': 88, 'motivo': 'Dia do fato'},
+                        {'ip': '2001:db8:18::1', 'tipo': 'IPv6', 'data': '2026-01-15 10:00', 'provedor': 'Vivo', 'score': 95, 'motivo': 'Primeiro'},
+                        {'ip': '2001:db8:18::2', 'tipo': 'IPv6', 'data': '2026-01-15 11:00', 'provedor': 'Vivo', 'score': 90, 'motivo': 'Ultimo'},
+                        {'ip': '2001:db8:18::3', 'tipo': 'IPv6', 'data': '2026-01-15 12:00', 'provedor': 'Vivo', 'score': 88, 'motivo': 'Dia do fato'},
                     ],
                     'justificativa': 'Provedor dominante',
                 }],
@@ -254,7 +254,7 @@ class TestAIAssistant(unittest.TestCase):
         ]
 
         df = pd.DataFrame({
-            'Ip': ['2804:18::1', '2804:18::2', '2804:18::3'],
+            'Ip': ['2001:db8:18::1', '2001:db8:18::2', '2001:db8:18::3'],
             'Ip_Dono': ['Vivo', 'Vivo', 'Vivo'],
             'Score': [95, 90, 88],
             'Data': pd.date_range('2026-01-15 10:00:00', periods=3, freq='h'),

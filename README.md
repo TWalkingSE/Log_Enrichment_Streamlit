@@ -1,8 +1,10 @@
-# Log Enrichment v5.2 Pro
+# Log Enrichment v5.3 Pro
 
 > 🇺🇸 [English](docs/English/README.md) · 🇪🇸 [Español](docs/Spanish/README.md)
 
 Ferramenta profissional para extração, análise forense e enriquecimento de endereços IP em logs de acesso e interceptação telemática, utilizando múltiplas fontes de inteligência (IP-API, VirusTotal, AbuseIPDB).
+
+<img width="1899" height="919" alt="image" src="https://github.com/user-attachments/assets/e850b58c-5247-45ac-95fa-75a117384566" />
 
 ## 📋 Descrição
 
@@ -31,14 +33,14 @@ O **Log Enrichment** é uma aplicação web (Streamlit) que automatiza a anális
 - **Cancelamento cooperativo**: botão **Solicitar cancelamento** (outra aba) interrompe entre lotes de API
 - **Filtro de IPs Privados**: IPs privados/reservados (10.x, 192.168.x, 127.x) são ignorados automaticamente
 - **Saída CSV com Reputação Colorida**: Coluna Reputação com texto colorido por categoria
-- **Sanitização anti CSV injection** em todos os exports
+- **Sanitização anti fórmula injetada** (CSV e Excel) em todos os exports
 - **Período com Emojis**: ☀️ Diurno / 🌙 Noturno para identificação visual rápida
 - **Normalização de Provedores**: Agrupa variantes (Claro S.A./NXT/Net → Claro; Vivo/Telefônica/GVT → Vivo)
 - **Worker headless**: `python scripts/enrich_worker.py --input logs.txt --output out.csv` (sem UI Streamlit)
 - **Modo air-gapped**: `AIR_GAPPED=true` — enriquecimento só com cache local (sem HTTP externo)
 - **Cache assinado HMAC**: export/import de pacotes offline verificáveis (`CACHE_HMAC_SECRET` / `SIGN_IP_CACHE`)
 - **Persistência de sessão**: restaura `df_resultado` de `data/sessions/` (parquet/pickle)
-- **Camada de aplicação**: pipeline principal via `application.enrich_use_case` + `enrich_service`
+- **Camada de serviço**: pipeline principal via `enrich_service`
 - **Pacote `analysis/`**: análises modularizadas (risco, temporal, geo, correlação, etc.)
 - **Retenção automática**: limpeza de audit trail, sessions e cache (`scripts/retention_cleanup.py`)
 - **Export SIEM**: IOC (txt/csv) e bundle **STIX 2.1** na página Resultados (e no ZIP)
@@ -82,8 +84,9 @@ O **Log Enrichment** é uma aplicação web (Streamlit) que automatiza a anális
 - **Rota Temporal**: Linha cronológica entre localizações com início e fim destacados
 - **Visão Investigativa**: Marcadores + rota sutil + destaque para proxy/datacenter + locais base (casa 🏠 / trabalho 🏢)
 
-**Cinco estilos de mapa (tiles Carto — sem API key necessário):**
-- Escuro (CartoDB dark_matter) · Escuro sem labels · Claro (CartoDB positron) · Voyager · OpenStreetMap
+**Seis estilos de mapa — nenhum exige chave de API:**
+- OpenStreetMap · Ruas (Esri) · Satélite (Esri World Imagery) · Relevo (OpenTopoMap) ·
+  Claro e Escuro (Esri Gray Canvas, com rótulos sobrepostos)
 
 **Controles interativos:**
 - **Filtro temporal**: Filtra IPs por intervalo de datas diretamente no mapa
@@ -201,7 +204,6 @@ O módulo de análise avançada foi reestruturado em **8 páginas agrupadas** co
 - **Validação de Dados**: Pipeline de 3 camadas (Schema, Domain, Integrity) + prevenção de CSV injection
 - **Multi-Target**: Processamento em lote de múltiplos alvos com detecção de IPs/locais compartilhados e atividade simultânea
 - **Grafo de Rede IP** (`components/graph_view.py`): Visualização interativa de grafos IP ↔ ASN ↔ localização usando vis.js embeddido no Streamlit
-- **Mapas Modernos** (`components/modern_map.py`): Motor pydeck/deck.gl mantido como base legada/experimental para evoluções futuras
 - **Visualizações Avançadas** (`components/visualizations.py`): Gauges de saúde dos dados, comparação lado a lado de alvos, replay temporal 2D em Leaflet.js e tabela de IPs com sparklines
 - **Export IOC/STIX** (`export_ioc.py`): lista de IOCs, CSV contextual e bundle STIX 2.1 para SIEM
 - **Job control** (`helpers/job_control.py`): cancelamento cooperativo multi-aba
@@ -252,7 +254,13 @@ Módulo especializado para uso investigativo policial:
 - Gera ZIP contendo: CSV, JSON, Excel, HTML do relatório, **IOC txt/csv** e **STIX 2.1** em um único download
 
 ### Exportação Multi-formato
-- **Excel (.xlsx)** — formatado com cores, filtros e cabeçalhos estilizados
+- **Excel (.xlsx)** — linhas coloridas por reputação do IP, cabeçalho estilizado e
+  larguras de coluna ajustadas. Escrito em **streaming**, então **não há teto de 100
+  mil linhas**: o único limite é o do próprio formato (1.048.575 linhas por planilha),
+  e acima dele o resultado continua em `Resultado (2)`, `Resultado (3)`… com a
+  contagem declarada na interface. Acima de 50 mil linhas o arquivo é gerado em
+  disco com barra de progresso e servido do disco, em vez de trafegar inteiro pelo
+  websocket
 - **CSV (;)** — separador ponto-e-vírgula, encoding UTF-8 BOM (sanitizado)
 - **JSON** — array de objetos
 - **PDF / HTML** — relatório formatado com gráficos
@@ -265,7 +273,10 @@ Módulo especializado para uso investigativo policial:
 - **Autenticação com Argon2/bcrypt (recomendado)** em `AUTH_PASSWORD_HASH`; hash SHA-256 hex (64 caracteres) ainda aceito como legado
 - **Rate limit de login**: 5 tentativas, bloqueio de 5 minutos após exceder
 - **`AUTH_PASSWORD`**: apenas para dev; em produção use `AUTH_PASSWORD_HASH` gerado com `python scripts/gen_auth_password_hash.py` (ver [SECURITY.md](SECURITY.md))
-- **CSV injection**: `sanitize_dataframe_for_csv` em pipeline e downloads
+- **Fórmula injetada (CSV e Excel)**: `sanitize_dataframe_for_csv` aplicado dentro
+  do próprio `export_xlsx_colored` e do pipeline de CSV, não a cargo do chamador.
+  Valores iniciados por `=`, `+`, `-`, `@`, `|` ou controle recebem prefixo `'`;
+  números negativos legítimos (latitude, longitude) são preservados
 - **XSS**: escape HTML em mapas e sparklines
 - **Path sandbox**: `safe_output_path` restringe escrita a `output/`
 - **Audit chain + HMAC**: `prev_hash` e `AUDIT_HMAC_SECRET` opcional
@@ -289,6 +300,29 @@ Módulo especializado para uso investigativo policial:
 - **Fuso horário configurável**: Via `TZ_OFFSET_HOURS` no `.env` (padrão: -3)
 - **Colunas de País**: `Ip_Pais` e `Ip_Pais_Codigo` adicionadas em todo o pipeline
 - **Lookup rDNS**: Função `resolve_rdns()` disponível para consulta reversa de DNS
+
+### 📈 Comportamento em Datasets Grandes
+
+Um caso real chega a **200 mil linhas**, e o Streamlit reexecuta o script inteiro a
+cada interação — inclusive o corpo de abas que não estão visíveis. Sem guarda-corpos,
+digitar na busca serializa centenas de MB por tecla. O módulo
+[`helpers/large_data.py`](helpers/large_data.py) concentra as regras:
+
+| Mecanismo | O que faz |
+|-----------|-----------|
+| `gate(...)` | Análises que varrem o DataFrame só rodam após clique explícito acima de 50 mil linhas. Uma vez liberadas, ficam liberadas até o dataset mudar |
+| `prepare_button(...)` | Exports em dois estágios ("Preparar X" → download). `st.download_button` exige os bytes prontos na renderização, então não há como gerá-los preguiçosamente |
+| `show_truncation(...)` | **Toda truncagem é declarada.** Uma prévia de 1.000 linhas sempre informa o total real — o tamanho da fatia nunca é apresentado como se fosse a contagem |
+| `bump_data_version()` | Invalida portões e preparos quando o alvo muda, para o analista não ver o resultado liberado do alvo anterior |
+
+Tetos de renderização: prévia de tabela em 1.000 linhas, grafo de rede em 500 nós e
+5.000 arestas. **Exports não têm teto de conteúdo** — o Excel colorido divide em abas
+e o CSV é sempre o artefato primário: se o Excel falhar por qualquer motivo, o
+processamento continua, o CSV é gravado e o motivo é reportado.
+
+Esse caminho é coberto por [`tests/test_load.py`](tests/test_load.py), que exercita
+análises, relatório e exportação sobre **202.128 linhas** — o tamanho do caso que
+quebrou em produção. Fixtures de poucas linhas não revelam complexidade O(n²).
 
 ### ⚙️ Configurações (4 abas)
 
@@ -442,41 +476,49 @@ O sistema suporta dois modos:
 
 ### Formato 1: Genérico (Lista de IPs)
 ```
-191.13.51.97
-2804:18:18bf:9681:1:0:70f2:df19
-187.37.136.128
+198.51.100.20
+2001:db8:18bf:9681:1:0:70f2:df19
+198.51.100.18
 ```
 
 ### Formato 2: Meta Platforms (Instagram/Facebook)
 ```
 IP Address
-24.152.81.150:22859
+198.51.100.10:22859
 Time
 2025-09-29 11:15:01 UTC
 ```
-A porta lógica é extraída como coluna separada (`Porta`).
+A porta lógica é extraída como coluna separada (`Porta`). IPv6 vem entre
+colchetes quando há porta: `[2001:db8::1]:63629`.
+
+**Quebra de página:** nos documentos HTML da Meta e do WhatsApp, um campo pode ser
+partido pela virada de página — o rótulo fica numa página e o valor na seguinte. O
+parser remenda essa quebra; sem isso o registro inteiro desaparecia do resultado.
 
 ### Formato 3: WhatsApp (Log de Acesso)
 ```
 Time
 2025-12-10 18:58:48 UTC
 IP Address
-2804:14d:8e90:866e:d4ba:a89a:bcd8:8dc7
+2001:db8:8e90:866e:d4ba:a89a:bcd8:8dc7
 ```
+O WhatsApp entrega o IP sem porta. Caso passe a entregar `IP:porta` como a Meta,
+o parser já separa os dois e acrescenta a coluna `Porta` — registros nesse formato
+não são descartados.
 
 ### Formato 4: Google
 ```
 IP ACTIVITY
 
 Timestamp   IP Address  Activity Type
-2023-02-25 04:34:32 Z   2804:214:82ae:6fb1:1:1:b8eb:1d22    Login
+2023-02-25 04:34:32 Z   2001:db8:82ae:6fb1:1:1:b8eb:1d22    Login
 ```
 
 ### Formato 5: Preservation Google (CSV do Google Takeout)
 ```csv
 Gaia ID,Activity Timestamp,IP Address,Proxiedhost IP Address,Is Non-routable IP Address,User Agent String,Product Name
-314329686157,2026-03-11 02:49:39 UTC,2804:214:85c1:b496:81e9:9e8e:a396:d027,,No,App : YOUTUBE_APP. App Version : 21.10.2. Os : IOS_OS.,YouTube
-314329686157,2026-03-11 02:33:59 UTC,168.0.233.233,,No,App : GMAIL_APP. App Version : 6.0.260302.,Gmail
+100000000001,2026-03-11 02:49:39 UTC,2001:db8:85c1:b496:81e9:9e8e:a396:d027,,No,App : YOUTUBE_APP. App Version : 21.10.2. Os : IOS_OS.,YouTube
+100000000001,2026-03-11 02:33:59 UTC,198.51.100.14,,No,App : GMAIL_APP. App Version : 6.0.260302.,Gmail
 ```
 Arquivo CSV gerado pelo Google Takeout (nome padrão: `Activities - A list of Google services accessed by your devices.csv`).
 Detectado automaticamente pelas colunas `Activity Timestamp`, `IP Address` e `User Agent String`.
@@ -484,20 +526,20 @@ A coluna `User_Agent` é extraída e incluída na saída. IPs não roteáveis s�
 
 ### Formato 6: Discord (PDF)
 ```
-User ID:                     1366836644673622076
-Username:                    r1ert47#0
-Email:                       xxxxxx.6666@gmail.com
+User ID:                     1234567890123456789
+Username:                    usuario_exemplo#0
+Email:                       usuario@example.com
 Email verified:              Yes
 Phone number:                Not found
 Registration IP:             Not found
 Registration Time (UTC):     2025-04-29 18:00:50
 Last Seen Time (UTC):        2025-05-14 01:43:39
-Last Seen IP:                89.39.104.194
+Last Seen IP:                198.51.100.13
 
 Session Start (UTC)    IP Address
-2025-05-14 00:47:29    89.39.104.194
-2025-05-13 23:55:51    179.63.13.130
-2025-05-12 08:46:41    179.63.13.130
+2025-05-14 00:47:29    198.51.100.13
+2025-05-13 23:55:51    198.51.100.16
+2025-05-12 08:46:41    198.51.100.16
 ```
 PDF gerado pelo Discord contendo dados do usuário (User ID, Username, Email) e tabela de sessões com timestamps e IPs.
 Detectado automaticamente pela presença de `Session Start (UTC)` com `User ID:` ou `Username:`.
@@ -534,7 +576,7 @@ Suporta upload de ZIP com 15 dias de interceptação (ZIP contendo ZIPs internos
 |--------|-----------|
 | Alvo | Identificador (telefone ou outro) |
 | Ip | Endereço IP extraído |
-| Porta | Porta lógica (apenas Meta Platforms) |
+| Porta | Porta lógica — Meta Platforms, e WhatsApp quando o documento a traz |
 | Evento | Tipo de evento da conta (apenas TikTok: video_play, like, follow, etc.) |
 | User_Agent | User Agent do dispositivo (apenas Preservation Google) |
 | Data | Data/hora convertida para o fuso configurado |
@@ -578,32 +620,42 @@ Suporta upload de ZIP com 15 dias de interceptação (ZIP contendo ZIPs internos
 
 ## 🔧 Dependências
 
+Runtime — todas fixadas em [`requirements.txt`](requirements.txt):
+
 | Pacote | Uso |
 |--------|-----|
 | streamlit | Interface web |
 | pandas | Manipulação de dados |
-| openpyxl | Leitura de Excel |
-| aiohttp | Cliente HTTP assíncrono (batch API, retry) |
+| numpy | Cálculos numéricos |
+| openpyxl | Leitura de Excel e escrita do Excel colorido em modo streaming |
+| pyarrow | Persistência de sessões em parquet |
+| aiohttp | Cliente HTTP assíncrono (batch IP-API, rDNS, retry) |
+| requests | Cliente HTTP síncrono para integrações auxiliares |
 | plotly | Gráficos interativos |
-| **pydeck** | **Motor legado/experimental de mapas WebGL mantido no projeto** |
-| **h3** | **Suporte geoespacial legado para agregações avançadas** |
 | folium | Motor principal dos mapas 2D da aplicação |
 | streamlit-folium | Integração Folium/Streamlit |
-| fpdf2 | Geração de relatórios PDF |
-| kaleido | Renderização de gráficos Plotly como imagem (PDF) |
-| beautifulsoup4 | Parsing de HTML (interceptação) |
 | simplekml | Exportação KML e KML animado (Google Earth) |
 | scipy | Cálculos geodésicos e Convex Hull |
 | scikit-learn | Clustering DBSCAN para padrões de vida |
-| numpy | Cálculos numéricos |
+| beautifulsoup4 | Parsing de HTML (interceptação, Meta, Google) |
+| pdfplumber | Parsing de PDFs de entrada (Discord, TikTok) |
+| jinja2 | Template do relatório ([`templates/report_template.html`](templates/report_template.html)) |
+| pydantic | Structured output do Assistente AI |
+| passlib / bcrypt | Hash de senha (Argon2 recomendado) |
 | python-dotenv | Carregamento de variáveis de ambiente |
+| pydeck | Requisito do próprio Streamlit (`st.pydeck_chart`); o projeto não usa mais diretamente |
 
-| requests | Cliente HTTP para integrações auxiliares |
-| shodan | Consulta de serviços/portas (Shodan API) |
-| pydantic | Structured output para o Assistente AI |
-| matplotlib | Gráficos adicionais para relatórios |
-| pdfplumber | Parsing de PDFs (Discord, TikTok) |
-| pytest | Framework de testes unitários |
+Desenvolvimento — [`requirements-dev.txt`](requirements-dev.txt): `pytest`,
+`pytest-cov`, `pytest-timeout`, `ruff`, `mypy`.
+
+Sem dependência de pacote:
+
+- **VirusTotal, AbuseIPDB e Shodan** são consultados por REST via `aiohttp` — não
+  há SDK desses serviços no projeto, apenas as chaves no `.env`.
+- **Ollama** (Assistente AI) é chamado por REST no host local.
+- O **relatório é HTML**, gerado por Jinja2 com os gráficos Plotly embutidos. O
+  "PDF" da interface é esse HTML impresso pelo navegador — não há biblioteca de
+  geração de PDF no projeto.
 
 ## ⚙️ Configuração
 
@@ -626,7 +678,6 @@ Suporta upload de ZIP com 15 dias de interceptação (ZIP contendo ZIPs internos
 | `ip_cache.json` | Cache de IPs com TTL de 30 dias |
 | `processing_history.json` | Histórico dos últimos 50 processamentos |
 | `infrastructure_providers.json` | Keywords de datacenter/VPN/cloud (externalizável) |
-
 | `analysis_config.json` | Thresholds de análise avançada |
 | `logs/` | Diretório de logs persistentes (um arquivo por dia) |
 | `.streamlit/config.toml` | Tema escuro e configurações do Streamlit |
@@ -668,6 +719,7 @@ Log Enrichment/
 │       ├── overview.py            # Dashboard KPIs + Top 10 risco + Resumo Executivo
 │       ├── risco.py               # Risk Score, VirusTotal, AbuseIPDB, Shodan, Tor
 │       ├── temporal.py            # Padrões temporais, silêncio, timezone, timing
+│       ├── comparacao.py          # Comparação A/B entre dois períodos
 │       ├── geo.py                 # Geo History, subnets, life patterns
 │       ├── correlacao.py          # Cross-correlation, WiFi, relay chains
 │       ├── comportamento.py       # VPN/Proxy, IP confidence, dispositivos
@@ -678,24 +730,49 @@ Log Enrichment/
 │   └── components.py              # Componentes reutilizáveis: section_header, kpi_row, empty_state, badges
 ├── helpers/                       # Funções compartilhadas entre páginas
 │   ├── __init__.py                # Pacote de helpers
+│   ├── large_data.py              # Guarda-corpos p/ datasets grandes (portões, truncagem visível)
 │   ├── shared.py                  # add_log, run_processing, save_history, anomalies
-│   ├── pdf_report.py              # Wrapper compatível para o relatório PDF rápido
-│   └── geo.py                     # Haversine, popups do mapa
+│   ├── geo.py                     # Haversine, popups do mapa
+│   ├── persistence.py             # Sessões em parquet/pickle + SCHEMA_VERSION
+│   ├── job_control.py             # Cancelamento cooperativo entre abas (flag em disco)
+│   ├── signed_cache.py            # Envelope HMAC do cache para transferência air-gapped
+│   ├── retention.py               # Política de retenção de audit/sessions/cache
+│   ├── period_compare.py          # Comparação A/B entre períodos
+│   └── runtime_flags.py           # Flags de runtime (air-gapped, features)
 ├── html_parser.py                 # Parser HTML: WhatsApp, Meta Platforms, Google
 ├── api_client.py                  # Cliente IP-API (batch /batch, retry, rDNS async)
-├── data_processor.py              # Parsers de log + helpers período (emoji-safe)
-├── file_handler.py                # Processamento assíncrono + CSV + XLSX on-demand
+├── enrich_service.py              # Serviço de enriquecimento (fachada do pipeline)
+├── data_processor.py              # Fachada pública sobre data_processing/ (re-exports com # noqa: F401)
+├── data_processing/               # Parsers de log e normalizações
+│   ├── providers.py               # Normalização de provedores (Claro/Vivo/NXT/GVT...)
+│   └── timezone.py                # Conversão de fuso e helpers de período (emoji-safe)
+├── file_handler.py                # Processamento assíncrono + CSV + Excel colorido em streaming
 ├── interception_parser.py         # Parser de interceptação telemática (HTML WhatsApp)
-├── analysis.py                    # Análise unificada: risk, VPN, padrões, geo, correlação
+├── html_report_generator.py       # Relatório HTML/PDF + hash de integridade
+├── export_ioc.py                  # Exportação IOC (txt/csv) e bundle STIX 2.1
+├── auth_password.py               # Verificação de senha (Argon2/bcrypt/SHA-256 legado)
+├── templates/report_template.html # Template Jinja2 do relatório
+├── scripts/                       # Utilitários de linha de comando
+│   ├── enrich_worker.py           # Worker headless (filas / multi-usuário)
+│   ├── retention_cleanup.py       # Aplicação da política de retenção
+│   └── gen_auth_password_hash.py  # Geração do AUTH_PASSWORD_HASH
+├── analysis/                      # Pacote de análise (substituiu o monólito analysis.py)
+│   ├── geo.py                     # Clustering de padrões de vida, geofence, precisão
+│   ├── risk.py                    # Scoring de risco, heurísticas de VPN, confiança de IP
+│   ├── movement.py                # Saltos impossíveis, locais base, área de deslocamento
+│   ├── temporal.py                # Padrões temporais e timing por provedor
+│   ├── infrastructure.py          # Classificação residencial/móvel/proxy/hosting
+│   ├── correlation.py             # Correlação cruzada entre alvos
+│   ├── subnet.py                  # Padrões de sub-rede /24 e /48
+│   ├── profile.py                 # Perfil comportamental, WiFi compartilhado
+│   ├── comms.py, cache_ops.py, io_scan.py, export_kml.py, _config.py
 ├── advanced_analysis.py           # VirusTotal, AbuseIPDB, relay chains
 ├── tor_updater.py                 # Atualizador local do cache Tor (torbulkexitlist + Onionoo)
 ├── audit_logger.py                # Audit trail forense (SHA-256, JSONL)
 ├── validators.py                  # Validação de dados (3 camadas)
-├── report_generator.py            # Relatórios profissionais PDF
 ├── ip_investigativo.py            # Análise investigativa com scoring + AI + seleção temporal
 ├── components/
 │   ├── graph_view.py              # Grafo interativo IP/ASN (vis.js)
-│   ├── modern_map.py              # Motor pydeck/deck.gl legado/experimental
 │   └── visualizations.py          # Gauges, comparação, replay temporal 2D, sparklines
 ├── .github/workflows/tests.yml    # CI mínima para executar a suíte automatizada
 ├── CONTRIBUTING.md                # Guia curto para contribuições
@@ -707,9 +784,11 @@ Log Enrichment/
 │   ├── common.py                  # Imports compartilhados e setup de path
 │   ├── test_parsers.py            # Parsers, formatos e HTML
 │   ├── test_analysis.py           # Análises, geo, sub-redes e timing
-│   ├── test_integrations.py       # API, relatórios e smoke tests
+│   ├── test_integrations.py       # Relatórios, exports e smoke tests
+│   ├── test_api_client.py         # Cliente IP-API (batch, retry, rate limit)
 │   ├── test_advanced.py           # Recursos avançados e assistente AI
-│   └── test_security.py           # Validação, ZIP security e sanitização
+│   ├── test_security.py           # Validação, ZIP security e sanitização
+│   └── test_load.py               # Carga: 202.128 linhas (marcado `slow`)
 ├── requirements.txt               # Dependências Python de runtime e testes
 ├── .env.example                   # Template público de variáveis de ambiente
 ├── logs/                          # Logs persistentes (diários)
@@ -729,13 +808,17 @@ Log Enrichment/
 | `batch_resolve_rdns()` | api_client.py | rDNS assíncrono em paralelo |
 | `normalizar_periodo()` | data_processor.py | Comparação de período emoji-safe |
 | `periodo_matches()` | data_processor.py | Compara períodos ignorando emojis |
-| `compute_unified_reputation()` | analysis.py | Score de reputação unificado (0-100) |
-| `detect_vpn_timing()` | analysis.py | Detecção VPN por análise de timing |
-| `cross_correlation_temporal()` | analysis.py | Correlação cruzada com sobreposição temporal |
-| `detect_usage_profile()` | analysis.py | Detecção residencial vs corporativo |
-| `compute_geo_precision()` | analysis.py | Indicador de precisão da geolocalização |
-| `export_kml_animated()` | analysis.py | KML com timestamps para Google Earth Pro |
-
+| `compute_unified_reputation()` | analysis/ | Score de reputação unificado (0-100) |
+| `detect_vpn_timing()` | analysis/ | Detecção VPN por análise de timing |
+| `cross_correlation_temporal()` | analysis/ | Correlação cruzada com sobreposição temporal |
+| `detect_usage_profile()` | analysis/ | Detecção residencial vs corporativo |
+| `compute_geo_precision()` | analysis/ | Indicador de precisão da geolocalização |
+| `export_kml_animated()` | analysis/ | KML com timestamps para Google Earth Pro |
+| `export_xlsx_colored()` | file_handler.py | Excel colorido em streaming; divide em abas acima do limite do formato |
+| `export_xlsx_to_disk()` | file_handler.py | Excel grande gravado em disco de forma atômica, com progresso |
+| `salvar_exportacao()` | file_handler.py | CSV (primário) + Excel; falha no Excel não aborta o processamento |
+| `gate()` / `prepare_button()` | helpers/large_data.py | Portões de trabalho pesado em dataset grande |
+| `show_truncation()` | helpers/large_data.py | Declara total real sempre que a exibição é parcial |
 | `run_ai_analysis()` | ai_assistant.py | Orquestrador da análise AI via Ollama |
 | `query_ollama()` | ai_assistant.py | Chamada REST ao Ollama com structured output |
 | `validate_ai_response()` | ai_assistant.py | Validação da resposta AI contra regras de negócio |
@@ -754,11 +837,19 @@ Módulo de inteligência artificial local para análise investigativa:
 
 ## 🧪 Testes
 
+Suíte rápida (uso diário):
+
 ```bash
-python -m pytest tests -v
+python -m pytest tests -q -m "not slow"
 ```
 
-**167+ testes automatizados** organizados em `tests/` por domínio, cobrindo: validação de IP, IPs privados, rDNS, fuso horário, parsers (WhatsApp, Meta, Google, genérico e HTML), risk score, padrões temporais, geofencing, correlação cruzada, números descartáveis, cliente API, definição de colunas, **validators** (schema, domain, CSV injection), **VPN heuristics**, **IP confidence**, **life patterns**, **impossible jumps**, **base locations**, **movement area**, **infrastructure classification**, **audit logger**, **report generator** (rápido/profissional), **cache compression**, **relay chains**, **device fingerprinting**, **shared Wi-Fi**, **digital silence**, **timezone validation**, **data health**, **helpers de período**, **score unificado**, **VPN timing**, **correlação temporal**, **perfil de uso**, **precisão geográfica**, **KML animado**, **AI assistant** (prompts, validação, offline), **detecção tipo IP**, **ZIP security** (bomb detection, path traversal), **input sanitization**, **geofence coordinate validation**, updater Tor oficial com fallback de cache e smoke tests cobrindo entrada simples, relatório, exportação XLSX e enriquecimento de interceptação.
+Teste de carga sobre dataset de tamanho real — 202.128 linhas, alguns minutos:
+
+```bash
+python -m pytest tests/test_load.py -m slow
+```
+
+**244 testes automatizados** (236 rápidos + 8 marcados `slow`) organizados em `tests/` por domínio, cobrindo: validação de IP, IPs privados, rDNS, fuso horário, parsers (WhatsApp, Meta, Google, genérico e HTML), risk score, padrões temporais, geofencing, correlação cruzada, números descartáveis, cliente API, definição de colunas, **validators** (schema, domain, CSV injection), **VPN heuristics**, **IP confidence**, **life patterns**, **impossible jumps**, **base locations**, **movement area**, **infrastructure classification**, **audit logger**, **report generator** (rápido/profissional), **cache compression**, **relay chains**, **device fingerprinting**, **shared Wi-Fi**, **digital silence**, **timezone validation**, **data health**, **helpers de período**, **score unificado**, **VPN timing**, **correlação temporal**, **perfil de uso**, **precisão geográfica**, **KML animado**, **AI assistant** (prompts, validação, offline), **detecção tipo IP**, **ZIP security** (bomb detection, path traversal), **input sanitization**, **geofence coordinate validation**, updater Tor oficial com fallback de cache e smoke tests cobrindo entrada simples, relatório, exportação XLSX e enriquecimento de interceptação. A suíte `slow` ([`tests/test_load.py`](tests/test_load.py)) roda análises, relatório e exportação sobre 202.128 linhas, medindo pico de memória e tempo — é ela que pega regressões de complexidade que fixtures de poucas linhas não revelam.
 
 ## 🔐 Governança
 
@@ -772,6 +863,92 @@ python -m pytest tests -v
 Este projeto é distribuído sob a licença MIT. Veja o arquivo `LICENSE` para o texto completo.
 
 ## 🔄 Changelog
+
+### v5.3 (2026)
+
+**Excel colorido sem teto de 100 mil linhas**
+- `export_xlsx_colored` passou a usar `Workbook(write_only=True)`: cada linha é
+  serializada no `append` e as células são descartadas, então o consumo de memória
+  não acompanha o número de linhas. Medido em 15 colunas: a implementação anterior
+  gastava **622 MB de heap só para 100 mil linhas**; a atual fica em **14 MB para
+  200 mil**
+- O teto de 100 mil linhas foi **removido**. O limite restante é o do próprio formato
+  XLSX (1.048.575 linhas por planilha) e, acima dele, o resultado continua em
+  `Resultado (2)`, `Resultado (3)`… — nada é omitido em silêncio
+- A função devolve `{'linhas', 'abas'}` e as páginas **declaram** ao analista quantas
+  linhas foram gravadas e em quantas abas
+- Nova `export_xlsx_to_disk`: acima de 50 mil linhas o arquivo é gerado em disco
+  (gravação atômica `.part` + `os.replace`) com barra de progresso e servido de um
+  handle, em vez de virar dezenas de MB de bytes em cache de sessão e no websocket
+- O ZIP "Exportar Tudo" deixou de omitir o Excel em datasets grandes
+- Teste de carga real: exportação das 202.128 linhas com verificação de pico de
+  memória e releitura integral do artefato
+
+**Parsers — quebra de página da Meta e do WhatsApp**
+- O HTML da Meta parte um campo ao meio na virada de página: o rótulo fica no fim de
+  uma página com o valor vazio e o valor reaparece na página seguinte, num bloco sem
+  rótulo. O parser lia os blocos em sequência e **perdia o registro inteiro**. Num
+  documento real de 27 IPs, entregava 25 — um deles sem data
+- `_campos_da_secao` remenda a quebra antes do pareamento: descarta invólucros,
+  distingue rótulo de valor e costura o rótulo órfão ao valor órfão seguinte
+- O pareamento fecha quando IP e Time chegam, em qualquer ordem, atendendo à Meta
+  (`IP Address` → `Time`) e ao WhatsApp (`Time` → `IP Address`)
+- Descartes por IP inválido e registros sem timestamp deixaram de ser silenciosos
+
+**Parsers — WhatsApp pronto para a porta lógica**
+- O WhatsApp ainda não entrega porta, mas a Meta entrega e a tendência é seguir.
+  O parser passou a separar `IP:porta` antes de validar: hoje é no-op, e no dia da
+  virada o registro é preservado em vez de reprovado por `is_valid_ip`
+- A coluna `Porta` só entra quando o documento traz porta — a saída dos laudos de
+  hoje continua idêntica, coluna por coluna
+- Um IPv6 sem brackets é lido inteiro como endereço: `2001:db8:...:37229` é ambíguo e
+  chutar uma porta inventaria dado que o documento não afirma
+
+**Mapas — fim da dependência de chave de API**
+- Os tiles da CARTO passaram a exigir chave: a requisição volta `200` com a imagem
+  carimbada `API KEY REQUIRED` por cima do mapa. Nada falha em voz alta — o laudo só
+  sai com a figura inutilizada
+- Catálogo único de fundos em [`helpers/geo.py`](helpers/geo.py), todos sem chave:
+  OpenStreetMap, Ruas (Esri), Satélite, Relevo, Claro e Escuro
+- Relatório, página de Mapa, minimapa, mapa de área e replay temporal migrados
+- Atenção ao gabarito do ArcGIS: `{z}/{y}/{x}`, linha antes de coluna — inverter
+  devolve tiles de outro lugar do mundo com `200` e sem erro
+
+**Limpeza**
+- Removidos `components/modern_map.py` (824 linhas) e `_render_pydeck_replay`: o
+  motor pydeck/deck.gl não era alcançável por nenhuma página, e era o único
+  consumidor do módulo. `pydeck` continua no `requirements.txt` por ser requisito
+  do próprio Streamlit
+
+**Segurança — fórmula injetada também no Excel**
+- O caminho da interface exportava o `.xlsx` **sem sanitizar** — só o pipeline passava
+  por `sanitize_dataframe_for_csv`. Uma célula iniciada por `=`, `+`, `-` ou `@` vira
+  fórmula ao abrir a planilha e o valor exibido deixa de ser o do log
+- A sanitização passou para **dentro de `export_xlsx_colored`**, de modo que nenhum
+  chamador possa esquecê-la
+- Corrigido um bypass na regra do `-`: "traço seguido de dígito é número" deixava
+  passar o payload DDE `-2+3+cmd|' /C calc'!A0`. O critério agora é `float()` aceitar
+  a string inteira, o que preserva latitude e longitude negativas
+- `sanitize_dataframe_for_csv` passou a copiar **preguiçosamente**, só as colunas que
+  mudam: a dupla sanitização do pipeline saiu de ~50 MB de pico para zero, e o export
+  de 202.128 linhas ficou em 33 MB
+
+**Escala (campanha de endurecimento)**
+- Novo [`helpers/large_data.py`](helpers/large_data.py): `gate`, `prepare_button`,
+  `show_truncation`, `bump_data_version` — trabalho pesado exige clique e toda
+  truncagem é declarada
+- Novo [`tests/test_load.py`](tests/test_load.py) sobre 202.128 linhas, marcado
+  `slow`: pegou o `DBSCAN` O(n²) que derrubava a geração de relatório em produção
+- Monólito `analysis.py` dividido no pacote `analysis/` (livre de `streamlit`);
+  `data_processor.py` virou fachada sobre `data_processing/`
+- Coerção de booleanos por `as_bool` / `bool_series`, com aviso por token
+  desconhecido em vez de classificação errada em silêncio
+
+**Documentação**
+- Árvore de estrutura corrigida e completada (helpers, pacotes de aplicação,
+  scripts, templates, testes)
+- Tabela de dependências separada entre pinadas em `requirements.txt` e opcionais
+- Nova seção "Comportamento em Datasets Grandes"
 
 ### v5.2 (2025)
 
@@ -787,7 +964,7 @@ Este projeto é distribuído sob a licença MIT. Veja o arquivo `LICENSE` para o
 - `styles/theme.py`: ~25 tokens de cor (COLORS), paleta Plotly (COLORWAY), tipografia (FONT_SIZES), espaçamento (SPACING), bordas (BORDER_RADIUS), transições (TRANSITIONS)
 - `styles/custom_css.py`: CSS injetado uma única vez — sidebar com gradiente, cards com hover glow, botões com efeitos translateY, scrollbar estilizada, responsivo, auth page com gradiente animado
 - `styles/components.py`: Componentes Streamlit reutilizáveis — `section_header()`, `empty_state()`, `status_badge()`, `kpi_row()`, `sidebar_brand()`, `sidebar_data_summary()`, `sidebar_api_status()`, `sidebar_footer()`, `auth_header()`
-- Cores hardcoded centralizadas em todas as páginas e componentes (visualizations, graph_view, pdf_report, ip_investigativo)
+- Cores hardcoded centralizadas em todas as páginas e componentes (visualizations, graph_view, ip_investigativo)
 - consolidação da camada visual em `styles/` e remoção de referências obsoletas no fluxo atual
 - 14 páginas refatoradas para usar `section_header()` e `empty_state()`
 

@@ -94,7 +94,7 @@
     "title": "📥 Data Input",
     "subtitle": "Upload files or paste text for IP enrichment",
     "target": "🎯 Target",
-    "target_placeholder": "E.g.: 557996393334",
+    "target_placeholder": "E.g.: 5511999999999",
     "output_file": "💾 Output file (.csv)",
     "tab_file": "📁 Upload File",
     "tab_text": "📋 Paste Text",

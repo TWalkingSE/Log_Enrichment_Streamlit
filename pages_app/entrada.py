@@ -20,6 +20,7 @@ from audit_logger import log_audit_event
 from validators import validate_dataframe, safe_output_path
 from helpers.shared import add_log, run_processing, save_history, extract_alvo_from_filename
 from i18n import t
+from helpers.large_data import bump_data_version
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,12 @@ def _sanitize_alvo(alvo):
 def page_entrada():
     from styles.components import section_header
     section_header(t('entrada.title'), t('entrada.subtitle'), divider="green")
+
+    # Falha ao restaurar a sessão anterior (app.py) precisa ser visível: sem
+    # isso o analista veria "sem dados" sem saber que houve erro.
+    restore_error = st.session_state.pop('_restore_error', None)
+    if restore_error:
+        st.warning(f"⚠️ {restore_error}")
 
     # Alvo + Output
     col_alvo, col_output = st.columns(2)
@@ -72,6 +79,7 @@ def page_entrada():
                 st.success(t('entrada.offline_success', filename=offline_file.name, count=len(df_off), columns=str(df_off.columns.tolist()[:8])))
                 if st.button(t('entrada.offline_load'), key="offline_load"):
                     st.session_state.df_resultado = df_off
+                    bump_data_version()
                     if 'Alvo' in df_off.columns and not df_off['Alvo'].dropna().empty:
                         st.session_state.alvo = str(df_off['Alvo'].dropna().iloc[0])
                     st.rerun()
@@ -334,6 +342,7 @@ def page_entrada():
 
                         if result is not None and not result.empty:
                             st.session_state.df_resultado = result
+                            bump_data_version()
                             try:
                                 from helpers.persistence import save_dataframe
                                 save_dataframe(result, name='current')
@@ -404,6 +413,7 @@ def page_entrada():
     with col_btn3:
         if st.button(t('entrada.clear_btn')):
             st.session_state.df_resultado = None
+            bump_data_version()
             st.session_state.log_messages = []
             try:
                 from helpers.persistence import clear_dataframe
@@ -434,6 +444,7 @@ def page_entrada():
                     else:
                         df = pd.read_csv(output_file, sep=';', encoding='utf-8-sig')
                     st.session_state.df_resultado = df
+                    bump_data_version()
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro: {e}")

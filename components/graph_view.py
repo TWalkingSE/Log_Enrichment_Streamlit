@@ -9,6 +9,12 @@ import streamlit as st
 import streamlit.components.v1 as components
 from styles.theme import COLORS
 
+# Tetos de renderização: vis.js roda física em O(nós+arestas) no navegador,
+# e o payload trafega inteiro pelo websocket do Streamlit.
+MAX_NODES = 500
+MAX_EDGES = 5000
+from validators import bool_series
+
 
 def render_ip_network_graph(df, height=650):
     """
@@ -24,33 +30,38 @@ def render_ip_network_graph(df, height=650):
         st.warning("Coluna IP não encontrada.")
         return
 
-    # Build graph data from DataFrame
+    # O grafo é de IPs, não de registros: iterar 200k linhas para produzir os
+    # mesmos ~4k nós era puro desperdício, e as arestas eram acrescentadas por
+    # LINHA sem deduplicação — com poucos IPs únicos o corte de nós nunca
+    # disparava e centenas de milhares de arestas idênticas iam para o
+    # navegador, derrubando a conexão.
+    unique_df = df.drop_duplicates(subset=[ip_col])
+    total_ips = len(unique_df)
+
+    proxy_flags = bool_series(unique_df, 'Ip_Proxy').tolist()
+    hosting_flags = bool_series(unique_df, 'Ip_Hospedagem').tolist()
+    mobile_flags = bool_series(unique_df, 'Ip_Movel').tolist()
+
     nodes = []
-    edges = []
     node_ids = set()
+    edge_set = set()   # (origem, destino, tipo) — deduplicação natural
 
-    # Group by ASN
-    asn_groups = {}
-    for _, row in df.iterrows():
+    for pos, (_, row) in enumerate(unique_df.iterrows()):
         ip = str(row.get(ip_col, ''))
-        asn = str(row.get('Ip_AS', 'Desconhecido'))
-        provider = str(row.get('Ip_Dono', ''))
-        city = str(row.get('Ip_Cidade', ''))
-        is_proxy = str(row.get('Ip_Proxy', '')).lower() == 'true'
-        is_hosting = str(row.get('Ip_Hospedagem', '')).lower() == 'true'
-        is_mobile = str(row.get('Ip_Movel', '')).lower() == 'true'
-
         if not ip or ip == 'nan':
             continue
 
-        if asn not in asn_groups:
-            asn_groups[asn] = {'provider': provider, 'ips': set(), 'cities': set()}
-        asn_groups[asn]['ips'].add(ip)
-        if city and city != 'nan':
-            asn_groups[asn]['cities'].add(city)
+        asn = str(row.get('Ip_AS', 'Desconhecido'))
+        provider = str(row.get('Ip_Dono', ''))
+        city = str(row.get('Ip_Cidade', ''))
+        is_proxy = proxy_flags[pos]
+        is_hosting = hosting_flags[pos]
+        is_mobile = mobile_flags[pos]
 
         # IP node
         if ip not in node_ids:
+            if len(node_ids) >= MAX_NODES:
+                continue
             color = COLORS['danger'] if is_proxy else COLORS['hosting'] if is_hosting else COLORS['mobile'] if is_mobile else COLORS['success']
             node_type = 'Proxy/VPN' if is_proxy else 'Hosting' if is_hosting else 'Móvel' if is_mobile else 'Residencial'
             nodes.append({
@@ -66,7 +77,7 @@ def render_ip_network_graph(df, height=650):
 
         # ASN node
         asn_id = f'asn_{asn}'
-        if asn_id not in node_ids:
+        if asn_id not in node_ids and len(node_ids) < MAX_NODES:
             nodes.append({
                 'id': asn_id,
                 'label': asn[:25] if len(asn) < 25 else asn[:22] + '...',
@@ -79,9 +90,10 @@ def render_ip_network_graph(df, height=650):
             node_ids.add(asn_id)
 
         # City node
+        city_id = None
         if city and city != 'nan':
             city_id = f'city_{city}'
-            if city_id not in node_ids:
+            if city_id not in node_ids and len(node_ids) < MAX_NODES:
                 nodes.append({
                     'id': city_id,
                     'label': city,
@@ -93,18 +105,30 @@ def render_ip_network_graph(df, height=650):
                 })
                 node_ids.add(city_id)
 
-            # IP → City edge
-            edges.append({'from': ip, 'to': city_id, 'color': {'color': COLORS['border']}, 'width': 1})
+        if city_id and ip in node_ids and city_id in node_ids:
+            edge_set.add((ip, city_id, 'city'))
+        if ip in node_ids and asn_id in node_ids:
+            edge_set.add((ip, asn_id, 'asn'))
 
-        # IP → ASN edge
-        edges.append({'from': ip, 'to': asn_id, 'color': {'color': COLORS['text_dim']}, 'width': 1})
+    edges = [
+        {'from': a, 'to': b,
+         'color': {'color': COLORS['border'] if kind == 'city' else COLORS['text_dim']},
+         'width': 1}
+        for a, b, kind in sorted(edge_set)
+    ]
 
-    # Limit nodes for performance
-    if len(nodes) > 500:
-        st.warning(f"Grafo limitado a 500 nós (total: {len(nodes)}). Filtre os dados para visualização completa.")
-        nodes = nodes[:500]
-        valid_ids = {n['id'] for n in nodes}
-        edges = [e for e in edges if e['from'] in valid_ids and e['to'] in valid_ids]
+    # Truncagem sempre explícita — o analista precisa saber que está vendo
+    # uma parte do grafo, não o todo.
+    truncated_edges = len(edges) > MAX_EDGES
+    if truncated_edges:
+        edges = edges[:MAX_EDGES]
+    if len(node_ids) >= MAX_NODES or truncated_edges:
+        st.warning(
+            f"Grafo truncado para {len(nodes)} nós e {len(edges)} arestas "
+            f"(de {total_ips} IPs únicos). Filtre os dados para ver o grafo completo."
+        )
+    else:
+        st.caption(f"{len(nodes)} nós e {len(edges)} arestas a partir de {total_ips} IPs únicos.")
 
     graph_data = json.dumps({'nodes': nodes, 'edges': edges}, ensure_ascii=False)
 

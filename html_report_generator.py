@@ -10,15 +10,16 @@ Gera um único arquivo .html self-contained com:
 - Expandir/colapsar seções
 """
 
-import os
 import hashlib
 import logging
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from validators import as_bool, bool_series, parse_data
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +40,9 @@ def _build_findings(df, analyses, n_total):
 
     proxy_n = hosting_n = mobile_n = 0
     if all(c in df.columns for c in ['Ip_Proxy', 'Ip_Hospedagem', 'Ip_Movel']):
-        proxy_n = int(df['Ip_Proxy'].apply(lambda x: str(x).lower() == 'true').sum())
-        hosting_n = int(df['Ip_Hospedagem'].apply(lambda x: str(x).lower() == 'true').sum())
-        mobile_n = int(df['Ip_Movel'].apply(lambda x: str(x).lower() == 'true').sum())
+        proxy_n = int(bool_series(df, 'Ip_Proxy').sum())
+        hosting_n = int(bool_series(df, 'Ip_Hospedagem').sum())
+        mobile_n = int(bool_series(df, 'Ip_Movel').sum())
 
     if proxy_n + hosting_n > n_total * 0.3:
         findings.append(f'Alto uso de anonimização ({proxy_n + hosting_n} conexões via proxy/hosting)')
@@ -63,6 +64,30 @@ def _build_findings(df, analyses, n_total):
             findings.append(f'{high_risk} IP(s) com risco elevado (>= 70)')
 
     return findings, proxy_n, hosting_n, mobile_n
+
+
+# Linhas por bloco ao calcular o hash de integridade do dataset.
+_HASH_CHUNK_ROWS = 50000
+# Teto de marcadores no mapa do relatório. Cada marcador vira ~500 bytes de
+# HTML inline, e o branca escapa o mapa inteiro dentro de um iframe srcdoc
+# (multiplicador de 4-6x sobre a string final).
+MAX_MAP_MARKERS = 5000
+
+
+def _hash_dataframe_csv(df, chunk_rows=_HASH_CHUNK_ROWS):
+    """SHA-256 do CSV do DataFrame, sem materializá-lo inteiro em memória.
+
+    Idêntico a `sha256(df.to_csv(index=False).encode('utf-8'))`: o primeiro
+    bloco carrega o cabeçalho e os demais não, exatamente como o CSV único.
+    """
+    digest = hashlib.sha256()
+    total = len(df)
+    if total == 0:
+        return hashlib.sha256(df.to_csv(index=False).encode('utf-8')).hexdigest()
+    for start in range(0, total, chunk_rows):
+        piece = df.iloc[start:start + chunk_rows]
+        digest.update(piece.to_csv(index=False, header=(start == 0)).encode('utf-8'))
+    return digest.hexdigest()
 
 
 def _generate_map_html(df):
@@ -95,14 +120,38 @@ def _generate_map_html(df):
                        **{c: (c, 'first') for c in extra_cols})
                   .reset_index())
 
+    # Truncagem visível: mantém os pontos de maior ocorrência e declara
+    # no próprio mapa o que ficou de fora.
+    marker_note = ''
+    if len(agg) > MAX_MAP_MARKERS:
+        total_markers = len(agg)
+        total_records = int(agg['_count'].sum())
+        agg = agg.nlargest(MAX_MAP_MARKERS, '_count')
+        kept_records = int(agg['_count'].sum())
+        pct = kept_records / total_records * 100 if total_records else 0
+        marker_note = (
+            f'Mapa exibindo os {MAX_MAP_MARKERS:,} pontos de maior ocorrência '
+            f'de {total_markers:,} ({pct:.1f}% dos registros).'
+        ).replace(',', '.')
+        logger.info("Mapa do relatório truncado: %d de %d marcadores",
+                    MAX_MAP_MARKERS, total_markers)
+
     center_lat = float(agg['Ip_Lat'].mean())
     center_lon = float(agg['Ip_Lon'].mean())
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=3,
-                   tiles='cartodbdark_matter', control_scale=True)
+    # Fundo sem chave de API. Os tiles da CARTO passaram a voltar carimbados
+    # com "API KEY REQUIRED" por cima do mapa, o que num laudo entregue
+    # inutiliza a figura. Ver helpers/geo.TILE_SOURCES.
+    from helpers.geo import (DEFAULT_TILE_RELATORIO, TILE_SOURCES,
+                             TILE_SOURCES_COM_ROTULO)
 
-    # Tile layers extras
-    folium.TileLayer('OpenStreetMap', name='OpenStreetMap').add_to(m)
-    folium.TileLayer('cartodbpositron', name='Light').add_to(m)
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=3,
+                   tiles=None, control_scale=True)
+    for nome in TILE_SOURCES_COM_ROTULO:
+        fonte = TILE_SOURCES[nome]
+        folium.TileLayer(
+            tiles=fonte['url'], attr=fonte['attr'], name=nome, overlay=False,
+            show=(nome == DEFAULT_TILE_RELATORIO),
+        ).add_to(m)
 
     # Feature groups por categoria
     fg_resid = folium.FeatureGroup(name='Residencial / Móvel', show=True)
@@ -120,9 +169,9 @@ def _generate_map_html(df):
         dono = _safe(row.get('Ip_Dono'))
         count = int(row['_count'])
 
-        is_proxy = str(row.get('Ip_Proxy', '')).lower() == 'true'
-        is_hosting = str(row.get('Ip_Hospedagem', '')).lower() == 'true'
-        is_mobile = str(row.get('Ip_Movel', '')).lower() == 'true'
+        is_proxy = as_bool(row.get('Ip_Proxy'), field='Ip_Proxy')
+        is_hosting = as_bool(row.get('Ip_Hospedagem'), field='Ip_Hospedagem')
+        is_mobile = as_bool(row.get('Ip_Movel'), field='Ip_Movel')
 
         if is_proxy:
             color, tipo, target = '#f87171', 'Proxy/VPN', cluster_proxy
@@ -194,7 +243,11 @@ def _generate_map_html(df):
     macro._template = Template(legend_html)
     m.get_root().add_child(macro)
 
-    return m._repr_html_()
+    html = m._repr_html_()
+    if marker_note:
+        html = (f'<p style="font-size:0.8rem;color:#f59e0b;margin:0 0 8px;">'
+                f'&#9888; {marker_note}</p>' + html)
+    return html
 
 
 def _plotly_to_div(fig, width=900, height=420):
@@ -282,7 +335,7 @@ def _generate_timeline_plot(df, risk_df=None):
     if 'Data' not in df.columns:
         return ""
     work = df.copy()
-    work['_dt'] = pd.to_datetime(work['Data'], format='mixed', errors='coerce')
+    work['_dt'] = parse_data(work['Data'])
     work = work.dropna(subset=['_dt'])
     if work.empty:
         return ""
@@ -329,7 +382,7 @@ def _generate_heatmap_plot(df):
     if 'Data' not in df.columns:
         return ""
     work = df.copy()
-    work['_dt'] = pd.to_datetime(work['Data'], format='mixed', errors='coerce')
+    work['_dt'] = parse_data(work['Data'])
     work = work.dropna(subset=['_dt'])
     if work.empty:
         return ""
@@ -371,22 +424,29 @@ def _generate_sankey_plot(df, max_per_level=8):
     work['Ip_Dono'] = work['Ip_Dono'].fillna('Desconhecido').astype(str)
 
     def _conn_type(row):
-        if str(row.get('Ip_Proxy', '')).lower() == 'true':
+        if as_bool(row.get('Ip_Proxy'), field='Ip_Proxy'):
             return 'Proxy/VPN'
-        if str(row.get('Ip_Hospedagem', '')).lower() == 'true':
+        if as_bool(row.get('Ip_Hospedagem'), field='Ip_Hospedagem'):
             return 'Hosting'
-        if str(row.get('Ip_Movel', '')).lower() == 'true':
+        if as_bool(row.get('Ip_Movel'), field='Ip_Movel'):
             return 'Móvel'
         return 'Residencial'
 
-    work['_conn'] = work.apply(_conn_type, axis=1)
-
-    # Limita top-N de cada nível para não ficar ilegível
+    # Limita top-N de cada nível ANTES de classificar: o apply por linha rodava
+    # sobre o DataFrame inteiro para depois descartar quase tudo.
     top_countries = set(work['Ip_Pais'].value_counts().head(max_per_level).index)
     top_providers = set(work['Ip_Dono'].value_counts().head(max_per_level).index)
     work = work[work['Ip_Pais'].isin(top_countries) & work['Ip_Dono'].isin(top_providers)]
     if work.empty:
         return ""
+
+    work = work.copy()
+    work['_conn'] = np.select(
+        [bool_series(work, 'Ip_Proxy'),
+         bool_series(work, 'Ip_Hospedagem'),
+         bool_series(work, 'Ip_Movel')],
+        ['Proxy/VPN', 'Hosting', 'Móvel'],
+        default='Residencial')
 
     # Constrói nós e fluxos
     countries = sorted(work['Ip_Pais'].unique())
@@ -473,9 +533,12 @@ def generate_html_report(df, alvo, config=None, analyses=None, audit_hash=None):
             periodo_fim = dates.max().strftime('%d/%m/%Y')
             dias_atividade = dates.dt.date.nunique()
 
-    # Hash dos dados
-    data_str = df.to_csv(index=False)
-    data_hash = hashlib.sha256(data_str.encode('utf-8')).hexdigest()
+    # Hash dos dados, em blocos.
+    # `df.to_csv()` inteiro produzia UMA string contígua com todo o dataset e
+    # `.encode()` uma segunda cópia — duas alocações gigantes só para calcular
+    # um digest. O resultado é byte-a-byte idêntico ao anterior (mesmo CSV,
+    # apenas alimentado ao hash em pedaços).
+    data_hash = _hash_dataframe_csv(df)
 
     # ----- BRANDING -----
     branding_in = config.get('branding') or {}
@@ -495,7 +558,10 @@ def generate_html_report(df, alvo, config=None, analyses=None, audit_hash=None):
         'operator': coc_in.get('operator', ''),
         'hostname': coc_in.get('hostname', ''),
         'enrichment_source': coc_in.get('enrichment_source', 'ip-api.com'),
-        'tool_version': coc_in.get('tool_version', 'Log Enrichment'),
+        # v5.3: coerção de booleanos corrigida (1/0 e VERDADEIRO passaram a ser
+        # reconhecidos). Relatórios v5.2 e v5.3 podem divergir sobre o mesmo
+        # arquivo de entrada — por isso a versão consta na cadeia de custódia.
+        'tool_version': coc_in.get('tool_version', 'Log Enrichment v5.3'),
         'receipt_hash': coc_in.get('receipt_hash', ''),
         'generated_at_iso': coc_in.get('generated_at_iso', datetime.now().isoformat()),
     }

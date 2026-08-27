@@ -14,6 +14,7 @@ import json
 import ipaddress
 from datetime import datetime
 from collections import defaultdict
+from validators import as_bool, bool_series, parse_data
 
 logger = logging.getLogger(__name__)
 
@@ -244,7 +245,7 @@ def compute_data_health(df):
 
     # Date coverage
     if 'Data' in df.columns:
-        has_date = pd.to_datetime(df['Data'], format='mixed', errors='coerce').notna().sum()
+        has_date = parse_data(df['Data']).notna().sum()
         metrics['date_coverage'] = round(has_date / total * 100, 1)
     else:
         metrics['date_coverage'] = 0
@@ -260,7 +261,7 @@ def compute_data_health(df):
 
     # Proxy/Hosting ratio
     if 'Ip_Proxy' in df.columns:
-        metrics['proxy_ratio'] = round(df['Ip_Proxy'].apply(lambda x: str(x).lower() == 'true').sum() / total * 100, 1)
+        metrics['proxy_ratio'] = round(bool_series(df, 'Ip_Proxy').sum() / total * 100, 1)
     else:
         metrics['proxy_ratio'] = 0
 
@@ -289,7 +290,7 @@ def detect_relay_chains(df, date_col='Data', max_gap_minutes=10):
     Returns dict with chains found, suspicious patterns, relay_score (0-100).
     """
     df_r = df.copy()
-    df_r['_dt'] = pd.to_datetime(df_r[date_col], format='mixed', errors='coerce')
+    df_r['_dt'] = parse_data(df_r[date_col])
     df_r = df_r.dropna(subset=['_dt']).sort_values('_dt')
 
     if len(df_r) < 3:
@@ -297,11 +298,11 @@ def detect_relay_chains(df, date_col='Data', max_gap_minutes=10):
 
     # Classify each record
     def _classify(row):
-        if str(row.get('Ip_Proxy', '')).lower() == 'true':
+        if as_bool(row.get('Ip_Proxy'), field='Ip_Proxy'):
             return 'proxy'
-        if str(row.get('Ip_Hospedagem', '')).lower() == 'true':
+        if as_bool(row.get('Ip_Hospedagem'), field='Ip_Hospedagem'):
             return 'datacenter'
-        if str(row.get('Ip_Movel', '')).lower() == 'true':
+        if as_bool(row.get('Ip_Movel'), field='Ip_Movel'):
             return 'mobile'
         return 'residential'
 
@@ -375,13 +376,13 @@ def fingerprint_device_by_ip_pattern(dataframes_dict, date_col='Data', window_mi
     # Build fingerprint per target: list of (timestamp_bucket, provider, infra_type)
     def _build_fingerprint(df):
         df_f = df.copy()
-        df_f['_dt'] = pd.to_datetime(df_f[date_col], format='mixed', errors='coerce')
+        df_f['_dt'] = parse_data(df_f[date_col])
         df_f = df_f.dropna(subset=['_dt']).sort_values('_dt')
         fingerprints = []
         for _, row in df_f.iterrows():
             bucket = row['_dt'].floor(f'{window_minutes}min')
             provider = str(row.get('Ip_Dono', '')).lower()[:20]
-            infra = 'dc' if str(row.get('Ip_Hospedagem', '')).lower() == 'true' else 'res'
+            infra = 'dc' if as_bool(row.get('Ip_Hospedagem'), field='Ip_Hospedagem') else 'res'
             fingerprints.append((bucket, provider, infra))
         return set(fingerprints)
 
@@ -436,7 +437,7 @@ def detect_shared_wifi(dataframes_dict, date_col='Data', tolerance_seconds=60):
         ip_col = 'Sender IP' if 'Sender IP' in df_w.columns else 'Ip'
         if ip_col not in df_w.columns or date_col not in df_w.columns:
             continue
-        df_w['_dt'] = pd.to_datetime(df_w[date_col], format='mixed', errors='coerce')
+        df_w['_dt'] = parse_data(df_w[date_col])
         df_w = df_w.dropna(subset=['_dt'])
         events = set()
         for _, row in df_w.iterrows():
@@ -487,7 +488,7 @@ def detect_digital_silence(df, date_col='Data', min_gap_hours=24):
     Returns dict with silence_periods, correlations, risk indicators.
     """
     df_s = df.copy()
-    df_s['_dt'] = pd.to_datetime(df_s[date_col], format='mixed', errors='coerce')
+    df_s['_dt'] = parse_data(df_s[date_col])
     df_s = df_s.dropna(subset=['_dt']).sort_values('_dt')
 
     if len(df_s) < 2:
@@ -600,7 +601,7 @@ def validate_timezone_consistency(df, date_col='Data', sleep_pattern=None):
     }
 
     df_t = df.copy()
-    df_t['_dt'] = pd.to_datetime(df_t[date_col], format='mixed', errors='coerce')
+    df_t['_dt'] = parse_data(df_t[date_col])
     df_t = df_t.dropna(subset=['_dt'])
 
     if df_t.empty or 'Ip_Pais_Codigo' not in df_t.columns:
@@ -777,8 +778,8 @@ def compute_shodan_risk_indicators(shodan_results, df=None):
         ip_col = 'Sender IP' if 'Sender IP' in df.columns else 'Ip'
         if ip_col in df.columns:
             for _, row in df.drop_duplicates(subset=[ip_col]).iterrows():
-                is_hosting = str(row.get('Ip_Hospedagem', '')).lower() == 'true'
-                is_proxy = str(row.get('Ip_Proxy', '')).lower() == 'true'
+                is_hosting = as_bool(row.get('Ip_Hospedagem'), field='Ip_Hospedagem')
+                is_proxy = as_bool(row.get('Ip_Proxy'), field='Ip_Proxy')
                 infra_map[str(row[ip_col])] = 'hosting' if (is_hosting or is_proxy) else 'residential'
 
     for r in shodan_results:
@@ -1174,7 +1175,7 @@ def check_tor_exit_nodes(df, tor_nodes_set=None, ip_col=None):
     tor_timeline = []
     if tor_ips and 'Data' in df.columns:
         df_tor = df[df[ip_col].isin(tor_ips)].copy()
-        df_tor['_dt'] = pd.to_datetime(df_tor['Data'], format='mixed', errors='coerce')
+        df_tor['_dt'] = parse_data(df_tor['Data'])
         df_tor = df_tor.dropna(subset=['_dt']).sort_values('_dt')
         for ip in tor_ips:
             ip_dates = df_tor[df_tor[ip_col] == ip]['_dt'].tolist()

@@ -20,7 +20,7 @@ from analysis import (
     check_geofence,
     classify_dataframe,
     classify_infrastructure,
-    compare_periods,
+    compare_split_periods,
     detect_base_locations,
     detect_impossible_jumps,
     detect_travel_pattern,
@@ -29,32 +29,19 @@ from analysis import (
     generate_behavioral_profile,
 )
 from components.visualizations import render_map_replay
-from helpers.geo import build_cluster_popup, build_rich_popup, haversine_km
+from helpers.geo import build_cluster_popup, build_rich_popup
+from validators import as_bool, bool_series, parse_data
+from helpers.large_data import gate, show_truncation, PREVIEW_ROWS
+
+# Tetos de exportação/renderização desta página. Toda truncagem é declarada.
+MAX_GEOJSON_FEATURES = 20000
+MAX_HULL_MARKERS = 2000
 
 logger = logging.getLogger(__name__)
 
-FOLIUM_TILE_SOURCES = {
-    'Escuro': {
-        'tiles': 'CartoDB dark_matter',
-        'attr': '© OpenStreetMap contributors © CARTO',
-    },
-    'Escuro (sem labels)': {
-        'tiles': 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
-        'attr': '© OpenStreetMap contributors © CARTO',
-    },
-    'Claro': {
-        'tiles': 'CartoDB positron',
-        'attr': '© OpenStreetMap contributors © CARTO',
-    },
-    'Voyager': {
-        'tiles': 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-        'attr': '© OpenStreetMap contributors © CARTO',
-    },
-    'OpenStreetMap': {
-        'tiles': 'OpenStreetMap',
-        'attr': '© OpenStreetMap contributors',
-    },
-}
+# Os fundos vivem em helpers/geo.py, compartilhados com o relatório: os tiles
+# da CARTO passaram a voltar carimbados com "API KEY REQUIRED" por cima do mapa.
+from helpers.geo import DEFAULT_TILE, TILE_SOURCES, add_base_layer
 
 LEGEND_INFRA = [
     ('Residencial', '#22c55e', 'normal'),
@@ -67,27 +54,20 @@ LEGEND_INFRA = [
 
 
 def _is_true(value):
-    return str(value).strip().lower() == 'true'
+    return as_bool(value)
 
 
 def _series_bool(df, column_name):
-    if column_name not in df.columns:
-        return pd.Series(False, index=df.index)
-    return df[column_name].fillna(False).map(_is_true)
+    return bool_series(df, column_name)
 
 
 def _marker_radius(count):
     return max(4, min(14, 4 + math.log2(max(int(count), 1)) * 2.2))
 
 
-def _tile_layer(style_name):
-    return FOLIUM_TILE_SOURCES.get(style_name, FOLIUM_TILE_SOURCES['Escuro'])
-
-
 def _create_base_map(df_map, tile_style, zoom_start=4):
     center_lat = float(df_map['Ip_Lat'].mean())
     center_lon = float(df_map['Ip_Lon'].mean())
-    tile = _tile_layer(tile_style)
 
     fmap = folium.Map(
         location=[center_lat, center_lon],
@@ -95,15 +75,12 @@ def _create_base_map(df_map, tile_style, zoom_start=4):
         tiles=None,
         control_scale=True,
     )
-    folium.TileLayer(
-        tiles=tile['tiles'],
-        attr=tile['attr'],
-        name=tile_style,
-        overlay=False,
-        control=False,
-    ).add_to(fmap)
+    add_base_layer(fmap, tile_style)
     Fullscreen(position='topleft').add_to(fmap)
-    MiniMap(tile_layer='CartoDB positron', position='bottomright', width=120, height=120).add_to(fmap)
+    MiniMap(tile_layer=folium.TileLayer(
+        tiles=TILE_SOURCES['OpenStreetMap']['url'],
+        attr=TILE_SOURCES['OpenStreetMap']['attr']),
+        position='bottomright', width=120, height=120).add_to(fmap)
     MeasureControl(position='topleft', primary_length_unit='kilometers', secondary_length_unit='meters').add_to(fmap)
     return fmap
 
@@ -263,7 +240,7 @@ def _render_heatmap_map(df_map, ip_col, tile_style):
 
 def _prepare_route_dataframe(df_map, max_points=450):
     route_df = df_map.copy()
-    route_df['_dt'] = pd.to_datetime(route_df['Data'], format='mixed', errors='coerce') if 'Data' in route_df.columns else pd.NaT
+    route_df['_dt'] = parse_data(route_df['Data']) if 'Data' in route_df.columns else pd.NaT
     route_df = route_df.dropna(subset=['_dt']).sort_values('_dt')
     if len(route_df) > max_points:
         step = max(1, len(route_df) // max_points)
@@ -470,10 +447,14 @@ def page_mapa():
             key='map_view',
         )
     with filter_col5:
-        tile_style = st.selectbox('Estilo do Mapa', list(FOLIUM_TILE_SOURCES.keys()), key='map_tile_style')
+        # Um estilo gravado na sessão que não exista mais faria o selectbox
+        # levantar exceção; melhor voltar ao padrão do que derrubar a página.
+        if st.session_state.get('map_tile_style') not in TILE_SOURCES:
+            st.session_state['map_tile_style'] = DEFAULT_TILE
+        tile_style = st.selectbox('Estilo do Mapa', list(TILE_SOURCES.keys()), key='map_tile_style')
 
     if 'Data' in df_m.columns:
-        df_m['_dt_filter'] = pd.to_datetime(df_m['Data'], format='mixed', errors='coerce')
+        df_m['_dt_filter'] = parse_data(df_m['Data'])
         valid_dates = df_m['_dt_filter'].dropna()
         if len(valid_dates) > 1:
             min_date = valid_dates.min().date()
@@ -602,21 +583,44 @@ def page_mapa():
         with export_col3:
             st.subheader('📦 GeoJSON')
             if st.button('Exportar GeoJSON', key='map_geojson_btn'):
-                features = []
-                for _, row in classified_df.iterrows():
-                    features.append({
-                        'type': 'Feature',
-                        'geometry': {'type': 'Point', 'coordinates': [row['Ip_Lon'], row['Ip_Lat']]},
-                        'properties': {
-                            'ip': row.get(ip_col, ''),
-                            'provedor': row.get('Ip_Dono', ''),
-                            'cidade': row.get('Ip_Cidade', ''),
-                            'pais': row.get('Ip_Pais', ''),
-                            'data': str(row.get('Data', '')),
-                        },
-                    })
-                geojson = json.dumps({'type': 'FeatureCollection', 'features': features}, indent=2, ensure_ascii=False)
-                st.download_button('📥 Baixar GeoJSON', geojson, 'ip_locations.geojson', 'application/geo+json', key='map_geojson_dl')
+                # `iterrows()` sobre 200k linhas construía 200k dicts e o
+                # `json.dumps(indent=2)` uma única string de centenas de MB,
+                # empurrada inteira pelo websocket. Aqui os registros são
+                # agregados por ponto/IP e o volume é declarado ao analista.
+                geo_cols = [c for c in (ip_col, 'Ip_Dono', 'Ip_Cidade', 'Ip_Pais')
+                            if c in classified_df.columns]
+                pontos = classified_df.dropna(subset=['Ip_Lat', 'Ip_Lon'])
+                tem_data = 'Data' in pontos.columns
+                agregacoes = {'_ocorrencias': ('Ip_Lat', 'size')}
+                if tem_data:
+                    agregacoes['_primeira'] = ('Data', 'min')
+                    agregacoes['_ultima'] = ('Data', 'max')
+                agrupado = (pontos.groupby(['Ip_Lat', 'Ip_Lon'] + geo_cols, dropna=False)
+                                  .agg(**agregacoes).reset_index())
+                total_pontos = len(agrupado)
+                if total_pontos > MAX_GEOJSON_FEATURES:
+                    agrupado = agrupado.nlargest(MAX_GEOJSON_FEATURES, '_ocorrencias')
+                features = [{
+                    'type': 'Feature',
+                    'geometry': {'type': 'Point',
+                                 'coordinates': [r['Ip_Lon'], r['Ip_Lat']]},
+                    'properties': {
+                        'ip': r.get(ip_col, ''),
+                        'provedor': r.get('Ip_Dono', ''),
+                        'cidade': r.get('Ip_Cidade', ''),
+                        'pais': r.get('Ip_Pais', ''),
+                        'ocorrencias': int(r['_ocorrencias']),
+                        # Campos temporais só quando há coluna de data: emitir
+                        # um valor inventado num artefato pericial é pior que omiti-lo.
+                        **({'primeira_ocorrencia': str(r['_primeira']),
+                            'ultima_ocorrencia': str(r['_ultima'])} if tem_data else {}),
+                    },
+                } for _, r in agrupado.iterrows()]
+                geojson = json.dumps({'type': 'FeatureCollection', 'features': features},
+                                     ensure_ascii=False)
+                show_truncation(len(features), total_pontos, 'pontos distintos')
+                st.download_button('📥 Baixar GeoJSON', geojson, 'ip_locations.geojson',
+                                   'application/geo+json', key='map_geojson_dl')
 
     with tool_tabs[1]:
         st.subheader('📍 Geofencing')
@@ -642,18 +646,25 @@ def page_mapa():
                 st.success(f'✅ Todos os IPs ficaram dentro da cerca de {geo_radius} km.')
 
     with tool_tabs[2]:
+        # st.tabs executa o corpo de TODAS as abas a cada rerun, visíveis ou
+        # não. Sem estes portões, arrastar o slider abaixo disparava três
+        # varreduras completas do DataFrame — mesmo com a aba fechada.
         st.subheader('⚡ Deteccao de Saltos Impossiveis')
         max_speed = st.slider('Velocidade maxima (km/h)', 100, 2000, 900, key='map_anom_speed')
-        jumps = detect_impossible_jumps(df, max_speed_kmh=max_speed)
-        if not jumps.empty:
-            st.error(f'🚨 **{len(jumps)}** saltos impossiveis detectados (>{max_speed} km/h).')
-            st.dataframe(jumps, hide_index=True, use_container_width=True)
-        else:
-            st.success('✅ Nenhum salto impossivel detectado.')
+        if gate('⚡ Detectar saltos impossiveis', df, 'map_jumps'):
+            jumps = detect_impossible_jumps(df, max_speed_kmh=max_speed)
+            if not jumps.empty:
+                st.error(f'🚨 **{len(jumps)}** saltos impossiveis detectados (>{max_speed} km/h).')
+                shown = jumps.head(PREVIEW_ROWS)
+                st.dataframe(shown, hide_index=True, use_container_width=True)
+                show_truncation(len(shown), len(jumps), 'saltos')
+            else:
+                st.success('✅ Nenhum salto impossivel detectado.')
 
         st.divider()
         st.subheader('🏠 Deteccao de Locais Base')
-        bases = detect_base_locations(df)
+        bases = (detect_base_locations(df)
+                 if gate('🏠 Detectar locais base', df, 'map_bases') else {})
         base_col1, base_col2 = st.columns(2)
         with base_col1:
             if bases.get('home'):
@@ -673,71 +684,73 @@ def page_mapa():
     with tool_tabs[3]:
         st.subheader('🧠 Perfil Comportamental')
         target_name = st.session_state.alvo or 'desconhecido'
-        profile = generate_behavioral_profile(df, alvo=target_name)
+        # st.tabs executa este corpo a cada rerun, mesmo com a aba fechada.
+        if gate('🧠 Gerar perfil comportamental', df, 'map_profile'):
+            profile = generate_behavioral_profile(df, alvo=target_name)
 
-        profile_col1, profile_col2, profile_col3, profile_col4 = st.columns(4)
-        with profile_col1:
-            st.metric('📅 Dias Monitorados', profile['dias_monitorados'])
-        with profile_col2:
-            st.metric('🔢 Registros', profile['total_registros'])
-        with profile_col3:
-            st.metric('🌐 IPs Unicos', profile['ips_unicos'])
-        with profile_col4:
-            st.metric('⏰ Padrao', profile['padrao_atividade'] or 'N/A')
+            profile_col1, profile_col2, profile_col3, profile_col4 = st.columns(4)
+            with profile_col1:
+                st.metric('📅 Dias Monitorados', profile['dias_monitorados'])
+            with profile_col2:
+                st.metric('🔢 Registros', profile['total_registros'])
+            with profile_col3:
+                st.metric('🌐 IPs Unicos', profile['ips_unicos'])
+            with profile_col4:
+                st.metric('⏰ Padrao', profile['padrao_atividade'] or 'N/A')
 
-        if profile['resumo']:
-            st.code(profile['resumo'], language=None)
+            if profile['resumo']:
+                st.code(profile['resumo'], language=None)
 
-        profile_list_col1, profile_list_col2 = st.columns(2)
-        with profile_list_col1:
-            if profile['provedores']:
-                st.markdown('**Provedores utilizados:**')
-                for provider in profile['provedores']:
-                    st.markdown(f'- {provider}')
-        with profile_list_col2:
-            if profile['cidades_visitadas']:
-                st.markdown('**Cidades visitadas:**')
-                for city in profile['cidades_visitadas']:
-                    st.markdown(f'- {city}')
+            profile_list_col1, profile_list_col2 = st.columns(2)
+            with profile_list_col1:
+                if profile['provedores']:
+                    st.markdown('**Provedores utilizados:**')
+                    for provider in profile['provedores']:
+                        st.markdown(f'- {provider}')
+            with profile_list_col2:
+                if profile['cidades_visitadas']:
+                    st.markdown('**Cidades visitadas:**')
+                    for city in profile['cidades_visitadas']:
+                        st.markdown(f'- {city}')
 
-        if 'Data' in df.columns:
-            st.divider()
-            st.subheader('📈 Timeline de Atividade')
-            profile_df = df.copy()
-            profile_df['_dt'] = pd.to_datetime(profile_df['Data'], errors='coerce')
-            profile_df = profile_df.dropna(subset=['_dt'])
-            if not profile_df.empty:
-                profile_df['_date'] = profile_df['_dt'].dt.date
-                daily = profile_df.groupby('_date').size().reset_index(name='Acessos')
-                daily.columns = ['Data', 'Acessos']
-                fig_timeline = px.area(daily, x='Data', y='Acessos', color_discrete_sequence=['#818cf8'])
-                fig_timeline.update_layout(
-                    height=250,
-                    margin=dict(l=0, r=0, t=10, b=10),
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    paper_bgcolor='rgba(0,0,0,0)',
-                )
-                st.plotly_chart(fig_timeline, use_container_width=True, key='map_profile_timeline')
+            if 'Data' in df.columns:
+                st.divider()
+                st.subheader('📈 Timeline de Atividade')
+                profile_df = df.copy()
+                profile_df['_dt'] = pd.to_datetime(profile_df['Data'], errors='coerce')
+                profile_df = profile_df.dropna(subset=['_dt'])
+                if not profile_df.empty:
+                    profile_df['_date'] = profile_df['_dt'].dt.date
+                    daily = profile_df.groupby('_date').size().reset_index(name='Acessos')
+                    daily.columns = ['Data', 'Acessos']
+                    fig_timeline = px.area(daily, x='Data', y='Acessos', color_discrete_sequence=['#818cf8'])
+                    fig_timeline.update_layout(
+                        height=250,
+                        margin=dict(l=0, r=0, t=10, b=10),
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        paper_bgcolor='rgba(0,0,0,0)',
+                    )
+                    st.plotly_chart(fig_timeline, use_container_width=True, key='map_profile_timeline')
 
-                profile_df['_hour'] = profile_df['_dt'].dt.hour
-                profile_df['_dow'] = profile_df['_dt'].dt.day_name()
-                heat = profile_df.groupby(['_dow', '_hour']).size().reset_index(name='count')
-                day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-                heat_pivot = heat.pivot_table(index='_dow', columns='_hour', values='count', fill_value=0)
-                heat_pivot = heat_pivot.reindex(day_order)
-                fig_heat = px.imshow(
-                    heat_pivot,
-                    aspect='auto',
-                    color_continuous_scale='YlOrRd',
-                    labels=dict(x='Hora', y='Dia', color='Acessos'),
-                )
-                fig_heat.update_layout(
-                    height=250,
-                    margin=dict(l=0, r=0, t=10, b=10),
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    paper_bgcolor='rgba(0,0,0,0)',
-                )
-                st.plotly_chart(fig_heat, use_container_width=True, key='map_profile_heatmap')
+                    profile_df['_hour'] = profile_df['_dt'].dt.hour
+                    profile_df['_dow'] = profile_df['_dt'].dt.day_name()
+                    heat = profile_df.groupby(['_dow', '_hour']).size().reset_index(name='count')
+                    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                    heat_pivot = heat.pivot_table(index='_dow', columns='_hour', values='count', fill_value=0)
+                    heat_pivot = heat_pivot.reindex(day_order)
+                    fig_heat = px.imshow(
+                        heat_pivot,
+                        aspect='auto',
+                        color_continuous_scale='YlOrRd',
+                        labels=dict(x='Hora', y='Dia', color='Acessos'),
+                    )
+                    fig_heat.update_layout(
+                        height=250,
+                        margin=dict(l=0, r=0, t=10, b=10),
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        paper_bgcolor='rgba(0,0,0,0)',
+                    )
+                    st.plotly_chart(fig_heat, use_container_width=True, key='map_profile_heatmap')
 
     with tool_tabs[4]:
         st.subheader('📅 Comparacao Temporal')
@@ -748,7 +761,7 @@ def page_mapa():
                 max_date = date_series.max().date()
                 mid_date = min_date + (max_date - min_date) / 2
                 split_date = st.date_input('Data de divisao', value=mid_date, min_value=min_date, max_value=max_date, key='map_cmp_split')
-                comparison = compare_periods(df, split_date=str(split_date))
+                comparison = compare_split_periods(df, split_date=str(split_date))
                 if comparison:
                     comp_col1, comp_col2 = st.columns(2)
                     period_a = comparison['periodo_a']
@@ -814,7 +827,8 @@ def page_mapa():
                 st.metric('📍 Localizacoes', area_data['num_points'])
 
             if area_data['area_km2'] > 0:
-                hull_map = folium.Map(location=area_data['center'], zoom_start=5, tiles='CartoDB dark_matter')
+                hull_map = folium.Map(location=area_data['center'], zoom_start=5, tiles=None)
+                add_base_layer(hull_map, tile_style)
                 folium.Polygon(
                     locations=area_data['hull_coords'],
                     color='#818cf8',
@@ -823,17 +837,24 @@ def page_mapa():
                     fill_color='#818cf8',
                     fill_opacity=0.15,
                 ).add_to(hull_map)
-                for _, row in classified_df.drop_duplicates(subset=[ip_col]).iterrows():
-                    infra = classify_infrastructure(row)
+                # `_infra_color` já foi calculado por classify_dataframe;
+                # reclassificar por marcador era trabalho repetido.
+                marcadores = classified_df.drop_duplicates(subset=[ip_col])
+                total_marcadores = len(marcadores)
+                if total_marcadores > MAX_HULL_MARKERS:
+                    marcadores = marcadores.head(MAX_HULL_MARKERS)
+                for _, row in marcadores.iterrows():
+                    cor = row.get('_infra_color') or classify_infrastructure(row)['circle_color']
                     folium.CircleMarker(
                         location=[row['Ip_Lat'], row['Ip_Lon']],
                         radius=4,
-                        color=infra['circle_color'],
+                        color=cor,
                         fill=True,
-                        fill_color=infra['circle_color'],
+                        fill_color=cor,
                         fill_opacity=0.85,
                         tooltip=f"{row.get(ip_col, '')} - {row.get('Ip_Cidade', '')}",
                     ).add_to(hull_map)
+                show_truncation(len(marcadores), total_marcadores, 'IPs no mapa de área')
                 st_folium(hull_map, use_container_width=True, height=400, returned_objects=[], key='map_hull_map')
         except Exception as exc:
             st.warning(f'Nao foi possivel calcular a area: {exc}')

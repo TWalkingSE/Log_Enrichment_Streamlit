@@ -13,7 +13,6 @@ from analysis import compute_data_health, calculate_risk_scores
 from ip_investigativo import render_analise_investigativa
 from components.visualizations import render_health_gauges
 from ai_assistant import AI_MODELS, check_ollama_status, get_default_ai_tier, run_ai_analysis
-from styles.theme import COLORS
 from i18n import t
 
 _SNAPSHOTS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),

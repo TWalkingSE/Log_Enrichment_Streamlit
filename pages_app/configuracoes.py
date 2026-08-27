@@ -211,13 +211,13 @@ def page_configuracoes():
         with c2:
             st.subheader(t('configuracoes.formats_title'))
             with st.expander("Formato 1: Genérico (Lista de IPs)"):
-                st.code("191.13.51.97\n2804:18:18bf:9681:1:0:70f2:df19\n187.37.136.128", language=None)
+                st.code("198.51.100.20\n2001:db8:18bf:9681:1:0:70f2:df19\n198.51.100.18", language=None)
             with st.expander("Formato 2: Meta Platforms (Instagram/Facebook)"):
-                st.code("IP Address\n24.152.81.150:22859\nTime\n2025-09-29 11:15:01 UTC", language=None)
+                st.code("IP Address\n198.51.100.10:22859\nTime\n2025-09-29 11:15:01 UTC", language=None)
             with st.expander("Formato 3: WhatsApp"):
-                st.code("Time\n2025-12-10 18:58:48 UTC\nIP Address\n2804:14d:8e90:866e:d4ba:a89a:bcd8:8dc7", language=None)
+                st.code("Time\n2025-12-10 18:58:48 UTC\nIP Address\n2001:db8:8e90:866e:d4ba:a89a:bcd8:8dc7", language=None)
             with st.expander("Formato 4: Google"):
-                st.code("IP ACTIVITY\n\nTimestamp   IP Address  Activity Type\n2023-02-25 04:34:32 Z   187.37.136.128    Login", language=None)
+                st.code("IP ACTIVITY\n\nTimestamp   IP Address  Activity Type\n2023-02-25 04:34:32 Z   198.51.100.18    Login", language=None)
             with st.expander("Formato 5: TikTok (Events IP Data)"):
                 st.code("Date: 27/07/2026 03:04:43PM (UTC +00)\nIP: 203.0.113.45\nEvent: video_play\nCountry: Brazil", language=None)
             st.subheader(t('configuracoes.output_formats_title'))

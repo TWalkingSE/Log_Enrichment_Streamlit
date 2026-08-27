@@ -1,12 +1,7 @@
 """analysis.export_kml — split from analysis monolith."""
 import pandas as pd
-import numpy as np
-import os
-import json
-import shutil
-import glob
 import logging
-from datetime import datetime
+from validators import as_bool, parse_data
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +17,7 @@ def export_kml_animated(df, ip_col='Ip', lat_col='Ip_Lat', lon_col='Ip_Lon', dat
     df_kml = df.copy()
     df_kml[lat_col] = pd.to_numeric(df_kml[lat_col], errors='coerce')
     df_kml[lon_col] = pd.to_numeric(df_kml[lon_col], errors='coerce')
-    df_kml['_dt'] = pd.to_datetime(df_kml.get(date_col, pd.Series(dtype='object')),
-                                    format='mixed', errors='coerce')
+    df_kml['_dt'] = parse_data(df_kml.get(date_col, pd.Series(dtype='object')))
     df_kml = df_kml.dropna(subset=[lat_col, lon_col, '_dt'])
     df_kml = df_kml[(df_kml[lat_col] != 0) | (df_kml[lon_col] != 0)]
     df_kml = df_kml.sort_values('_dt')
@@ -52,8 +46,8 @@ def export_kml_animated(df, ip_col='Ip', lat_col='Ip_Lat', lon_col='Ip_Lon', dat
         desc_parts.append(f"Data: {dt.strftime('%Y-%m-%d %H:%M:%S')}")
         pnt.description = '\n'.join(desc_parts)
 
-        is_proxy = str(row.get('Ip_Proxy', '')).lower() == 'true'
-        is_hosting = str(row.get('Ip_Hospedagem', '')).lower() == 'true'
+        is_proxy = as_bool(row.get('Ip_Proxy'), field='Ip_Proxy')
+        is_hosting = as_bool(row.get('Ip_Hospedagem'), field='Ip_Hospedagem')
         if is_proxy:
             pnt.style.iconstyle.color = simplekml.Color.red
         elif is_hosting:

@@ -1,12 +1,7 @@
 """analysis.profile — split from analysis monolith."""
 import pandas as pd
-import numpy as np
-import os
-import json
-import shutil
-import glob
 import logging
-from datetime import datetime
+from validators import as_bool, bool_series, parse_data
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +15,7 @@ def detect_vpn_timing(df, date_col='Data', max_gap_seconds=5):
         return {'detected': False, 'pairs': []}
 
     df_w = df.copy()
-    df_w['_dt'] = pd.to_datetime(df_w[date_col], format='mixed', errors='coerce')
+    df_w['_dt'] = parse_data(df_w[date_col])
     df_w = df_w.dropna(subset=['_dt']).sort_values('_dt')
 
     if len(df_w) < 2:
@@ -34,7 +29,7 @@ def detect_vpn_timing(df, date_col='Data', max_gap_seconds=5):
         if prev is not None:
             gap_sec = abs((row['_dt'] - prev['_dt']).total_seconds())
             if gap_sec <= max_gap_seconds:
-                prev_hosting = str(prev.get('Ip_Hospedagem', False)).lower() == 'true' or str(prev.get('Ip_Proxy', False)).lower() == 'true'
+                prev_hosting = as_bool(prev.get('Ip_Hospedagem'), field='Ip_Hospedagem') or as_bool(prev.get('Ip_Proxy'), field='Ip_Proxy')
                 curr_residential = str(row.get('Ip_Hospedagem', False)).lower() != 'true' and str(row.get('Ip_Proxy', False)).lower() != 'true'
 
                 if prev_hosting and curr_residential and prev.get(ip_col) != row.get(ip_col):
@@ -70,8 +65,7 @@ def detect_usage_profile(df, date_col='Data'):
         return {'profile': 'indeterminado', 'confidence': 0, 'indicators': []}
 
     df_w = df.copy()
-    df_w['_dt'] = pd.to_datetime(df_w.get(date_col, pd.Series(dtype='object')),
-                                  format='mixed', errors='coerce')
+    df_w['_dt'] = parse_data(df_w.get(date_col, pd.Series(dtype='object')))
     df_w = df_w.dropna(subset=['_dt'])
 
     indicators = []
@@ -118,7 +112,7 @@ def detect_usage_profile(df, date_col='Data'):
 
     # 4. Tipo de conexão
     if 'Ip_Movel' in df_w.columns:
-        mobile_pct = df_w['Ip_Movel'].apply(lambda x: str(x).lower() == 'true').sum() / max(len(df_w), 1) * 100
+        mobile_pct = bool_series(df_w, 'Ip_Movel').sum() / max(len(df_w), 1) * 100
         if mobile_pct > 50:
             res_score += 15
             indicators.append(f"📱 {mobile_pct:.0f}% conexões móveis — uso pessoal")

@@ -2,7 +2,9 @@ import asyncio
 import aiohttp
 import gzip
 import json
+import io
 import os
+import tempfile
 import time
 import re
 import logging
@@ -37,6 +39,31 @@ MAX_RETRIES = 3
 # Rate limit da API gratuita: 45 req/min
 FREE_API_RATE_LIMIT = 45
 FREE_API_PERIOD = 60
+
+
+def _atomic_write(path, write_fn, mode='w', **open_kwargs):
+    """Escreve via arquivo temporário + os.replace (atômico em NTFS e POSIX).
+
+    O padrão anterior (`open(path, 'w')` + dump) trunca o arquivo ANTES de
+    escrever: uma falha no meio deixava JSON inválido, e o carregamento
+    seguinte começava do zero silenciosamente — descartando milhares de IPs
+    já enriquecidos.
+    """
+    directory = os.path.dirname(os.path.abspath(path)) or '.'
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix='.tmp_cache_', suffix='.part')
+    os.close(fd)
+    try:
+        with open(tmp, mode, **open_kwargs) as f:
+            write_fn(f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
 
 class IPAPIClient:
@@ -120,14 +147,22 @@ class IPAPIClient:
                 logger.debug(f"Verificação de assinatura de cache ignorada: {sig_err}")
             # Migrar cache antigo (sem TTL) e filtrar expirados
             now = time.time()
+            expired_count = 0
             for ip_key, entry in raw_cache.items():
-                if isinstance(entry, dict):
-                    ts = entry.get('_cached_at', 0)
-                    if ts == 0 or (now - ts) < self.cache_ttl:
-                        if '_cached_at' not in entry:
-                            entry['_cached_at'] = now
-                        self.cache[ip_key] = entry
-            expired_count = len(raw_cache) - len(self.cache)
+                if not isinstance(entry, dict):
+                    continue
+                ts = entry.get('_cached_at')
+                # Timestamp ausente, zero ou inválido = idade desconhecida.
+                # Num laudo não se serve geolocalização de vintage incerta, e
+                # o código antigo deixava `_cached_at: 0` explícito imortal
+                # (passava pelo ramo `ts == 0` sem ser recarimbado).
+                if not isinstance(ts, (int, float)) or isinstance(ts, bool) or ts <= 0:
+                    expired_count += 1
+                    continue
+                if (now - ts) < self.cache_ttl:
+                    self.cache[ip_key] = entry
+                else:
+                    expired_count += 1
             logger.info(f"Cache carregado: {len(self.cache)} entradas válidas, {expired_count} expiradas removidas")
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as e:
             logger.error(f"Erro ao carregar cache: {e}")
@@ -175,7 +210,9 @@ class IPAPIClient:
         if ip in self.cache:
             entry = self.cache[ip]
             cached_at = entry.get('_cached_at', 0)
-            if cached_at and (time.time() - cached_at) >= self.cache_ttl:
+            # Idade desconhecida (ausente/zero/inválida) conta como expirada.
+            if (not isinstance(cached_at, (int, float)) or cached_at <= 0
+                    or (time.time() - cached_at) >= self.cache_ttl):
                 del self.cache[ip]
                 if callback:
                     callback(f"Cache expirado para IP {ip}, reconsultando")
@@ -380,7 +417,9 @@ class IPAPIClient:
             if ip in self.cache:
                 entry = self.cache[ip]
                 cached_at = entry.get('_cached_at', 0)
-                if cached_at and (time.time() - cached_at) >= self.cache_ttl:
+                # Idade desconhecida (ausente/zero/inválida) conta como expirada.
+                if (not isinstance(cached_at, (int, float)) or cached_at <= 0
+                        or (time.time() - cached_at) >= self.cache_ttl):
                     del self.cache[ip]
                 else:
                     self.cache_hits += 1
@@ -520,18 +559,49 @@ class IPAPIClient:
         """Consulta um lote de IPs. Usa batch endpoint quando possível."""
         return await self.consultar_batch(session, ips, callback=callback, progress_callback=progress_callback)
 
+    def _merge_disk_cache(self):
+        """Funde o cache em memória com o que já está no disco.
+
+        Cada execução constrói um IPAPIClient próprio com seu snapshot: sem
+        esta fusão, dois runs concorrentes se sobrescrevem e o último a salvar
+        descarta o trabalho do outro. Em empate, vence o `_cached_at` mais novo.
+        """
+        if not self.cache_file or not os.path.exists(self.cache_file):
+            return self.cache
+        try:
+            disk = IPAPIClient(cache_file=self.cache_file, api_key=None)
+            merged = dict(disk.cache)
+        except Exception as exc:
+            logger.debug(f"Fusão com cache em disco ignorada: {exc}")
+            return self.cache
+        for ip_key, entry in self.cache.items():
+            existing = merged.get(ip_key)
+            if not isinstance(existing, dict):
+                merged[ip_key] = entry
+                continue
+            if entry.get('_cached_at', 0) >= existing.get('_cached_at', 0):
+                merged[ip_key] = entry
+        if len(merged) != len(self.cache):
+            logger.info(f"Cache fundido com disco: {len(self.cache)} em memória + "
+                        f"disco = {len(merged)} entradas")
+        return merged
+
     def salvar_cache(self):
-        """Salva o cache em arquivo (suporta JSON, gzip e zstd)"""
+        """Salva o cache em arquivo (suporta JSON, gzip e zstd).
+
+        Toda escrita é atômica: um crash no meio nunca corrompe o cache.
+        """
         if self.cache_file:
             try:
+                self.cache = self._merge_disk_cache()
                 if self.cache_file.endswith('.zst') or self.cache_file.endswith('.zstd'):
                     try:
                         import zstandard as zstd
                         data = json.dumps(self.cache).encode('utf-8')
                         cctx = zstd.ZstdCompressor(level=3)
                         compressed = cctx.compress(data)
-                        with open(self.cache_file, 'wb') as f:
-                            f.write(compressed)
+                        _atomic_write(self.cache_file,
+                                      lambda f: f.write(compressed), mode='wb')
                         logger.info(f"Cache salvo com zstd ({len(self.cache)} entradas, "
                                     f"{len(data)} → {len(compressed)} bytes, "
                                     f"{len(compressed)/len(data)*100:.0f}%)")
@@ -540,12 +610,10 @@ class IPAPIClient:
                         logger.warning("zstandard não instalado, usando JSON padrão")
                         # Fallback to .json
                         fallback = self.cache_file.rsplit('.', 1)[0] + '.json'
-                        with open(fallback, 'w') as f:
-                            json.dump(self.cache, f)
+                        _atomic_write(fallback, lambda f: json.dump(self.cache, f))
                         return
                 if self.cache_file.endswith('.gz'):
-                    with gzip.open(self.cache_file, 'wt', encoding='utf-8') as f:
-                        json.dump(self.cache, f)
+                    self._atomic_write_gzip()
                 else:
                     sign = os.getenv('SIGN_IP_CACHE', '').strip().lower() in {'1', 'true', 'yes', 'on'}
                     if sign:
@@ -553,17 +621,28 @@ class IPAPIClient:
                             from helpers.signed_cache import build_signed_package, get_cache_hmac_secret
                             if get_cache_hmac_secret():
                                 package = build_signed_package(self.cache)
-                                with open(self.cache_file, 'w', encoding='utf-8') as f:
-                                    json.dump(package, f, ensure_ascii=False)
+                                _atomic_write(
+                                    self.cache_file,
+                                    lambda f: json.dump(package, f, ensure_ascii=False),
+                                    encoding='utf-8')
                                 logger.info(f"Cache assinado salvo com {len(self.cache)} entradas")
                                 return
                         except Exception as sig_err:
                             logger.warning(f"Falha ao assinar cache, salvando plain: {sig_err}")
-                    with open(self.cache_file, 'w', encoding='utf-8') as f:
-                        json.dump(self.cache, f)
+                    _atomic_write(self.cache_file,
+                                  lambda f: json.dump(self.cache, f),
+                                  encoding='utf-8')
                 logger.info(f"Cache salvo com {len(self.cache)} entradas")
             except (OSError, TypeError, ValueError) as e:
                 logger.error(f"Erro ao salvar cache: {e}")
+
+    def _atomic_write_gzip(self):
+        """gzip atômico: comprime em memória e grava de uma vez."""
+        buf = io.BytesIO()
+        with gzip.GzipFile(fileobj=buf, mode='wb') as gz:
+            gz.write(json.dumps(self.cache).encode('utf-8'))
+        payload = buf.getvalue()
+        _atomic_write(self.cache_file, lambda f: f.write(payload), mode='wb')
 
     def get_status(self):
         """Retorna o status atual do cliente incluindo métricas de cache"""

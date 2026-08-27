@@ -173,6 +173,99 @@ class TestLifePatterns(unittest.TestCase):
         result = detect_life_patterns(df)
         self.assertFalse(result['has_data'])
 
+    @staticmethod
+    def _replicated_frame(n_rows=5000, seed=42):
+        """Poucas coordenadas distintas replicadas em muitas linhas — o formato
+        real de dados geolocalizados por IP."""
+        import numpy as np
+        rng = np.random.default_rng(seed)
+        base = np.array([[-12.97, -38.50], [-23.55, -46.63], [-19.92, -43.94]])
+        coords = [b + rng.normal(0, 0.02, 2) for b in base for _ in range(12)]
+        coords += [[-3.10, -60.02], [5.80, -55.17], [-30.03, -51.23], [0.03, -51.06]]
+        coords = np.round(np.array(coords), 4)
+        idx = rng.integers(0, len(coords), n_rows)
+        return coords, idx, pd.DataFrame({
+            'Ip': ['10.0.0.%d' % (i % 40) for i in range(n_rows)],
+            'Ip_Lat': coords[idx, 0],
+            'Ip_Lon': coords[idx, 1],
+            'Ip_Cidade': ['Cidade%d' % (i % 7) for i in range(n_rows)],
+            'Data': pd.date_range('2025-01-01', periods=n_rows,
+                                  freq='17min').strftime('%Y-%m-%d %H:%M:%S'),
+        })
+
+    def test_weighted_dedup_matches_full_dbscan(self):
+        """A clusterização ponderada sobre coordenadas distintas deve induzir
+        EXATAMENTE a mesma partição das linhas que o DBSCAN sobre todas elas.
+
+        É o que autoriza a otimização: sem esta garantia, a dedução de 'Casa' e
+        'Trabalho' no laudo poderia mudar em função de um detalhe de performance.
+        """
+        try:
+            import numpy as np
+            from sklearn.cluster import DBSCAN
+            from sklearn.metrics import adjusted_rand_score
+        except ImportError:
+            self.skipTest('scikit-learn não instalado')
+
+        _, _, df = self._replicated_frame()
+
+        # Referência: DBSCAN sobre todas as linhas, sem pesos.
+        eps_rad = 5.0 / 6371.0
+        ref = DBSCAN(eps=eps_rad, min_samples=3, metric='haversine').fit_predict(
+            np.radians(df[['Ip_Lat', 'Ip_Lon']].to_numpy()))
+
+        uniq = df.groupby(['Ip_Lat', 'Ip_Lon'], sort=True).size().reset_index(name='_w')
+        uniq['_c'] = DBSCAN(eps=eps_rad, min_samples=3, metric='haversine').fit_predict(
+            np.radians(uniq[['Ip_Lat', 'Ip_Lon']].to_numpy()),
+            sample_weight=uniq['_w'].to_numpy())
+        got = df.merge(uniq, on=['Ip_Lat', 'Ip_Lon'], how='left')['_c'].to_numpy()
+
+        # ARI é invariante à renumeração dos clusters; 1.0 = partições idênticas.
+        self.assertEqual(adjusted_rand_score(ref, got), 1.0)
+        self.assertEqual((ref == -1).sum(), (got == -1).sum())
+
+    def test_no_rows_lost(self):
+        """Todo registro deve terminar num cluster ou contabilizado como desvio."""
+        _, _, df = self._replicated_frame()
+        r = detect_life_patterns(df)
+        self.assertTrue(r['has_data'])
+        total = sum(c['count'] for c in r['clusters']) + r['routine_deviations_total']
+        self.assertEqual(total, len(df))
+        self.assertEqual(r['n_unique_coords'], 40)
+
+    def test_deviations_report_true_total(self):
+        """A lista de desvios é truncada, mas o TOTAL informado deve ser o real —
+        exibir 20 como se fosse o total é afirmação incorreta num laudo."""
+        import analysis.geo as geo
+        # Um aglomerado denso (vira cluster) + muitos pontos isolados (viram ruído).
+        lats = [-23.55] * 200 + [10.0 + i * 0.5 for i in range(60)]
+        lons = [-46.63] * 200 + [20.0 + i * 0.5 for i in range(60)]
+        df = pd.DataFrame({
+            'Ip': ['1.1.1.%d' % (i % 250) for i in range(len(lats))],
+            'Ip_Lat': lats, 'Ip_Lon': lons,
+            'Ip_Cidade': ['X'] * len(lats),
+            'Data': pd.date_range('2025-01-01', periods=len(lats),
+                                  freq='h').strftime('%Y-%m-%d %H:%M:%S'),
+        })
+        r = detect_life_patterns(df)
+        self.assertEqual(r['routine_deviations_total'], 60)
+        self.assertEqual(len(r['routine_deviations']), geo.MAX_DEVIATIONS)
+        self.assertTrue(r['routine_deviations_truncated'])
+
+    def test_rounding_note_is_visible(self):
+        """Quando o arredondamento de coordenadas entra em ação, ele precisa
+        aparecer no resultado para ser renderizado no relatório."""
+        import analysis.geo as geo
+        original = geo.MAX_UNIQUE_COORDS
+        geo.MAX_UNIQUE_COORDS = 5
+        try:
+            _, _, df = self._replicated_frame(n_rows=500)
+            r = detect_life_patterns(df)
+            self.assertTrue(r['coord_precision_note'])
+            self.assertIn('arredondadas', r['coord_precision_note'])
+        finally:
+            geo.MAX_UNIQUE_COORDS = original
+
 
 class TestImpossibleJumps(unittest.TestCase):
     def test_no_jumps(self):
@@ -279,7 +372,7 @@ class TestUsageProfile(unittest.TestCase):
 
     def test_residential_pattern(self):
         dates = [f'2025-01-01 {hour:02d}:00:00' for hour in [22, 23, 0, 1, 6, 7, 20, 21, 22, 23]]
-        df = pd.DataFrame({'Ip': ['2804::1'] * 10, 'Data': dates, 'Ip_Dono': ['Claro'] * 10, 'Ip_Movel': [True] * 10})
+        df = pd.DataFrame({'Ip': ['2001:db8::1'] * 10, 'Data': dates, 'Ip_Dono': ['Claro'] * 10, 'Ip_Movel': [True] * 10})
         result = detect_usage_profile(df)
         self.assertIn(result['profile'], ['residencial', 'misto', 'indeterminado'])
         self.assertIsInstance(result['indicators'], list)
@@ -291,7 +384,7 @@ class TestGeoPrecision(unittest.TestCase):
         self.assertEqual(result['precision'], 'Baixa')
 
     def test_ipv6_residential_high(self):
-        result = compute_geo_precision({'Ip': '2804::1', 'Ip_Proxy': 'False', 'Ip_Hospedagem': 'False', 'Ip_Movel': 'False'})
+        result = compute_geo_precision({'Ip': '2001:db8::1', 'Ip_Proxy': 'False', 'Ip_Hospedagem': 'False', 'Ip_Movel': 'False'})
         self.assertEqual(result['precision'], 'Alta')
 
     def test_mobile_ipv4_medium(self):

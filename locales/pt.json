@@ -94,7 +94,7 @@
     "title": "📥 Entrada de Dados",
     "subtitle": "Carregue arquivos ou cole texto para enriquecimento de IPs",
     "target": "🎯 Alvo",
-    "target_placeholder": "Ex: 557996393334",
+    "target_placeholder": "Ex: 5511999999999",
     "output_file": "💾 Arquivo de saída (.csv)",
     "tab_file": "📁 Carregar Arquivo",
     "tab_text": "📋 Colar Texto",

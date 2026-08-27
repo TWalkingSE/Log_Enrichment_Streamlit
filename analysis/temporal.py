@@ -1,12 +1,8 @@
 """analysis.temporal — split from analysis monolith."""
 import pandas as pd
 import numpy as np
-import os
-import json
-import shutil
-import glob
 import logging
-from datetime import datetime
+from validators import bool_series, parse_data
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +80,7 @@ def analyze_provider_timing(df, date_col='Data', min_records=5):
         return {'providers': {}, 'transitions': [], 'vpn_schedule': {'detected': False}}
 
     df_work = df.copy()
-    df_work['_dt'] = pd.to_datetime(df_work[date_col], format='mixed', errors='coerce')
+    df_work['_dt'] = parse_data(df_work[date_col])
     df_work = df_work.dropna(subset=['_dt']).sort_values('_dt')
 
     if df_work.empty:
@@ -137,8 +133,8 @@ def analyze_provider_timing(df, date_col='Data', min_records=5):
         prov_rows = df_work[df_work['Ip_Dono'] == prov]
         if prov_rows.empty:
             continue
-        proxy_pct = prov_rows['Ip_Proxy'].apply(lambda x: str(x).lower() == 'true').mean() if 'Ip_Proxy' in prov_rows.columns else 0
-        hosting_pct = prov_rows['Ip_Hospedagem'].apply(lambda x: str(x).lower() == 'true').mean() if 'Ip_Hospedagem' in prov_rows.columns else 0
+        proxy_pct = bool_series(prov_rows, 'Ip_Proxy').mean() if 'Ip_Proxy' in prov_rows.columns else 0
+        hosting_pct = bool_series(prov_rows, 'Ip_Hospedagem').mean() if 'Ip_Hospedagem' in prov_rows.columns else 0
         if proxy_pct > 0.5 or hosting_pct > 0.5:
             vpn_providers.add(prov)
         else:
@@ -186,7 +182,7 @@ def detect_provider_transitions(df, date_col='Data', window_minutes=30):
         return {'transitions': [], 'sandwich_patterns': [], 'matrix': {}}
 
     df_work = df.copy()
-    df_work['_dt'] = pd.to_datetime(df_work[date_col], format='mixed', errors='coerce')
+    df_work['_dt'] = parse_data(df_work[date_col])
     df_work = df_work.dropna(subset=['_dt']).sort_values('_dt')
 
     if len(df_work) < 3:

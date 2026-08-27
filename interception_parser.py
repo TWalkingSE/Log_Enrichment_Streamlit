@@ -388,54 +388,81 @@ def parse_zip_interception(zip_path_or_bytes, update_callback=None):
 
 
 def _add_reputacao_interceptacao(df):
-    """Adiciona coluna Reputação ao DataFrame de interceptação."""
-    from analysis import format_reputacao
-    required = ['Ip_Proxy', 'Ip_Hospedagem', 'Ip_Movel']
-    if not all(c in df.columns for c in required):
-        return df
-    if 'Reputação' in df.columns:
-        return df
-    df = df.copy()
-    df['Reputação'] = df.apply(format_reputacao, axis=1)
-    return df
+    """Adiciona coluna Reputação (delega à implementação compartilhada)."""
+    from analysis import add_reputacao_column
+    return add_reputacao_column(df)
 
 
 def processar_resultados_interceptacao(df, resultados_api):
     """
     Merge API enrichment results into the interception DataFrame.
     Supports both raw API responses and normalized IPAPIClient results.
+
+    Usa o mesmo idioma vetorizado de `data_processor.processar_resultados`:
+    a versão anterior fazia `df['Sender IP'] == ip` por IP — com milhares de
+    IPs sobre 200k linhas isso são bilhões de comparações e dezenas de
+    milhares de escritas `.loc` encadeadas.
     """
     if not resultados_api:
         return df
 
+    # Campo de destino -> chaves aceitas na resposta (normalizada ou crua)
+    CAMPOS = (
+        ('Ip_Dono', ('Ip_Dono', 'org', 'isp')),
+        ('Ip_AS', ('Ip_AS', 'as')),
+        ('Ip_Regiao', ('Ip_Regiao', 'regionName')),
+        ('Ip_Cidade', ('Ip_Cidade', 'city')),
+        ('Ip_Pais', ('Ip_Pais', 'country')),
+        ('Ip_Pais_Codigo', ('Ip_Pais_Codigo', 'countryCode')),
+    )
+    # Estes são gravados mesmo quando falsos/nulos, preservando o
+    # comportamento anterior (um False da API sobrescreve o default).
+    CAMPOS_DIRETOS = (
+        ('Ip_Movel', ('Ip_Movel', 'mobile'), False),
+        ('Ip_Proxy', ('Ip_Proxy', 'proxy'), False),
+        ('Ip_Hospedagem', ('Ip_Hospedagem', 'hosting'), False),
+        ('Ip_Lat', ('Ip_Lat', 'lat'), None),
+        ('Ip_Lon', ('Ip_Lon', 'lon'), None),
+    )
+
+    def _first(dados, chaves):
+        for k in chaves:
+            if k in dados:
+                return dados[k]
+        return None
+
+    registros = []
     for ip, dados in resultados_api.items():
         status = dados.get('status', '')
-        if status == 'success' or 'Ip_Dono' in dados:
-            mask = df['Sender IP'] == ip
-            # Suporte ao formato normalizado do IPAPIClient
-            dono = dados.get('Ip_Dono', dados.get('org', dados.get('isp', '')))
-            if dono and not str(dono).startswith('Erro:'):
-                df.loc[mask, 'Ip_Dono'] = dono
-            ip_as = dados.get('Ip_AS', dados.get('as', ''))
-            if ip_as and ip_as != 'Erro':
-                df.loc[mask, 'Ip_AS'] = ip_as
-            regiao = dados.get('Ip_Regiao', dados.get('regionName', ''))
-            if regiao and regiao != 'Erro':
-                df.loc[mask, 'Ip_Regiao'] = regiao
-            cidade = dados.get('Ip_Cidade', dados.get('city', ''))
-            if cidade and cidade != 'Erro':
-                df.loc[mask, 'Ip_Cidade'] = cidade
-            pais = dados.get('Ip_Pais', dados.get('country', ''))
-            if pais and pais != 'Erro':
-                df.loc[mask, 'Ip_Pais'] = pais
-            pais_codigo = dados.get('Ip_Pais_Codigo', dados.get('countryCode', ''))
-            if pais_codigo:
-                df.loc[mask, 'Ip_Pais_Codigo'] = pais_codigo
-            df.loc[mask, 'Ip_Movel'] = dados.get('Ip_Movel', dados.get('mobile', False))
-            df.loc[mask, 'Ip_Proxy'] = dados.get('Ip_Proxy', dados.get('proxy', False))
-            df.loc[mask, 'Ip_Hospedagem'] = dados.get('Ip_Hospedagem', dados.get('hosting', False))
-            df.loc[mask, 'Ip_Lat'] = dados.get('Ip_Lat', dados.get('lat'))
-            df.loc[mask, 'Ip_Lon'] = dados.get('Ip_Lon', dados.get('lon'))
+        if not (status == 'success' or 'Ip_Dono' in dados):
+            continue
+        rec = {'_merge_ip': ip}
+        for destino, chaves in CAMPOS:
+            val = _first(dados, chaves)
+            if val in (None, ''):
+                continue
+            texto = str(val)
+            if texto == 'Erro' or texto.startswith('Erro:'):
+                continue
+            rec[destino] = val
+        for destino, chaves, default in CAMPOS_DIRETOS:
+            val = _first(dados, chaves)
+            rec[destino] = default if val is None else val
+        registros.append(rec)
+
+    if not registros:
+        return df
+
+    df_api = pd.DataFrame(registros)
+    campos = [c for c in df_api.columns if c != '_merge_ip' and c in df.columns]
+    for campo in campos:
+        ip_to_value = dict(zip(df_api['_merge_ip'], df_api[campo]))
+        # Valores ausentes neste campo não devem apagar o que já existe.
+        ip_to_value = {k: v for k, v in ip_to_value.items() if not pd.isna(v)}
+        if not ip_to_value:
+            continue
+        mask = df['Sender IP'].isin(ip_to_value.keys())
+        df.loc[mask, campo] = df.loc[mask, 'Sender IP'].map(ip_to_value)
 
     return df
 
@@ -476,16 +503,7 @@ async def processar_interceptacao_async(zip_data, output_file, batch_size=500, p
 
     df = _add_reputacao_interceptacao(df)
 
-    from validators import sanitize_dataframe_for_csv
-    export_cols = [c for c in COLUNAS_EXPORT_INTERCEPTACAO if c in df.columns]
-    df_export = sanitize_dataframe_for_csv(df[export_cols])
-    df_export.to_csv(output_file, index=False, sep=';', encoding='utf-8-sig')
-
-    from file_handler import export_xlsx_colored
-    xlsx_path = os.path.splitext(output_file)[0] + '.xlsx'
-    export_xlsx_colored(df_export, xlsx_path)
-
-    if update_callback:
-        update_callback(f"Resultado salvo em {output_file} e .xlsx ({len(df_export)} registros)")
+    from file_handler import salvar_exportacao
+    salvar_exportacao(df, COLUNAS_EXPORT_INTERCEPTACAO, output_file, update_callback)
 
     return df

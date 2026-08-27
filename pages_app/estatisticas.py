@@ -12,6 +12,7 @@ import streamlit as st
 from helpers.shared import detect_anomalies
 from styles.theme import COLORS
 from i18n import t
+from validators import bool_series, parse_data
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ def _hex_to_rgba(hex_color, alpha):
 
 
 def _to_bool_series(series):
-    return series.fillna(False).map(lambda value: str(value).strip().lower() == 'true')
+    return bool_series(series.to_frame('_v'), '_v')
 
 
 def _prepare_datetime_frame(df):
@@ -51,7 +52,7 @@ def _prepare_datetime_frame(df):
         return pd.DataFrame()
 
     df_t = df.copy()
-    df_t['Data_parsed'] = pd.to_datetime(df_t['Data'], format='mixed', errors='coerce')
+    df_t['Data_parsed'] = parse_data(df_t['Data'])
     return df_t.dropna(subset=['Data_parsed'])
 
 

@@ -13,6 +13,7 @@ import plotly.express as px
 import pandas as pd
 import json
 from styles.theme import COLORS
+from validators import as_bool, parse_data
 
 
 # ============================================================
@@ -137,7 +138,7 @@ def render_side_by_side_comparison(df1, df2, name1='Alvo 1', name2='Alvo 2'):
         with col:
             if 'Data' in df.columns:
                 df_t = df.copy()
-                df_t['_dt'] = pd.to_datetime(df_t['Data'], format='mixed', errors='coerce')
+                df_t['_dt'] = parse_data(df_t['Data'])
                 df_t = df_t.dropna(subset=['_dt'])
                 if not df_t.empty:
                     daily = df_t.groupby(df_t['_dt'].dt.date).size().reset_index(name='count')
@@ -199,8 +200,7 @@ def render_map_replay(df, height=600):
         return
 
     df_m = df.copy()
-    df_m['_dt'] = pd.to_datetime(df_m.get('Data', pd.Series(dtype='object')),
-                                  format='mixed', errors='coerce')
+    df_m['_dt'] = parse_data(df_m.get('Data', pd.Series(dtype='object')))
     df_m['Ip_Lat'] = pd.to_numeric(df_m.get('Ip_Lat'), errors='coerce')
     df_m['Ip_Lon'] = pd.to_numeric(df_m.get('Ip_Lon'), errors='coerce')
     df_m = df_m.dropna(subset=['_dt', 'Ip_Lat', 'Ip_Lon'])
@@ -214,130 +214,12 @@ def render_map_replay(df, height=600):
     _render_leaflet_replay(df_m, height)
 
 
-def _render_pydeck_replay(df_m, height=600):
-    """Pydeck TripsLayer animated replay with Streamlit slider."""
-    import pydeck as pdk
-    from components.modern_map import prepare_map_dataframe, get_map_style, TOOLTIP_SINGLE
-
-    # Limit for animation performance
-    max_points = 2000
-    if len(df_m) > max_points:
-        st.info(f"Limitando animação a {max_points} pontos (total: {len(df_m)}).")
-        df_m = df_m.head(max_points)
-
-    df_pdk = prepare_map_dataframe(df_m)
-    min_ts = int(df_m['_dt'].min().timestamp())
-    max_ts = int(df_m['_dt'].max().timestamp())
-
-    # Timeline slider
-    rc1, rc2 = st.columns([4, 1])
-    with rc1:
-        current_time = st.slider(
-            "Timeline",
-            min_value=min_ts, max_value=max_ts, value=max_ts,
-            format="",
-            key="replay_slider",
-            help="Arraste para controlar o tempo da animação"
-        )
-    with rc2:
-        from datetime import datetime
-        ts_label = datetime.fromtimestamp(current_time).strftime('%Y-%m-%d %H:%M')
-        st.markdown(f"**{ts_label}**")
-        pct = ((current_time - min_ts) / max(max_ts - min_ts, 1)) * 100
-        st.caption(f"{pct:.0f}% concluído")
-
-    # Filter data up to current_time
-    df_visible = df_pdk[df_pdk['_dt'].apply(lambda x: x.timestamp()) <= current_time]
-
-    if df_visible.empty:
-        st.info("Nenhum ponto visível neste momento da timeline.")
-        return
-
-    # Build path from visible points
-    coords = df_visible[['Ip_Lon', 'Ip_Lat']].values.tolist()
-    path_data = pd.DataFrame({'path': [coords]}) if len(coords) >= 2 else None
-
-    layers = []
-
-    # Path line
-    if path_data is not None:
-        layers.append(pdk.Layer(
-            "PathLayer",
-            data=path_data,
-            get_path='path',
-            get_color=[129, 140, 248, 160],
-            width_min_pixels=2,
-            width_max_pixels=5,
-        ))
-
-    # Scatter markers for visible points
-    layers.append(pdk.Layer(
-        "ScatterplotLayer",
-        data=df_visible,
-        get_position='[Ip_Lon, Ip_Lat]',
-        get_radius=800,
-        radius_min_pixels=4,
-        radius_max_pixels=20,
-        get_fill_color='[_color_r, _color_g, _color_b, _color_a]',
-        pickable=True,
-        auto_highlight=True,
-    ))
-
-    # Start marker
-    start = df_visible.iloc[[0]]
-    layers.append(pdk.Layer(
-        "ScatterplotLayer",
-        data=start,
-        get_position='[Ip_Lon, Ip_Lat]',
-        get_radius=2000,
-        radius_min_pixels=8,
-        get_fill_color=[34, 197, 94, 220],
-        get_line_color=[255, 255, 255, 255],
-        stroked=True,
-        line_width_min_pixels=2,
-    ))
-
-    # Current position marker (latest visible point)
-    latest = df_visible.iloc[[-1]]
-    layers.append(pdk.Layer(
-        "ScatterplotLayer",
-        data=latest,
-        get_position='[Ip_Lon, Ip_Lat]',
-        get_radius=2500,
-        radius_min_pixels=10,
-        get_fill_color=[56, 189, 248, 255],
-        get_line_color=[255, 255, 255, 255],
-        stroked=True,
-        line_width_min_pixels=3,
-    ))
-
-    center_lat = df_visible['Ip_Lat'].mean()
-    center_lon = df_visible['Ip_Lon'].mean()
-
-    deck = pdk.Deck(
-        layers=layers,
-        initial_view_state=pdk.ViewState(
-            latitude=center_lat, longitude=center_lon,
-            zoom=5, pitch=30,
-        ),
-        map_style=get_map_style('Escuro'),
-        tooltip=TOOLTIP_SINGLE,
-    )
-    st.pydeck_chart(deck, height=height - 60, key="replay_map")
-
-    # Stats
-    rc_s1, rc_s2, rc_s3 = st.columns(3)
-    with rc_s1:
-        st.metric("Pontos visíveis", len(df_visible))
-    with rc_s2:
-        st.metric("Total", len(df_m))
-    with rc_s3:
-        ip_col = 'Sender IP' if 'Sender IP' in df_visible.columns else 'Ip'
-        st.metric("IPs únicos", df_visible[ip_col].nunique() if ip_col in df_visible.columns else 0)
-
-
 def _render_leaflet_replay(df_m, height=600):
-    """Fallback: Leaflet.js embedded HTML animation (original implementation)."""
+    """Animação em Leaflet.js embutido — única implementação do replay.
+
+    Havia uma variante em pydeck que nenhuma página chamava; foi removida
+    junto com `components/modern_map.py`, que só ela usava.
+    """
     # Limit for performance
     if len(df_m) > 500:
         st.info(f"Limitando animação a 500 pontos (total: {len(df_m)}).")
@@ -345,8 +227,8 @@ def _render_leaflet_replay(df_m, height=600):
 
     markers = []
     for _, row in df_m.iterrows():
-        is_proxy = str(row.get('Ip_Proxy', '')).lower() == 'true'
-        is_hosting = str(row.get('Ip_Hospedagem', '')).lower() == 'true'
+        is_proxy = as_bool(row.get('Ip_Proxy'), field='Ip_Proxy')
+        is_hosting = as_bool(row.get('Ip_Hospedagem'), field='Ip_Hospedagem')
         color = COLORS['danger'] if is_proxy else COLORS['hosting'] if is_hosting else COLORS['success']
         markers.append({
             'lat': float(row['Ip_Lat']),
@@ -410,8 +292,13 @@ def _render_leaflet_replay(df_m, height=600):
         <script>
             var markers = {markers_json};
             var map = L.map('map', {{ zoomControl: true }}).setView([{center_lat}, {center_lon}], 5);
-            L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
-                maxZoom: 19, attribution: '&copy; CartoDB'
+            // Fundo sem chave de API: os tiles da CARTO voltam carimbados com
+            // "API KEY REQUIRED". Ver helpers/geo.TILE_SOURCES.
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
+                maxZoom: 16, attribution: 'Tiles &copy; Esri'
+            }}).addTo(map);
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
+                maxZoom: 16, attribution: ''
             }}).addTo(map);
             var displayedMarkers = [];
             var polyline = L.polyline([], {{color: '#38bdf8', weight: 2, opacity: 0.6}}).addTo(map);
@@ -490,7 +377,7 @@ def render_ip_table_with_sparklines(df):
         return
 
     df_s = df.copy()
-    df_s['_dt'] = pd.to_datetime(df_s['Data'], format='mixed', errors='coerce')
+    df_s['_dt'] = parse_data(df_s['Data'])
     df_s = df_s.dropna(subset=['_dt'])
 
     if df_s.empty:
@@ -511,7 +398,9 @@ def render_ip_table_with_sparklines(df):
         # Classify
         provider = ip_data['Ip_Dono'].iloc[0] if 'Ip_Dono' in ip_data.columns else ''
         city = ip_data['Ip_Cidade'].iloc[0] if 'Ip_Cidade' in ip_data.columns else ''
-        is_proxy = str(ip_data.get('Ip_Proxy', pd.Series()).iloc[0] if 'Ip_Proxy' in ip_data.columns and len(ip_data) > 0 else '').lower() == 'true'
+        is_proxy = as_bool(ip_data['Ip_Proxy'].iloc[0]
+                           if 'Ip_Proxy' in ip_data.columns and len(ip_data) > 0 else '',
+                           field='Ip_Proxy')
 
         # Determine persistence
         active_days = sum(1 for v in spark_vals if v > 0)

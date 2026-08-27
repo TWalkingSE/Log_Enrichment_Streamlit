@@ -1,12 +1,7 @@
 """analysis.movement — split from analysis monolith."""
 import pandas as pd
 import numpy as np
-import os
-import json
-import shutil
-import glob
 import logging
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -204,9 +199,13 @@ def generate_behavioral_profile(df, alvo='', date_col='Data'):
 # ============================================================
 # 22. PERIOD COMPARISON (A vs B)
 # ============================================================
-def compare_periods(df, date_col='Data', split_date=None):
+def compare_split_periods(df, date_col='Data', split_date=None):
     """
-    Compare two time periods of the same target.
+    Compare two time periods of the same target, splitting automatically.
+
+    Para comparar dois intervalos escolhidos pelo analista, use
+    `helpers.period_compare.compare_periods` — assinatura diferente.
+
     If split_date is None, splits at the midpoint.
 
     Returns dict with comparison metrics.

@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 import pandas as pd
 
@@ -29,7 +29,14 @@ def _ip_column(df: pd.DataFrame) -> str:
     return "Ip"
 
 
-def collect_unique_ips(df: pd.DataFrame, ip_col: Optional[str] = None) -> List[str]:
+def collect_ioc_candidates(df: pd.DataFrame, ip_col: Optional[str] = None) -> List[str]:
+    """Indicadores distintos presentes no dado, SEM validar formato de IP.
+
+    Difere de `enrich_service.collect_unique_ips`, que filtra por
+    `is_valid_ip` porque só faz sentido consultar a API com IPs válidos.
+    Aqui um valor malformado ainda é um indicador que o analista pode querer
+    levar ao SIEM, então nada é descartado silenciosamente.
+    """
     if df is None or getattr(df, "empty", True):
         return []
     col = ip_col or _ip_column(df)
@@ -57,7 +64,7 @@ def export_ioc_list(
             mask = host if mask is False else (mask | host)
         if mask is not False:
             work = work[mask]
-    ips = collect_unique_ips(work, col)
+    ips = collect_ioc_candidates(work, col)
     return "\n".join(ips) + ("\n" if ips else "")
 
 

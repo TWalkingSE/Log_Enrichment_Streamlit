@@ -1,6 +1,5 @@
 import re
 
-import pandas as pd
 
 
 PROVIDER_ALIASES = {

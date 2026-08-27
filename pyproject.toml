@@ -26,14 +26,6 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["F401"]
 "__init__.py" = ["F401"]
-"pages_app/**" = ["F401"]
-"analysis/**" = ["F401"]
-"advanced_analysis.py" = ["F401"]
-"ip_investigativo.py" = ["F401"]
-"data_processor.py" = ["F401"]
-"html_report_generator.py" = ["F401"]
-"ai_assistant.py" = ["F401"]
-"components/**" = ["F401"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -44,4 +36,7 @@ files = ["auth_password.py", "api_client.py", "validators.py", "enrich_service.p
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-timeout = 180
+timeout = 600
+markers = [
+    "slow: teste de carga sobre dataset de tamanho real (pytest -m 'not slow' para pular)",
+]
