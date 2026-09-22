@@ -298,7 +298,10 @@ def calculate_movement_area(df, lat_col='Ip_Lat', lon_col='Ip_Lon'):
     points = unique_points.values
     try:
         hull = ConvexHull(points)
-    except Exception:
+    except Exception as e:
+        # QhullError em pontos colineares etc. — relatamos e devolvemos
+        # fallback em vez de apresentar ausência de área como resultado.
+        logger.warning("ConvexHull falhou (%d pontos): %s", len(points), e)
         return {
             'area_km2': 0, 'hull_coords': points.tolist(),
             'center': [points[:, 0].mean(), points[:, 1].mean()],

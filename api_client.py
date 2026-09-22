@@ -720,7 +720,11 @@ async def resolve_rdns_async(ip_str, timeout_sec=3):
             timeout=timeout_sec
         )
         return ip_str, hostname
-    except (asyncio.TimeoutError, Exception):
+    except asyncio.TimeoutError:
+        logger.debug("rDNS timeout para %s", ip_str)
+        return ip_str, None
+    except Exception as e:
+        logger.debug("rDNS falhou para %s: %s", ip_str, e)
         return ip_str, None
 
 

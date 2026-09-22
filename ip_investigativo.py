@@ -8,10 +8,13 @@ com geração de resumo narrativo.
 
 import streamlit as st
 import pandas as pd
+import logging
 from datetime import datetime
 from api_client import is_cgnat_ip
 from data_processor import periodo_matches as _periodo_matches
 from styles.theme import COLORS
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -59,7 +62,8 @@ def _get_ipv6_prefix64(ip_str):
         full = addr.exploded  # ex: 2001:0db8:10b9:9855:0920:db70:2b33:5c08
         parts = full.split(':')
         return ':'.join(parts[:4]) + '::/64'
-    except Exception:
+    except ValueError:
+        # Valor na coluna Ip que não é endereço — esperado em dados sujos.
         return None
 
 
@@ -192,11 +196,19 @@ def calcular_score(df, dt_fato, periodo_fato, contagem_provedores, janela_horas_
     if max_count == 0:
         max_count = 1
 
-    for idx in df_scored.index:
+    # Continuidade temporal (item 4): para cada provedor basta saber se
+    # existe data antes e depois do fato — duas varreduras vetorizadas em
+    # vez de filtrar o frame inteiro por linha (O(n_linhas²)).
+    prov_dt = df_scored.loc[df_scored['_dt'].notna(), ['Ip_Dono', '_dt']]
+    prov_antes = set(prov_dt.loc[prov_dt['_dt'] < dt_fato, 'Ip_Dono'])
+    prov_depois = set(prov_dt.loc[prov_dt['_dt'] > dt_fato, 'Ip_Dono'])
+
+    scores = []
+    falhas = 0
+    for rd in df_scored.to_dict('records'):
         try:
-            row = df_scored.loc[idx]
             score = 0.0
-            dt_reg = row.get('_dt')
+            dt_reg = rd.get('_dt')
 
             # 1. Proximidade temporal (40 pts)
             if pd.notna(dt_reg):
@@ -205,40 +217,43 @@ def calcular_score(df, dt_fato, periodo_fato, contagem_provedores, janela_horas_
                     score += 40 * (1 - diff_hours / janela_horas_max)
 
             # 2. Recorrência do provedor (20 pts)
-            provedor = row.get('Ip_Dono', '')
+            provedor = rd.get('Ip_Dono', '')
             if provedor and provedor in contagem_provedores:
                 score += 20 * (contagem_provedores[provedor] / max_count)
 
             # 3. Compatibilidade de período (15 pts) - comparação emoji-safe
-            periodo_reg = row.get('Periodo', '')
+            periodo_reg = rd.get('Periodo', '')
             if _periodo_matches(periodo_reg, periodo_fato):
                 score += 15
 
             # 4. Continuidade temporal (15 pts)
             if provedor and pd.notna(dt_reg):
-                prov_mask = df_scored['Ip_Dono'] == provedor
-                prov_dates = df_scored.loc[prov_mask, '_dt'].dropna()
-                has_before = (prov_dates < dt_fato).any()
-                has_after = (prov_dates > dt_fato).any()
+                has_before = provedor in prov_antes
+                has_after = provedor in prov_depois
                 if has_before and has_after:
                     score += 15
                 elif has_before or has_after:
                     score += 7
 
             # 5. Bônus IPv6 (+5 pts)
-            if _is_ipv6(str(row.get('Ip', ''))):
+            if _is_ipv6(str(rd.get('Ip', ''))):
                 score += 5
 
             # 6. Penalidade proxy/hosting (-10 pts)
-            is_proxy = _parse_bool(row.get('Ip_Proxy', False))
-            is_hosting = _parse_bool(row.get('Ip_Hospedagem', False))
+            is_proxy = _parse_bool(rd.get('Ip_Proxy', False))
+            is_hosting = _parse_bool(rd.get('Ip_Hospedagem', False))
             if is_proxy or is_hosting:
                 score -= 10
 
-            df_scored.at[idx, 'Score'] = score
+            scores.append(score)
 
         except Exception:
-            df_scored.at[idx, 'Score'] = 0
+            falhas += 1
+            scores.append(0.0)
+
+    if falhas:
+        logger.warning("calcular_scores: %d registros com falha receberam Score=0", falhas)
+    df_scored['Score'] = scores
 
     df_scored['Score'] = df_scored['Score'].clip(0, 100).fillna(0).round(1)
     df_scored = df_scored.drop(columns=['_dt'], errors='ignore')

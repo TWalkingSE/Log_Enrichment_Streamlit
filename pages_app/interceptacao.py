@@ -110,8 +110,8 @@ def page_interceptacao():
                 zf = zipfile.ZipFile(io.BytesIO(intercept_data))
                 st.caption(t('interceptacao.files_in_zip', count=len(zf.namelist())))
                 zf.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Prévia do ZIP falhou (%s): %s", uploaded_zip.name, e)
 
     with tab_html:
         uploaded_html = st.file_uploader(t('interceptacao.upload_html'), type=['html', 'htm'], key="intercept_html")
@@ -120,7 +120,7 @@ def page_interceptacao():
             intercept_data = uploaded_html.getvalue()
             is_zip = False
             try:
-                html_content = intercept_data.decode('utf-8', errors='ignore')
+                html_content = intercept_data.decode('utf-8', errors='replace')
                 records = parse_html_records(html_content)
                 c1, c2, c3 = st.columns(3)
                 with c1:
@@ -129,8 +129,9 @@ def page_interceptacao():
                     st.metric("Messages", len([r for r in records if r['type'].startswith('message')]))
                 with c3:
                     st.metric("Calls", len([r for r in records if r['type'].startswith('call')]))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Prévia do HTML falhou (%s): %s", uploaded_html.name, e)
+                st.caption(f"⚠️ Não foi possível pré-visualizar o HTML: {e}")
 
     with st.expander("⚙️ Opções", expanded=False):
         c1, c2 = st.columns(2)
@@ -151,7 +152,7 @@ def page_interceptacao():
                         df = parse_zip_interception(intercept_data, update_callback=lambda msg: st.write(f"  {msg}"))
                     else:
                         st.write("📄 Processando HTML...")
-                        html_content = intercept_data.decode('utf-8', errors='ignore')
+                        html_content = intercept_data.decode('utf-8', errors='replace')
                         records = parse_html_records(html_content, update_callback=lambda msg: st.write(f"  {msg}"))
                         df = records_to_dataframe(records)
 

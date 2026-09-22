@@ -20,7 +20,7 @@ from audit_logger import log_audit_event
 from validators import validate_dataframe, safe_output_path
 from helpers.shared import add_log, run_processing, save_history, extract_alvo_from_filename
 from i18n import t
-from helpers.large_data import bump_data_version
+from helpers.large_data import bump_data_version, show_truncation
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ def page_entrada():
                 # Para HTMLs (WhatsApp/Meta/Google records.html)
                 if uploaded_file.name.lower().endswith(('.html', '.htm')):
                     from html_parser import parse_html_file, detect_html_platform
-                    html_content = uploaded_file.getvalue().decode('utf-8', errors='ignore')
+                    html_content = uploaded_file.getvalue().decode('utf-8', errors='replace')
                     platform = detect_html_platform(html_content)
                     platform_names = {'whatsapp': 'WhatsApp', 'meta': 'Meta Platforms (Facebook/Instagram)',
                                       'google': 'Google', 'unknown': t('entrada.html_platform_unknown')}
@@ -130,6 +130,7 @@ def page_entrada():
                                     cols_preview.insert(1, 'Porta')
                                 available = [c for c in cols_preview if c in preview_df.columns]
                                 st.dataframe(preview_df[available].head(20), use_container_width=True, hide_index=True)
+                                show_truncation(min(20, len(preview_df)), len(preview_df))
                             else:
                                 st.warning(t('entrada.no_ip_html'))
                         # Store HTML content + platform for processing
@@ -147,24 +148,24 @@ def page_entrada():
                         import pdfplumber
                         text_parts = []
                         with pdfplumber.open(io.BytesIO(uploaded_file.getvalue())) as pdf:
-                            for page in pdf.pages:
+                            for page_num, page in enumerate(pdf.pages, 1):
                                 try:
                                     page_text = page.extract_text()
                                     if page_text:
                                         text_parts.append(page_text)
-                                except Exception:
-                                    continue
+                                except Exception as e:
+                                    logger.warning("Página %d do PDF não extraída: %s", page_num, e)
                         content = '\n'.join(text_parts)
                         if not content.strip():
                             with pdfplumber.open(temp_path) as pdf_file:
                                 text_parts = []
-                                for page in pdf_file.pages:
+                                for page_num, page in enumerate(pdf_file.pages, 1):
                                     try:
                                         page_text = page.extract_text()
                                         if page_text:
                                             text_parts.append(page_text)
-                                    except Exception:
-                                        continue
+                                    except Exception as e:
+                                        logger.warning("Página %d do PDF não extraída: %s", page_num, e)
                                 content = '\n'.join(text_parts)
                     except ImportError:
                         st.warning("Instale 'pdfplumber' para processar PDFs: pip install pdfplumber")
@@ -200,6 +201,7 @@ def page_entrada():
                                         cols_preview.insert(1, 'User_ID')
                                     available = [c for c in cols_preview if c in preview_df.columns]
                                     st.dataframe(preview_df[available].head(20), use_container_width=True, hide_index=True)
+                                    show_truncation(min(20, len(preview_df)), len(preview_df))
                                 else:
                                     st.warning(t('entrada.no_ip_pdf'))
                         except Exception as e:
@@ -225,6 +227,7 @@ def page_entrada():
                                 cols_preview.insert(1, 'User_ID')
                             available = [c for c in cols_preview if c in preview_df.columns]
                             st.dataframe(preview_df[available].head(20), use_container_width=True, hide_index=True)
+                            show_truncation(min(20, len(preview_df)), len(preview_df))
                         else:
                             st.warning(t('entrada.no_ip_file'))
             except Exception as e:
@@ -281,6 +284,7 @@ def page_entrada():
                         cols_preview.insert(1, 'User_ID')
                     available = [c for c in cols_preview if c in preview_df.columns]
                     st.dataframe(preview_df[available].head(20), use_container_width=True, hide_index=True)
+                    show_truncation(min(20, len(preview_df)), len(preview_df))
                 else:
                     st.warning(t('entrada.no_ip_detected'))
 
@@ -418,8 +422,8 @@ def page_entrada():
             try:
                 from helpers.persistence import clear_dataframe
                 clear_dataframe('current')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Falha ao limpar persistência: %s", e)
             st.rerun()
 
     # Log

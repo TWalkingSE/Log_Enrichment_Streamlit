@@ -100,7 +100,7 @@ def carregar_arquivo_log(input_file, update_callback=None, alvo='desconhecido'):
         elif ext in ('.html', '.htm'):
             # HTML de plataformas (WhatsApp, Meta, Google)
             from html_parser import parse_html_file
-            with open(input_file, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(input_file, 'r', encoding='utf-8', errors='replace') as f:
                 html_content = f.read()
             df_html, platform = parse_html_file(html_content, alvo=alvo, update_callback=update_callback)
             if update_callback:
@@ -112,13 +112,13 @@ def carregar_arquivo_log(input_file, update_callback=None, alvo='desconhecido'):
                 import pdfplumber
                 text_parts = []
                 with pdfplumber.open(input_file) as pdf:
-                    for page in pdf.pages:
+                    for page_num, page in enumerate(pdf.pages, 1):
                         try:
                             page_text = page.extract_text()
                             if page_text:
                                 text_parts.append(page_text)
-                        except Exception:
-                            continue
+                        except Exception as e:
+                            logger.warning("Página %d do PDF não extraída: %s", page_num, e)
                 content = '\n'.join(text_parts)
                 if not content.strip():
                     raise ValueError("PDF sem conteúdo de texto extraível")

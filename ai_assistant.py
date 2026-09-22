@@ -364,8 +364,8 @@ def build_user_prompt(
             dt_series = parse_data(df_scored['Data'])
             fato_date = dt_fato.date() if hasattr(dt_fato, 'date') else dt_fato
             n_dia_fato = (dt_series.dt.date == fato_date).sum()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Contagem do dia do fato falhou: %s", e)
 
     # Proxy/CGNAT counts
     n_proxy = 0

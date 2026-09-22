@@ -12,7 +12,7 @@ from analysis import (
     detect_digital_silence, validate_timezone_consistency,
     analyze_provider_timing, detect_provider_transitions,
 )
-from helpers.large_data import cache_key, gate
+from helpers.large_data import cache_key, gate, show_truncation
 from i18n import t
 
 
@@ -154,6 +154,8 @@ def page_temporal():
             st.dataframe(pd.DataFrame(sandwiches), use_container_width=True, hide_index=True)
         transitions = trans.get('transitions', [])
         if transitions:
-            st.dataframe(pd.DataFrame(transitions[:10]), use_container_width=True, hide_index=True)
+            shown = transitions[:10]
+            st.dataframe(pd.DataFrame(shown), use_container_width=True, hide_index=True)
+            show_truncation(len(shown), len(transitions), 'transições')
         elif not sandwiches:
             st.success("✅ Nenhuma transição suspeita.")

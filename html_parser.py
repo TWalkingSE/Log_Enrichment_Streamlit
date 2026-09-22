@@ -300,7 +300,7 @@ def _parse_timestamp(ts_str, tz_suffix='UTC'):
     try:
         clean = re.sub(r'\s*(UTC|Z)\s*$', '', ts_str)
         return datetime.strptime(clean, '%Y-%m-%d %H:%M:%S')
-    except Exception:
+    except ValueError:
         return None
 
 
@@ -321,7 +321,7 @@ def _build_dataframe(pairs, alvo, has_port=False, tz_suffix='UTC'):
             iso_date = format_iso_date(dt)
         else:
             data = ts_str
-            periodo = '☀️ Diurno'
+            periodo = None
             iso_date = None
 
         # Porta logo depois de Ip, na mesma posição em que a Meta a entrega —
@@ -369,7 +369,7 @@ def _build_dataframe_meta(pairs, alvo):
             iso_date = format_iso_date(dt)
         else:
             data = ts_str
-            periodo = '☀️ Diurno'
+            periodo = None
             iso_date = None
 
         resultados.append({

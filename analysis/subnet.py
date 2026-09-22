@@ -1,5 +1,4 @@
 """analysis.subnet — split from analysis monolith."""
-import pandas as pd
 import logging
 from validators import parse_data
 
@@ -18,45 +17,46 @@ def analyze_subnet_patterns(df, ipv4_mask=24, ipv6_mask=48, ip_col=None):
     if df.empty or ip_col not in df.columns:
         return {'subnets': [], 'dominant_subnets': [], 'total_subnets': 0}
 
-    subnet_data = {}
-    date_col = 'Data' if 'Data' in df.columns else None
+    # Subrede calculada uma vez por IP distinto — cardinalidade baixa — e
+    # o restante agregado por groupby, em vez de iterrows() sobre o frame.
+    cols = [c for c in (ip_col, 'Ip_Dono', 'Ip_Cidade', 'Data') if c in df.columns]
+    work = df[cols].copy()
+    work['_ip'] = work[ip_col].astype(str).str.strip()
+    work = work[work['_ip'] != '']
 
-    for _, row in df.iterrows():
-        ip_str = str(row.get(ip_col, '')).strip()
-        if not ip_str:
-            continue
+    subnet_map = {}
+    for ip_str in work['_ip'].unique():
         try:
             addr = ipa(ip_str)
             mask = ipv6_mask if addr.version == 6 else ipv4_mask
-            net = ip_network(f"{ip_str}/{mask}", strict=False)
-            subnet_key = str(net)
-        except Exception:
+            subnet_map[ip_str] = (str(ip_network(f"{ip_str}/{mask}", strict=False)), addr.version)
+        except ValueError:
             continue
+    n_invalid = int((~work['_ip'].isin(subnet_map)).sum())
+    if n_invalid:
+        logger.warning("analyze_subnet_patterns: %d registros com IP inválido ignorados", n_invalid)
 
-        if subnet_key not in subnet_data:
-            subnet_data[subnet_key] = {
-                'subnet': subnet_key,
-                'ips': set(),
-                'count': 0,
-                'providers': set(),
-                'cities': set(),
-                'dates': [],
-                'version': addr.version,
-            }
+    work['_subnet'] = work['_ip'].map(lambda i: subnet_map.get(i, (None,))[0])
+    work = work[work['_subnet'].notna()]
+    if work.empty:
+        return {'subnets': [], 'dominant_subnets': [], 'total_subnets': 0}
 
-        subnet_data[subnet_key]['ips'].add(ip_str)
-        subnet_data[subnet_key]['count'] += 1
-
-        prov = row.get('Ip_Dono', '')
-        if prov and not pd.isna(prov):
-            subnet_data[subnet_key]['providers'].add(str(prov))
-        city = row.get('Ip_Cidade', '')
-        if city and not pd.isna(city):
-            subnet_data[subnet_key]['cities'].add(str(city))
-        if date_col and date_col in row.index:
-            d = row[date_col]
-            if d and not pd.isna(d):
-                subnet_data[subnet_key]['dates'].append(str(d))
+    subnet_data = {}
+    for subnet_key, grp in work.groupby('_subnet', sort=False):
+        provs = set(grp['Ip_Dono'].dropna().astype(str)) if 'Ip_Dono' in grp.columns else set()
+        cities = set(grp['Ip_Cidade'].dropna().astype(str)) if 'Ip_Cidade' in grp.columns else set()
+        dates = grp['Data'].dropna().astype(str).tolist() if 'Data' in grp.columns else []
+        provs.discard('')
+        cities.discard('')
+        subnet_data[subnet_key] = {
+            'subnet': subnet_key,
+            'ips': set(grp['_ip']),
+            'count': len(grp),
+            'providers': provs,
+            'cities': cities,
+            'dates': dates,
+            'version': subnet_map[grp['_ip'].iloc[0]][1],
+        }
 
     subnets = []
     for s in sorted(subnet_data.values(), key=lambda x: x['count'], reverse=True):
@@ -67,8 +67,8 @@ def analyze_subnet_patterns(df, ipv4_mask=24, ipv6_mask=48, ip_col=None):
                 parsed = parse_data(dates).dropna()
                 if len(parsed) > 0:
                     date_range = (parsed.min().strftime('%Y-%m-%d'), parsed.max().strftime('%Y-%m-%d'))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Intervalo de datas da subrede %s não calculado: %s", s['subnet'], e)
 
         subnets.append({
             'subnet': s['subnet'],

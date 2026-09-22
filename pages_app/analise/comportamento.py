@@ -3,13 +3,25 @@ Análise Avançada - Comportamento
 VPN/Proxy, Confiança IP, Números Descartáveis.
 """
 
+import pandas as pd
 import streamlit as st
 
 from analysis import (
     detect_vpn_heuristics, compute_ip_confidence,
     detect_disposable_numbers,
 )
+from helpers.large_data import cache_key, gate
 from i18n import t
+
+
+@st.cache_data(show_spinner=False)
+def _cached_vpn(_df, key):
+    return detect_vpn_heuristics(_df)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_confidence(_df, key):
+    return compute_ip_confidence(_df)
 
 
 def page_comportamento():
@@ -24,7 +36,9 @@ def page_comportamento():
     # ── VPN/Proxy ──
     with st.container(border=True):
         st.subheader("🕵️ Detecção Heurística de VPN/Proxy")
-        vpn_result = detect_vpn_heuristics(df)
+        vpn_result = (_cached_vpn(df, cache_key('vpn', len(df)))
+                      if gate('🕵️ Detectar heurísticas de VPN', df, 'comp_vpn')
+                      else {})
         score = vpn_result.get('score', 0)
         c1, c2 = st.columns([1, 2])
         with c1:
@@ -34,7 +48,7 @@ def page_comportamento():
         with c2:
             for k, v in vpn_result.get('indicators', {}).items():
                 st.markdown(f"**{k}**: {v}")
-            if not vpn_result.get('indicators'):
+            if not vpn_result.get('indicators') and vpn_result:
                 st.success("Nenhum indicador de VPN comportamental.")
         suspicious = vpn_result.get('suspicious_ips', [])
         if suspicious:
@@ -45,7 +59,9 @@ def page_comportamento():
     # ── Confiança IP ──
     with st.container(border=True):
         st.subheader("🎯 Confiança de IPs")
-        ip_conf = compute_ip_confidence(df)
+        ip_conf = (_cached_confidence(df, cache_key('conf', len(df)))
+                   if gate('🎯 Calcular confiança de IPs', df, 'comp_conf')
+                   else pd.DataFrame())
         if not ip_conf.empty:
             c1, c2, c3 = st.columns(3)
             c1.metric("IP Real", len(ip_conf[ip_conf['Classification'] == 'IP Real']))
@@ -60,11 +76,12 @@ def page_comportamento():
         if df_i is not None and not df_i.empty:
             with st.popover("⚙️ Configurar"):
                 max_app = st.slider("Máximo de aparições", 1, 10, 3, key="disp_max")
-            disposable = detect_disposable_numbers(df_i, max_appearances=max_app)
-            if not disposable.empty:
-                st.warning(f"**{len(disposable)}** números descartáveis")
-                st.dataframe(disposable, use_container_width=True, hide_index=True)
-            else:
-                st.success("✅ Nenhum número descartável detectado.")
+            if gate('📱 Detectar números descartáveis', df_i, 'comp_disp'):
+                disposable = detect_disposable_numbers(df_i, max_appearances=max_app)
+                if not disposable.empty:
+                    st.warning(f"**{len(disposable)}** números descartáveis")
+                    st.dataframe(disposable, use_container_width=True, hide_index=True)
+                else:
+                    st.success("✅ Nenhum número descartável detectado.")
         else:
             st.info("Processe dados de **Interceptação** primeiro.")

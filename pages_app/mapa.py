@@ -31,7 +31,7 @@ from analysis import (
 from components.visualizations import render_map_replay
 from helpers.geo import build_cluster_popup, build_rich_popup
 from validators import as_bool, bool_series, parse_data
-from helpers.large_data import gate, show_truncation, PREVIEW_ROWS
+from helpers.large_data import bump_data_version, gate, show_truncation, PREVIEW_ROWS
 
 # Tetos de exportação/renderização desta página. Toda truncagem é declarada.
 MAX_GEOJSON_FEATURES = 20000
@@ -415,6 +415,9 @@ def page_mapa():
                     st.session_state.df_resultado['Ip_Lon'] = st.session_state.df_resultado['Ip'].map(
                         lambda ip: ip_cache.get(ip, {}).get('Ip_Lon')
                     )
+                    # O conteúdo do dataset mudou — portões e caches por
+                    # versão precisam ser invalidados como numa atribuição.
+                    bump_data_version()
                     st.toast(f'📍 Coordenadas recuperadas do cache para {len(df_m)} registros')
             except Exception as exc:
                 logger.warning('Erro ao recuperar coordenadas do cache: %s', exc)
@@ -522,21 +525,25 @@ def page_mapa():
 
     if n_datacenter > 0:
         alert_rows = classified_df[classified_df['_infra_category'].isin(['proxy', 'datacenter_vpn'])]
-        alert_ips = ', '.join(alert_rows[ip_col].astype(str).unique()[:5])
+        alert_ip_set = alert_rows[ip_col].astype(str).unique()
+        alert_ips = ', '.join(alert_ip_set[:5])
         alert_providers = ', '.join(alert_rows['Ip_Dono'].dropna().astype(str).unique()[:5]) if 'Ip_Dono' in alert_rows.columns else 'N/A'
         st.error(
             f'🛡️ **{n_datacenter} registro(s) com Proxy/VPN/Datacenter detectados**\n\n'
-            f'IPs: {alert_ips or "N/A"}  \nProvedores: {alert_providers or "N/A"}  \n'
+            f'IPs ({len(alert_ip_set)} únicos, até 5 exibidos): {alert_ips or "N/A"}  \n'
+            f'Provedores: {alert_providers or "N/A"}  \n'
             '*A localizacao exibida pode representar o servidor, nao o usuario final.*'
         )
 
     if n_cloud > 0:
         cloud_rows = classified_df[classified_df['_infra_category'] == 'cloud']
-        cloud_ips = ', '.join(cloud_rows[ip_col].astype(str).unique()[:5])
+        cloud_ip_set = cloud_rows[ip_col].astype(str).unique()
+        cloud_ips = ', '.join(cloud_ip_set[:5])
         cloud_providers = ', '.join(cloud_rows['Ip_Dono'].dropna().astype(str).unique()[:5]) if 'Ip_Dono' in cloud_rows.columns else 'N/A'
         st.warning(
             f'☁️ **{n_cloud} registro(s) em Cloud Publica**\n\n'
-            f'IPs: {cloud_ips or "N/A"}  \nProvedores: {cloud_providers or "N/A"}  \n'
+            f'IPs ({len(cloud_ip_set)} únicos, até 5 exibidos): {cloud_ips or "N/A"}  \n'
+            f'Provedores: {cloud_providers or "N/A"}  \n'
             '*O IP pode pertencer a aplicacao, bot ou infraestrutura compartilhada.*'
         )
 

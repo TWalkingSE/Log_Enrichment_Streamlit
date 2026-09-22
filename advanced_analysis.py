@@ -889,15 +889,15 @@ def detect_geo_changes(df, cache):
             if old_lat and old_lon and current_lat and current_lon:
                 try:
                     distance_km = haversine_km(old_lat, old_lon, current_lat, current_lon)
-                except Exception:
-                    pass
+                except (TypeError, ValueError) as e:
+                    logger.debug("haversine falhou para %s: %s", ip_str, e)
 
             days_since = 0
             if old_ts:
                 try:
                     days_since = int((datetime.now().timestamp() - old_ts) / 86400)
-                except Exception:
-                    pass
+                except (TypeError, OverflowError) as e:
+                    logger.debug("days_since falhou para %s (ts=%r): %s", ip_str, old_ts, e)
 
             if city_changed or isp_changed or country_changed:
                 severity = 'Crítico' if country_changed else ('Alto' if isp_changed else 'Médio')
@@ -967,7 +967,7 @@ def fetch_tor_exit_nodes(list_url=TOR_BULK_EXIT_LIST_URL, return_error=False):
     try:
         req = urllib.request.Request(list_url, headers={'User-Agent': 'LogEnrichment/5.2'})
         with urllib.request.urlopen(req, timeout=20) as resp:
-            content = resp.read().decode('utf-8', errors='ignore')
+            content = resp.read().decode('utf-8', errors='replace')
 
         nodes = set()
         for raw_line in content.splitlines():
@@ -1002,7 +1002,7 @@ def fetch_tor_exit_nodes_from_onionoo(api_url=TOR_ONIONOO_DETAILS_URL, return_er
     try:
         req = urllib.request.Request(api_url, headers={'User-Agent': 'LogEnrichment/5.2'})
         with urllib.request.urlopen(req, timeout=25) as resp:
-            payload = json.loads(resp.read().decode('utf-8', errors='ignore'))
+            payload = json.loads(resp.read().decode('utf-8', errors='replace'))
 
         nodes = set()
         for relay in payload.get('relays', []):

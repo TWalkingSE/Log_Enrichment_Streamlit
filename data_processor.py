@@ -303,8 +303,10 @@ def extrair_ips_do_formato_whatsapp(content, update_callback=None, alvo='desconh
                 iso_date = format_iso_date(dt)
             except (TypeError, ValueError) as e:
                 logger.warning(f"Erro ao converter data '{date_utc}': {e}")
-                data = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                periodo = '☀️ Diurno'
+                # Preservar o valor bruto — inventar a data (ex.: now())
+                # fabrica o timestamp do evento no laudo.
+                data = date_utc
+                periodo = None
                 iso_date = None
 
             resultados.append({
@@ -383,8 +385,8 @@ def extrair_ips_do_formato_meta(content, update_callback=None, alvo='desconhecid
                 iso_date = format_iso_date(dt)
             except (TypeError, ValueError) as e:
                 logger.warning(f"Erro ao converter data '{date_utc}': {e}")
-                data = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                periodo = '☀️ Diurno'
+                data = date_utc
+                periodo = None
                 iso_date = None
 
             resultados.append({
@@ -484,7 +486,7 @@ def extrair_ips_do_formato_google(content, update_callback=None, alvo='desconhec
             except (TypeError, ValueError) as e:
                 logger.warning(f"Erro ao converter data '{timestamp_str}': {e}")
                 data_formatada = timestamp_str
-                periodo = '☀️ Diurno'
+                periodo = None
                 iso_date = None
 
             registro = {
@@ -909,7 +911,7 @@ def extrair_ips_do_formato_tiktok(content, update_callback=None, alvo='desconhec
         except (TypeError, ValueError) as e:
             logger.warning(f"Erro ao converter data TikTok '{date_raw}': {e}")
             data = date_str
-            periodo = '☀️ Diurno'
+            periodo = None
             iso_date = None
 
         resultados.append({
@@ -1005,7 +1007,7 @@ def extrair_ips_de_texto(file_path_or_content, is_file=True, update_callback=Non
             if update_callback:
                 update_callback(f"Extraindo IPs e dados temporais de {file_path_or_content}")
 
-            with open(file_path_or_content, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(file_path_or_content, 'r', encoding='utf-8', errors='replace') as f:
                 content = f.read()
         else:
             content = file_path_or_content
@@ -1081,7 +1083,7 @@ def extrair_ips_texto_simples(file_path_or_content, update_callback=None, is_fil
 
         # Obter o conteúdo do texto
         if is_file:
-            with open(file_path_or_content, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(file_path_or_content, 'r', encoding='utf-8', errors='replace') as f:
                 content = f.read()
         else:
             content = file_path_or_content
@@ -1160,7 +1162,7 @@ def extrair_ips_texto_simples(file_path_or_content, update_callback=None, is_fil
                     iso_date = format_iso_date(dt)
                 except (TypeError, ValueError) as e:
                     logger.warning(f"Erro ao calcular periodo para '{data}': {e}")
-                    periodo = '☀️ Diurno'
+                    periodo = None
                     iso_date = None
             else:
                 data = None
@@ -1229,8 +1231,6 @@ def processar_resultados(df_original, resultados_ips):
                 df_processado[col] = 'desconhecido'
             elif col == 'Data_Fuso':
                 df_processado[col] = TZ_LABEL
-            elif col == 'Periodo':
-                df_processado[col] = '☀️ Diurno'
             else:
                 df_processado[col] = None
 

@@ -7,6 +7,7 @@ import streamlit as st
 import pandas as pd
 import os
 import json
+import logging
 
 from analysis import (
     detect_life_patterns,
@@ -15,6 +16,8 @@ from analysis import (
 )
 from helpers.large_data import cache_key, gate
 from i18n import t
+
+logger = logging.getLogger(__name__)
 
 
 # `_df` não é hasheado (prefixo `_`); a identidade do cache vem de `key`,
@@ -53,8 +56,11 @@ def page_geo():
             try:
                 with open(cache_path, 'r') as f:
                     cache = json.load(f)
-            except Exception:
-                pass
+            except Exception as exc:
+                # Cache ilegível não pode ser apresentado como "sem
+                # histórico" — são estados diferentes numa perícia.
+                logger.warning("ip_cache.json ilegível: %s", exc)
+                st.warning(f"⚠️ Cache de IPs ilegível ({exc}) — histórico indisponível.")
         if cache:
             result = detect_geo_changes(df, cache)
             changes = result.get('changed_ips', [])

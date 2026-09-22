@@ -216,7 +216,7 @@ def records_to_dataframe(records, update_callback=None):
         except Exception as e:
             logger.warning(f"Erro ao converter timestamp '{timestamp_str}': {e}")
             data_formatada = timestamp_str
-            periodo = '☀️ Diurno'
+            periodo = None
             iso_date = None
 
         rows.append({
