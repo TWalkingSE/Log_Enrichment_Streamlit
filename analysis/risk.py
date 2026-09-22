@@ -28,20 +28,30 @@ def calculate_risk_scores(df, ip_col='Ip'):
         if len(cities) > 0:
             main_city = cities.index[0]
 
+    # Um grupo por IP: a versão anterior fazia uma varredura completa do
+    # frame por IP único (O(n_ips × n_linhas) — ~4,3k × 202k num caso real).
+    # Flags/cidade/provedor vêm do primeiro registro do grupo, como antes.
+    agg_spec = {'Ocorrencias': (ip_col, 'size')}
+    for c in ('Ip_Proxy', 'Ip_Hospedagem', 'Ip_Movel', 'Ip_Cidade', 'Ip_Dono'):
+        if c in df.columns:
+            agg_spec[c] = (c, 'first')
+    grp = df.groupby(ip_col, sort=False).agg(**agg_spec).reset_index()
+    # 'Sender IP' tem espaço — itertuples sanitizaria o nome do campo.
+    grp = grp.rename(columns={ip_col: 'IP'})
+
     ip_data = []
-    for ip in df[ip_col].dropna().unique():
-        mask = df[ip_col] == ip
-        rows = df[mask]
-        row = rows.iloc[0]
+    for row in grp.itertuples(index=False):
+        ip = row.IP
+        n_rows = row.Ocorrencias
 
         score = 0
         factors = []
         breakdown = []
 
-        is_proxy = as_bool(row.get('Ip_Proxy'), field='Ip_Proxy')
-        is_hosting = as_bool(row.get('Ip_Hospedagem'), field='Ip_Hospedagem')
-        is_mobile = as_bool(row.get('Ip_Movel'), field='Ip_Movel')
-        city = row.get('Ip_Cidade', '')
+        is_proxy = as_bool(getattr(row, 'Ip_Proxy', None), field='Ip_Proxy')
+        is_hosting = as_bool(getattr(row, 'Ip_Hospedagem', None), field='Ip_Hospedagem')
+        is_mobile = as_bool(getattr(row, 'Ip_Movel', None), field='Ip_Movel')
+        city = getattr(row, 'Ip_Cidade', '')
 
         if is_proxy:
             score += 40
@@ -55,14 +65,14 @@ def calculate_risk_scores(df, ip_col='Ip'):
                               'detail': 'IP pertence a datacenter/hospedagem (improvável uso residencial).'})
         if main_city and pd.notna(city) and city != main_city:
             score += 20
-            factors.append(f'Local incomum (+20)')
+            factors.append('Local incomum (+20)')
             breakdown.append({'label': 'Local incomum', 'weight': 20,
                               'detail': f'Cidade "{city}" diverge da cidade dominante "{main_city}".'})
-        if len(rows) <= 2:
+        if n_rows <= 2:
             score += 10
             factors.append('Baixa frequência (+10)')
             breakdown.append({'label': 'Baixa frequência', 'weight': 10,
-                              'detail': f'IP apareceu apenas {len(rows)}x — pode ser conexão pontual/anômala.'})
+                              'detail': f'IP apareceu apenas {n_rows}x — pode ser conexão pontual/anômala.'})
         if is_mobile:
             score -= 5
             factors.append('Móvel (-5)')
@@ -76,9 +86,9 @@ def calculate_risk_scores(df, ip_col='Ip'):
             'Score': score,
             'Fatores': '; '.join(factors) if factors else 'Residencial',
             'Breakdown': breakdown,
-            'Provedor': row.get('Ip_Dono', ''),
-            'Cidade': row.get('Ip_Cidade', ''),
-            'Ocorrencias': len(rows)
+            'Provedor': getattr(row, 'Ip_Dono', ''),
+            'Cidade': city,
+            'Ocorrencias': n_rows
         })
 
     result = pd.DataFrame(ip_data)
@@ -120,13 +130,11 @@ def detect_vpn_heuristics(df, date_col='Data'):
     # 1. IP Rotation Detection — IPs that change at regular intervals
     rotation_interval_min = _vpn_config.get('rotation_interval_minutes', 30)
     min_rotation_count = _vpn_config.get('min_rotation_count', 3)
-    ip_changes = []
-    prev_ip = None
-    for _, row in df_work.iterrows():
-        cur_ip = row[ip_col]
-        if prev_ip and cur_ip != prev_ip:
-            ip_changes.append(row['_dt'])
-        prev_ip = cur_ip
+    # Mesma semântica do loop anterior (prev_ip truthy && cur != prev): a
+    # primeira linha nunca conta; NaN != qualquer coisa conta como mudança.
+    mudou = df_work[ip_col].ne(df_work[ip_col].shift())
+    mudou.iloc[0] = False
+    ip_changes = df_work.loc[mudou, '_dt'].tolist()
 
     if len(ip_changes) >= min_rotation_count:
         # Check if intervals are suspiciously regular
@@ -164,24 +172,24 @@ def detect_vpn_heuristics(df, date_col='Data'):
             ~bool_series(df_work, 'Ip_Hospedagem')
         ]
         if len(residential) >= 2:
-            prev_row = None
-            for _, row in residential.iterrows():
-                if prev_row is not None:
-                    time_diff_h = abs((row['_dt'] - prev_row['_dt']).total_seconds()) / 3600
-                    if (time_diff_h <= residential_jump_hours and
-                            row.get('Ip_Pais') != prev_row.get('Ip_Pais') and
-                            pd.notna(row.get('Ip_Pais')) and pd.notna(prev_row.get('Ip_Pais'))):
-                        score += 30
-                        result['indicators']['Salto residencial'] = (
-                            f"🔴 IPs residenciais em {prev_row.get('Ip_Pais')} → "
-                            f"{row.get('Ip_Pais')} em {time_diff_h:.1f}h"
-                        )
-                        result['suspicious_ips'].extend([
-                            str(prev_row.get(ip_col, '')),
-                            str(row.get(ip_col, ''))
-                        ])
-                        break
-                prev_row = row
+            pais = residential['Ip_Pais']
+            delta_h = residential['_dt'].diff().dt.total_seconds() / 3600
+            jump_mask = (pais.ne(pais.shift()) & pais.notna() & pais.shift().notna()
+                         & delta_h.abs().le(residential_jump_hours))
+            if jump_mask.any():
+                cur = residential.loc[jump_mask.idxmax()]
+                pos = residential.index.get_loc(jump_mask.idxmax())
+                prev_row = residential.iloc[pos - 1]
+                time_diff_h = abs((cur['_dt'] - prev_row['_dt']).total_seconds()) / 3600
+                score += 30
+                result['indicators']['Salto residencial'] = (
+                    f"🔴 IPs residenciais em {prev_row.get('Ip_Pais')} → "
+                    f"{cur.get('Ip_Pais')} em {time_diff_h:.1f}h"
+                )
+                result['suspicious_ips'].extend([
+                    str(prev_row.get(ip_col, '')),
+                    str(cur.get(ip_col, ''))
+                ])
 
     # 4. Provider mix — residential + datacenter from same "user"
     if 'Ip_Hospedagem' in df_work.columns:
@@ -213,16 +221,41 @@ def compute_ip_confidence(df, date_col='Data'):
     if ip_col not in df.columns or df.empty:
         return pd.DataFrame(columns=['IP', 'Confidence', 'Classification', 'Motivo'])
 
+    # Uma agregação por IP em vez de uma varredura completa do frame por IP
+    # (O(n_ips × n_linhas) na versão anterior).
+    agg_spec = {'Ocorrencias': (ip_col, 'size')}
+    for c in ('Ip_Proxy', 'Ip_Hospedagem', 'Ip_Movel', 'Ip_Dono'):
+        if c in df.columns:
+            agg_spec[c] = (c, 'first')
+
+    work = df
+    if date_col in df.columns:
+        work = pd.DataFrame({ip_col: df[ip_col]})
+        for c in ('Ip_Proxy', 'Ip_Hospedagem', 'Ip_Movel', 'Ip_Dono'):
+            if c in df.columns:
+                work[c] = df[c]
+        datas = parse_data(df[date_col])
+        work['_hour'] = datas.dt.hour
+        work['_day'] = datas.dt.date
+        work['_tem_data'] = datas.notna()
+        agg_spec.update({
+            '_datas_ok': ('_tem_data', 'sum'),
+            '_hour_std': ('_hour', 'std'),
+            '_dias': ('_day', 'nunique'),
+        })
+
+    grp = work.groupby(ip_col, sort=False).agg(**agg_spec).reset_index()
+    grp = grp.rename(columns={ip_col: 'IP'})
+
     rows = []
-    for ip in df[ip_col].dropna().unique():
-        mask = df[ip_col] == ip
-        ip_data = df[mask]
+    for row in grp.itertuples(index=False):
+        ip = row.IP
         score = 50  # base
 
         motivos = []
 
         # Recurrence: more appearances = more likely real
-        count = len(ip_data)
+        count = row.Ocorrencias
         if count >= 10:
             score += 20
             motivos.append(f'{count}x ocorrências')
@@ -234,9 +267,9 @@ def compute_ip_confidence(df, date_col='Data'):
             motivos.append('Ocorrência única')
 
         # Proxy/hosting flags
-        is_proxy = as_bool(ip_data.iloc[0].get('Ip_Proxy'), field='Ip_Proxy')
-        is_hosting = as_bool(ip_data.iloc[0].get('Ip_Hospedagem'), field='Ip_Hospedagem')
-        is_mobile = as_bool(ip_data.iloc[0].get('Ip_Movel'), field='Ip_Movel')
+        is_proxy = as_bool(getattr(row, 'Ip_Proxy', None), field='Ip_Proxy')
+        is_hosting = as_bool(getattr(row, 'Ip_Hospedagem', None), field='Ip_Hospedagem')
+        is_mobile = as_bool(getattr(row, 'Ip_Movel', None), field='Ip_Movel')
 
         if is_proxy:
             score -= 30
@@ -249,20 +282,17 @@ def compute_ip_confidence(df, date_col='Data'):
             motivos.append('Rede móvel')
 
         # Temporal consistency
-        if date_col in ip_data.columns:
-            dates = parse_data(ip_data[date_col]).dropna()
-            if len(dates) >= 3:
-                hours = dates.dt.hour
-                hour_std = hours.std()
-                if hour_std < 4:
-                    score += 10
-                    motivos.append('Horários consistentes')
+        if getattr(row, '_datas_ok', 0) >= 3:
+            hour_std = row._hour_std
+            if pd.notna(hour_std) and hour_std < 4:
+                score += 10
+                motivos.append('Horários consistentes')
 
-                # Multi-day usage
-                days = dates.dt.date.nunique()
-                if days >= 3:
-                    score += 10
-                    motivos.append(f'{days} dias diferentes')
+            # Multi-day usage
+            days = row._dias
+            if days >= 3:
+                score += 10
+                motivos.append(f'{days} dias diferentes')
 
         score = max(0, min(100, score))
         classification = 'IP Real' if score >= 60 else 'Incerto' if score >= 35 else 'IP Mascarado'
@@ -272,7 +302,7 @@ def compute_ip_confidence(df, date_col='Data'):
             'Confidence': score,
             'Classification': classification,
             'Motivo': '; '.join(motivos),
-            'Provedor': ip_data.iloc[0].get('Ip_Dono', ''),
+            'Provedor': getattr(row, 'Ip_Dono', ''),
             'Ocorrencias': count,
         })
 

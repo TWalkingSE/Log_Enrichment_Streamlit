@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -69,13 +69,13 @@ def export_ioc_csv(df: pd.DataFrame, *, ip_col: Optional[str] = None) -> str:
     col = ip_col or _ip_column(df)
     if df is None or df.empty or col not in df.columns:
         return "ip,org,asn,city,country,proxy,hosting,mobile\n"
+    # Dedup antes do loop: a varredura por linha do frame inteiro (200k)
+    # virava 200k construções de Series só para achar ~4k IPs únicos.
     rows = []
-    seen: Set[str] = set()
-    for _, row in df.iterrows():
+    for _, row in df.drop_duplicates(subset=[col]).iterrows():
         ip = str(row.get(col, "")).strip()
-        if not ip or ip in seen:
+        if not ip:
             continue
-        seen.add(ip)
         rows.append({
             "ip": ip,
             "org": row.get("Ip_Dono", ""),
@@ -121,14 +121,12 @@ def build_stix_bundle(
         }
     ]
 
-    seen: Set[str] = set()
     count = 0
     if not work.empty and col in work.columns:
-        for _, row in work.iterrows():
+        for _, row in work.drop_duplicates(subset=[col]).iterrows():
             ip = str(row.get(col, "")).strip()
-            if not ip or ip in seen:
+            if not ip:
                 continue
-            seen.add(ip)
             if count >= max_indicators:
                 break
             count += 1

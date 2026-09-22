@@ -9,6 +9,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from helpers.large_data import gate
 from helpers.shared import detect_anomalies
 from styles.theme import COLORS
 from i18n import t
@@ -443,12 +444,13 @@ def page_estatisticas():
                 st.info('Sem datas validas para gerar o mapa de calor.')
 
     st.markdown('### Anomalias e Detalhamento')
-    anomalies = detect_anomalies(df)
-    if anomalies:
-        st.warning(f'**{len(anomalies)}** IPs com localizacao incomum detectados.')
-        st.dataframe(pd.DataFrame(anomalies), use_container_width=True, hide_index=True)
-    else:
-        st.success('Nenhuma anomalia detectada no conjunto atual.')
+    if gate('⚡ Detectar anomalias', df, 'stats_anomalies'):
+        anomalies = detect_anomalies(df)
+        if anomalies:
+            st.warning(f'**{len(anomalies)}** IPs com localizacao incomum detectados.')
+            st.dataframe(pd.DataFrame(anomalies), use_container_width=True, hide_index=True)
+        else:
+            st.success('Nenhuma anomalia detectada no conjunto atual.')
 
     st.subheader('📋 Detalhamento por Provedor')
     if 'Ip_Dono' in df.columns:

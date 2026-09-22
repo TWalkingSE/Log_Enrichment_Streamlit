@@ -122,7 +122,12 @@ def save_dataframe(df: Optional[pd.DataFrame], name: str = "current") -> Optiona
     except Exception as e:
         logger.debug("Parquet indisponível (%s); usando pickle", e)
         try:
-            df.to_pickle(paths["pickle"])
+            # Mesma garantia atômica do parquet: um pickle truncado por falha
+            # no meio da gravação era servido depois como se fosse válido.
+            tmp = paths["pickle"].with_suffix(".pkl.part")
+            df.to_pickle(tmp)
+            os.replace(tmp, paths["pickle"])
+            _write_meta(paths["meta"], df, str(paths["pickle"]))
             logger.info("DataFrame salvo em %s (%s linhas)", paths["pickle"], len(df))
             return str(paths["pickle"])
         except Exception as e2:

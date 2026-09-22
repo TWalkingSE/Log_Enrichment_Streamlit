@@ -17,15 +17,18 @@ from analysis import (
     get_tor_exit_nodes, check_tor_exit_nodes,
 )
 from helpers.shared import run_async
+from helpers.large_data import cache_key, gate
 
 from i18n import t
 
 logger = logging.getLogger(__name__)
 
 
+# `_df` não é hasheado (prefixo `_`); a identidade do cache vem de `key`,
+# derivado da versão do dataset. Hashear o frame a cada rerun era o custo.
 @st.cache_data(show_spinner=False)
-def _cached_risk_scores(df, ip_col):
-    return calculate_risk_scores(df, ip_col=ip_col)
+def _cached_risk_scores(_df, ip_col, key):
+    return calculate_risk_scores(_df, ip_col=ip_col)
 
 
 def page_risco():
@@ -43,7 +46,9 @@ def page_risco():
     # ── Risk Score ──
     with st.container(border=True):
         st.subheader(t('risco.risk_score_title'))
-        scores = _cached_risk_scores(df, ip_col)
+        scores = (_cached_risk_scores(df, ip_col, cache_key('risk', len(df), ip_col))
+                  if gate('🛡️ Calcular risk scores', df, 'risk_scores')
+                  else pd.DataFrame())
         if not scores.empty:
             c1, c2, c3 = st.columns(3)
             c1.metric(t('risco.high_risk'), len(scores[scores['Score'] >= 50]))

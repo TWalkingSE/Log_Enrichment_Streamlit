@@ -240,9 +240,13 @@ def validate_domain(df, mode='standard'):
     ip_col = 'Ip' if mode == 'standard' else 'Sender IP'
     valid_mask = pd.Series(True, index=df.index)
 
-    # 1. Validate IPs
+    # 1. Validate IPs — por valor distinto: geolocalização por IP tem
+    # cardinalidade baixíssima (milhares de IPs para ~200k linhas).
     if ip_col in df.columns:
-        ip_valid = df[ip_col].apply(lambda x: _is_valid_ip_strict(str(x)) if pd.notna(x) else False)
+        serie = df[ip_col]
+        unicos = serie.dropna().astype(str).str.strip().unique()
+        validos = {ip for ip in unicos if _is_valid_ip_strict(ip)}
+        ip_valid = serie.notna() & serie.astype(str).str.strip().isin(validos)
         invalid_ips = (~ip_valid).sum()
         if invalid_ips > 0:
             result.add_warning('domain', f'{invalid_ips} IPs inválidos detectados', invalid_ips)
@@ -257,9 +261,10 @@ def validate_domain(df, mode='standard'):
             if bad_count > 0:
                 result.add_warning('domain', f'{coord_col}: {bad_count} coordenadas fora do intervalo válido', bad_count)
 
-    # 3. Validate dates
+    # 3. Validate dates — formato canônico primeiro; 'mixed' cairia no
+    # parser por elemento do dateutil (~50x mais lento em 200k linhas).
     if 'Data' in df.columns:
-        dates = pd.to_datetime(df['Data'], errors='coerce')
+        dates = parse_data(df['Data'])
         invalid_dates = dates.isna().sum() - df['Data'].isna().sum()
         if invalid_dates > 0:
             result.add_warning('domain', f'{invalid_dates} datas não parseáveis', invalid_dates)

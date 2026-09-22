@@ -11,14 +11,19 @@ from analysis import (
     calculate_risk_scores, compute_data_health,
     detect_vpn_heuristics, compute_ip_confidence,
 )
+from helpers.large_data import cache_key, gate
+from validators import bool_series
 from i18n import t
 
 
+# `_df` não é hasheado (prefixo `_`); a identidade do cache vem de `key`,
+# derivado da versão do dataset — hashear o frame a cada rerun era o custo.
 @st.cache_data(show_spinner=False)
-def _cached_overview_kpis(df, ip_col):
+def _cached_overview_kpis(_df, ip_col, key):
+    df = _df
     unique_ips = df[ip_col].nunique()
     n_providers = df['Ip_Dono'].dropna().nunique() if 'Ip_Dono' in df.columns else 0
-    proxy_pct = (df['Ip_Proxy'].sum() / len(df) * 100) if 'Ip_Proxy' in df.columns and len(df) > 0 else 0
+    proxy_pct = (bool_series(df, 'Ip_Proxy').sum() / len(df) * 100) if 'Ip_Proxy' in df.columns and len(df) > 0 else 0
     health = compute_data_health(df)
     health_score = health.get('overall_score', 0)
     scores = calculate_risk_scores(df, ip_col=ip_col)
@@ -51,8 +56,13 @@ def page_overview():
 
     ip_col = 'Sender IP' if 'Sender IP' in df.columns else 'Ip'
 
+    # Toda a página é derivada de varreduras completas do frame — um clique
+    # libera tudo de uma vez em datasets grandes.
+    if not gate('📊 Calcular visão geral', df, 'overview_kpis'):
+        return
+
     # ── Row 1: KPIs (cached) ──
-    kpis = _cached_overview_kpis(df, ip_col)
+    kpis = _cached_overview_kpis(df, ip_col, cache_key('ovk', len(df), ip_col))
     unique_ips = kpis['unique_ips']
     n_providers = kpis['n_providers']
     proxy_pct = kpis['proxy_pct']

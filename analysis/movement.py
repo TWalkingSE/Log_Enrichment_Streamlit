@@ -82,10 +82,11 @@ def detect_base_locations(df, date_col='Data', lat_col='Ip_Lat', lon_col='Ip_Lon
         subset = df_b[mask]
         if subset.empty:
             continue
-        # Cluster by rounded coords (city-level)
+        # Cluster by rounded coords (city-level) — chave vetorizada; o
+        # apply(axis=1) anterior fazia uma passada Python por linha.
         subset = subset.copy()
-        subset['_loc'] = subset.apply(
-            lambda r: f"{round(r[lat_col], 2)},{round(r[lon_col], 2)}", axis=1)
+        subset['_loc'] = (subset[lat_col].round(2).astype(str) + ',' +
+                          subset[lon_col].round(2).astype(str))
         top = subset['_loc'].value_counts()
         if top.empty:
             continue

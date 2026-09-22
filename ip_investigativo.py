@@ -112,11 +112,11 @@ def selecionar_provedores(df):
     if df_f.empty:
         return [], {}, 0.0
 
-    # Excluir proxy/hosting (não identificam usuário final)
-    mask_clean = ~(
-        df_f.get('Ip_Proxy', pd.Series(False, index=df_f.index)).apply(_parse_bool)
-        | df_f.get('Ip_Hospedagem', pd.Series(False, index=df_f.index)).apply(_parse_bool)
-    )
+    # Excluir proxy/hosting (não identificam usuário final).
+    # bool_series já trata coluna ausente e loga tokens desconhecidos —
+    # o apply(_parse_bool) anterior fazia uma chamada Python por linha.
+    from validators import bool_series
+    mask_clean = ~(bool_series(df_f, 'Ip_Proxy') | bool_series(df_f, 'Ip_Hospedagem'))
     df_clean = df_f[mask_clean]
 
     # Fallback: se o filtro removeu tudo, usar todos os registros válidos

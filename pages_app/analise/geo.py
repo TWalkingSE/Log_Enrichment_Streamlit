@@ -13,22 +13,25 @@ from analysis import (
     detect_geo_changes,
     analyze_subnet_patterns, correlate_subnets_cross_target, compute_subnet_consistency,
 )
+from helpers.large_data import cache_key, gate
 from i18n import t
 
 
+# `_df` não é hasheado (prefixo `_`); a identidade do cache vem de `key`,
+# derivado da versão do dataset — hashear o frame a cada rerun era o custo.
 @st.cache_data(show_spinner=False)
-def _cached_subnet_patterns(df, ipv4_mask, ipv6_mask):
-    return analyze_subnet_patterns(df, ipv4_mask=ipv4_mask, ipv6_mask=ipv6_mask)
-
-
-@st.cache_data(show_spinner=False)
-def _cached_subnet_consistency(df, ipv4_mask, ipv6_mask):
-    return compute_subnet_consistency(df, ipv4_mask=ipv4_mask, ipv6_mask=ipv6_mask)
+def _cached_subnet_patterns(_df, ipv4_mask, ipv6_mask, key):
+    return analyze_subnet_patterns(_df, ipv4_mask=ipv4_mask, ipv6_mask=ipv6_mask)
 
 
 @st.cache_data(show_spinner=False)
-def _cached_life_patterns(df):
-    return detect_life_patterns(df)
+def _cached_subnet_consistency(_df, ipv4_mask, ipv6_mask, key):
+    return compute_subnet_consistency(_df, ipv4_mask=ipv4_mask, ipv6_mask=ipv6_mask)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_life_patterns(_df, key):
+    return detect_life_patterns(_df)
 
 
 def page_geo():
@@ -77,10 +80,15 @@ def page_geo():
             ipv4_mask = st.slider("IPv4", 16, 32, 24, key="subnet_v4")
             ipv6_mask = st.slider("IPv6", 32, 64, 48, key="subnet_v6")
 
-        result = _cached_subnet_patterns(df, ipv4_mask, ipv6_mask)
+        ck_sub = cache_key('subnet', len(df), ipv4_mask, ipv6_mask)
+        if gate('🌐 Analisar sub-redes', df, 'geo_subnets'):
+            result = _cached_subnet_patterns(df, ipv4_mask, ipv6_mask, ck_sub)
+            consistency = _cached_subnet_consistency(df, ipv4_mask, ipv6_mask, ck_sub)
+        else:
+            result = {'total_subnets': 0, 'dominant_subnets': []}
+            consistency = {'consistency_score': 0}
         c1, c2 = st.columns(2)
         c1.metric("Subnets", result['total_subnets'])
-        consistency = _cached_subnet_consistency(df, ipv4_mask, ipv6_mask)
         c2.metric("Consistency", f"{consistency['consistency_score']}%")
 
         if result['dominant_subnets']:
@@ -112,10 +120,11 @@ def page_geo():
     # ── Padrões de Vida ──
     with st.container(border=True):
         st.subheader(t('geo.life_patterns_title'))
-        life = _cached_life_patterns(df)
-        if life.get('has_data'):
-            for c in life.get('clusters', []):
-                icon = {'home': '🏠', 'work': '🏢', 'other': '📍'}.get(c.get('type', ''), '📍')
-                st.markdown(f"**{icon} {c.get('label', '')}** — {c.get('city', '')} ({c.get('count', 0)} acessos)")
-        else:
-            st.info(t('geo.life_patterns_subtitle'))
+        if gate('🧬 Detectar padrões de vida', df, 'geo_life'):
+            life = _cached_life_patterns(df, cache_key('life', len(df)))
+            if life.get('has_data'):
+                for c in life.get('clusters', []):
+                    icon = {'home': '🏠', 'work': '🏢', 'other': '📍'}.get(c.get('type', ''), '📍')
+                    st.markdown(f"**{icon} {c.get('label', '')}** — {c.get('city', '')} ({c.get('count', 0)} acessos)")
+            else:
+                st.info(t('geo.life_patterns_subtitle'))

@@ -12,32 +12,35 @@ from analysis import (
     detect_digital_silence, validate_timezone_consistency,
     analyze_provider_timing, detect_provider_transitions,
 )
+from helpers.large_data import cache_key, gate
 from i18n import t
 
 
+# `_df` não é hasheado (prefixo `_`); a identidade do cache vem de `key`,
+# derivado da versão do dataset — hashear o frame a cada rerun era o custo.
 @st.cache_data(show_spinner=False)
-def _cached_time_patterns(df):
-    return analyze_time_patterns(df)
-
-
-@st.cache_data(show_spinner=False)
-def _cached_digital_silence(df, min_gap_hours):
-    return detect_digital_silence(df, min_gap_hours=min_gap_hours)
+def _cached_time_patterns(_df, key):
+    return analyze_time_patterns(_df)
 
 
 @st.cache_data(show_spinner=False)
-def _cached_tz_consistency(df):
-    return validate_timezone_consistency(df)
+def _cached_digital_silence(_df, min_gap_hours, key):
+    return detect_digital_silence(_df, min_gap_hours=min_gap_hours)
 
 
 @st.cache_data(show_spinner=False)
-def _cached_provider_timing(df, min_records):
-    return analyze_provider_timing(df, min_records=min_records)
+def _cached_tz_consistency(_df, key):
+    return validate_timezone_consistency(_df)
 
 
 @st.cache_data(show_spinner=False)
-def _cached_provider_transitions(df, window_minutes):
-    return detect_provider_transitions(df, window_minutes=window_minutes)
+def _cached_provider_timing(_df, min_records, key):
+    return analyze_provider_timing(_df, min_records=min_records)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_provider_transitions(_df, window_minutes, key):
+    return detect_provider_transitions(_df, window_minutes=window_minutes)
 
 
 def page_temporal():
@@ -52,7 +55,9 @@ def page_temporal():
     # ── Padrões Temporais ──
     with st.container(border=True):
         st.subheader(t('temporal.patterns_title'))
-        patterns = _cached_time_patterns(df)
+        patterns = (_cached_time_patterns(df, cache_key('tpat', len(df)))
+                    if gate('🕐 Analisar padrões temporais', df, 'temporal_patterns')
+                    else {'hourly_counts': None})
         if patterns['hourly_counts'] is not None:
             c1, c2 = st.columns(2)
             c1.metric(t('temporal.routine_score'), f"{patterns['routine_score']}%")
@@ -72,19 +77,22 @@ def page_temporal():
         st.subheader(t('temporal.silence_title'))
         with st.popover("⚙️"):
             min_gap = st.slider(t('temporal.silence_gap_label'), 12, 168, 24, key="silence_gap")
-        result = _cached_digital_silence(df, min_gap)
-        silences = result.get('periods', [])
-        if silences:
-            st.warning(t('temporal.silence_found', count=len(silences)))
-            for s in silences:
-                st.markdown(f"**{s.get('start', '')}** → **{s.get('end', '')}** ({s.get('gap_hours', 0):.0f}h)")
-        else:
-            st.success(t('temporal.no_silence'))
+        if gate('🌒 Detectar silêncio digital', df, 'temporal_silence'):
+            result = _cached_digital_silence(df, min_gap, cache_key('sil', len(df), min_gap))
+            silences = result.get('periods', [])
+            if silences:
+                st.warning(t('temporal.silence_found', count=len(silences)))
+                for s in silences:
+                    st.markdown(f"**{s.get('start', '')}** → **{s.get('end', '')}** ({s.get('gap_hours', 0):.0f}h)")
+            else:
+                st.success(t('temporal.no_silence'))
 
     # ── Validação TZ ──
     with st.container(border=True):
         st.subheader(t('temporal.tz_title'))
-        tz_result = _cached_tz_consistency(df)
+        tz_result = (_cached_tz_consistency(df, cache_key('tz', len(df)))
+                     if gate('🌍 Validar consistência de fuso', df, 'temporal_tz')
+                     else {})
         if tz_result.get('analyzed'):
             inconsistent = tz_result.get('inconsistencies', [])
             if inconsistent:
@@ -99,7 +107,9 @@ def page_temporal():
         with st.popover("⚙️"):
             min_records = st.slider("min", 2, 20, 5, key="timing_min")
 
-        timing = _cached_provider_timing(df, min_records)
+        timing_ok = gate('⏱️ Analisar timing por provedor', df, 'temporal_timing')
+        timing = (_cached_provider_timing(df, min_records, cache_key('ptim', len(df), min_records))
+                  if timing_ok else {})
         providers = timing.get('providers', {})
         vpn_sched = timing.get('vpn_schedule', {})
 
@@ -127,7 +137,7 @@ def page_temporal():
                                  color='Registros', color_continuous_scale='Viridis')
                     fig.update_layout(height=200, showlegend=False, coloraxis_showscale=False)
                     st.plotly_chart(fig, key=f'timing_{prov_name}')
-        else:
+        elif timing_ok:
             st.info("Dados insuficientes para análise de timing.")
 
     # ── Transições entre Provedores ──
@@ -135,7 +145,9 @@ def page_temporal():
         st.subheader(t('temporal.transitions_title'))
         with st.popover("⚙️"):
             window = st.slider("window (min)", 10, 120, 30, key="timing_window")
-        trans = _cached_provider_transitions(df, window)
+        trans = (_cached_provider_transitions(df, window, cache_key('ptrans', len(df), window))
+                 if gate('🔄 Detectar transições de provedor', df, 'temporal_trans')
+                 else {})
         sandwiches = trans.get('sandwich_patterns', [])
         if sandwiches:
             st.warning(f"🔄 **{len(sandwiches)}** padrão(ões) sandwich (A→B→A) detectado(s)!")

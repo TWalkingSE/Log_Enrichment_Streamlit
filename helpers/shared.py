@@ -11,6 +11,8 @@ import logging
 import asyncio
 from datetime import datetime
 
+from validators import as_bool
+
 logger = logging.getLogger(__name__)
 
 
@@ -94,8 +96,8 @@ def detect_anomalies(df):
             continue
         seen.add(ip)
         city = getattr(row, 'Ip_Cidade', '')
-        is_proxy = bool(getattr(row, 'Ip_Proxy', False)) if hasattr(row, 'Ip_Proxy') else False
-        is_hosting = bool(getattr(row, 'Ip_Hospedagem', False)) if hasattr(row, 'Ip_Hospedagem') else False
+        is_proxy = as_bool(getattr(row, 'Ip_Proxy', None), field='Ip_Proxy') if hasattr(row, 'Ip_Proxy') else False
+        is_hosting = as_bool(getattr(row, 'Ip_Hospedagem', None), field='Ip_Hospedagem') if hasattr(row, 'Ip_Hospedagem') else False
         flags = []
         if is_proxy:
             flags.append('Proxy/VPN')

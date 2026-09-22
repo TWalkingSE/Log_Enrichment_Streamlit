@@ -10,6 +10,7 @@ import os
 from datetime import datetime, date
 
 from analysis import compute_data_health, calculate_risk_scores
+from helpers.large_data import gate
 from ip_investigativo import render_analise_investigativa
 from components.visualizations import render_health_gauges
 from ai_assistant import AI_MODELS, check_ollama_status, get_default_ai_tier, run_ai_analysis
@@ -302,5 +303,6 @@ def page_operacional():
     # ── Saúde dos Dados ──
     with st.container(border=True):
         st.subheader("💊 Saúde dos Dados")
-        health = compute_data_health(df)
-        render_health_gauges(health)
+        if gate('💊 Calcular saúde dos dados', df, 'op_health'):
+            health = compute_data_health(df)
+            render_health_gauges(health)
