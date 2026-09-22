@@ -16,6 +16,7 @@ from components.visualizations import render_ip_table_with_sparklines
 from html_report_generator import generate_html_report
 from file_handler import export_xlsx_colored, export_xlsx_to_disk
 from i18n import t
+from validators import bool_series
 from helpers.large_data import (
     bump_data_version, cache_key, estimate_xlsx_seconds, fmt_duracao,
     prepare_button, show_truncation,
@@ -167,21 +168,24 @@ def page_resultados():
     if sel_region != t('common.all') and 'Ip_Regiao' in df_f.columns:
         df_f = df_f[df_f['Ip_Regiao'] == sel_region]
     if sel_type != t('common.all') and all(c in df_f.columns for c in ['Ip_Proxy', 'Ip_Hospedagem', 'Ip_Movel']):
+        proxy_s = bool_series(df_f, 'Ip_Proxy')
+        host_s = bool_series(df_f, 'Ip_Hospedagem')
+        mob_s = bool_series(df_f, 'Ip_Movel')
         if sel_type == t('common.residential'):
-            df_f = df_f[~df_f['Ip_Proxy'] & ~df_f['Ip_Hospedagem'] & ~df_f['Ip_Movel']]
+            df_f = df_f[~proxy_s & ~host_s & ~mob_s]
         elif sel_type == t('common.mobile'):
-            df_f = df_f[df_f['Ip_Movel'].astype(bool)]
+            df_f = df_f[mob_s]
         elif sel_type == t('common.proxy_vpn'):
-            df_f = df_f[df_f['Ip_Proxy'].astype(bool)]
+            df_f = df_f[proxy_s]
         elif sel_type == t('common.hosting'):
-            df_f = df_f[df_f['Ip_Hospedagem'].astype(bool)]
+            df_f = df_f[host_s]
 
     # Metrics
     kpi_row([
         {'label': t('resultados.filtered'), 'value': len(df_f)},
         {'label': t('common.unique_ips'), 'value': df_f['Ip'].nunique() if 'Ip' in df_f.columns else 0},
-        {'label': t('resultados.proxies'), 'value': int(df_f['Ip_Proxy'].sum()) if 'Ip_Proxy' in df_f.columns else 0},
-        {'label': t('resultados.mobiles'), 'value': int(df_f['Ip_Movel'].sum()) if 'Ip_Movel' in df_f.columns else 0},
+        {'label': t('resultados.proxies'), 'value': int(bool_series(df_f, 'Ip_Proxy').sum())},
+        {'label': t('resultados.mobiles'), 'value': int(bool_series(df_f, 'Ip_Movel').sum())},
     ])
 
     # Table

@@ -32,6 +32,28 @@ def _fmt_int(n):
         return str(n)
 
 
+def _preencher_periodo(df, col='Periodo'):
+    """Deriva `Periodo` de `Data`; deixa vazio quando não dá para saber.
+
+    Gravar '☀️ Diurno' em registros sem data parseável fabrica um dado que
+    o documento não afirma — num laudo, ausência declarada é melhor que
+    valor inventado.
+    """
+    if 'Data' not in df.columns:
+        df[col] = None
+        return
+    try:
+        sample = df['Data'].iloc[0] if not df.empty else None
+        if sample and '/' in str(sample):
+            data_dt = pd.to_datetime(df['Data'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
+        else:
+            data_dt = pd.to_datetime(df['Data'], errors='coerce')
+        df[col] = data_dt.dt.hour.map(lambda h: get_periodo(int(h)) if pd.notna(h) else None)
+    except (AttributeError, TypeError, ValueError) as e:
+        logger.warning(f"Erro ao calcular Periodo: {e}")
+        df[col] = None
+
+
 def carregar_arquivo_log(input_file, update_callback=None, alvo='desconhecido'):
     """Carrega um arquivo de log e extrai os IPs com seus dados temporais"""
     ext = Path(input_file).suffix.lower()
@@ -69,7 +91,7 @@ def carregar_arquivo_log(input_file, update_callback=None, alvo='desconhecido'):
                 except Exception as e:
                     raise e
             else:
-                df = pd.read_csv(input_file, sep=separador, encoding='utf-8', errors='replace')
+                df = pd.read_csv(input_file, sep=separador, encoding='utf-8', encoding_errors='replace')
         elif ext in ('.xls', '.xlsx'):
             df = pd.read_excel(input_file)
         elif ext == '.txt':
@@ -142,21 +164,7 @@ def carregar_arquivo_log(input_file, update_callback=None, alvo='desconhecido'):
                     elif col in ['Ip_Movel', 'Ip_Proxy', 'Ip_Hospedagem', 'Ip_Tor']:
                         df[col] = False
                     elif col == 'Periodo':
-                        # Calcular período a partir da data
-                        if 'Data' in df.columns:
-                            try:
-                                sample = df['Data'].iloc[0] if not df.empty else None
-                                if sample and '/' in str(sample):
-                                    data_dt = pd.to_datetime(df['Data'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
-                                else:
-                                    data_dt = pd.to_datetime(df['Data'], errors='coerce')
-
-                                df['Periodo'] = data_dt.dt.hour.apply(get_periodo)
-                            except (AttributeError, TypeError, ValueError) as e:
-                                logger.warning(f"Erro ao calcular Periodo: {e}")
-                                df['Periodo'] = '☀️ Diurno'
-                        else:
-                            df['Periodo'] = '☀️ Diurno'
+                        _preencher_periodo(df)
                     elif col == 'ISO_Date':
                         # Gerar ISO_Date a partir da Data
                         if 'Data' in df.columns:
@@ -303,7 +311,7 @@ def carregar_arquivo_log(input_file, update_callback=None, alvo='desconhecido'):
                         elif col == 'Data_Fuso':
                             df_resultado[col] = TZ_LABEL
                         elif col == 'Periodo':
-                            df_resultado[col] = '☀️ Diurno'
+                            _preencher_periodo(df_resultado)
                         else:
                             df_resultado[col] = None
 
@@ -374,7 +382,7 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
                         except (OSError, ValueError, pd.errors.ParserError) as e:
                             raise e
                     else:
-                        df_resultado = pd.read_csv(output_file, sep=sep_existente, encoding='utf-8', errors='replace')
+                        df_resultado = pd.read_csv(output_file, sep=sep_existente, encoding='utf-8', encoding_errors='replace')
 
                 # Verificar se resultado existente é Meta, Preservation Google, Discord ou TikTok
                 if 'Porta' in df_resultado.columns:
@@ -396,7 +404,7 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
                         elif col == 'Data_Fuso':
                             df_resultado[col] = TZ_LABEL
                         elif col == 'Periodo':
-                            df_resultado[col] = 'Diurno'
+                            _preencher_periodo(df_resultado)
                         else:
                             df_resultado[col] = None
 

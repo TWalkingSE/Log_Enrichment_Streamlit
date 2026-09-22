@@ -12,6 +12,8 @@ from typing import Any, Dict, List, Optional, Set
 
 import pandas as pd
 
+from validators import as_bool, bool_series
+
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -56,14 +58,8 @@ def export_ioc_list(
     col = ip_col or _ip_column(df)
     work = df
     if only_suspicious and work is not None and not work.empty:
-        mask = False
-        if "Ip_Proxy" in work.columns:
-            mask = work["Ip_Proxy"].astype(bool)
-        if "Ip_Hospedagem" in work.columns:
-            host = work["Ip_Hospedagem"].astype(bool)
-            mask = host if mask is False else (mask | host)
-        if mask is not False:
-            work = work[mask]
+        mask = bool_series(work, "Ip_Proxy") | bool_series(work, "Ip_Hospedagem")
+        work = work[mask]
     ips = collect_ioc_candidates(work, col)
     return "\n".join(ips) + ("\n" if ips else "")
 
@@ -86,9 +82,9 @@ def export_ioc_csv(df: pd.DataFrame, *, ip_col: Optional[str] = None) -> str:
             "asn": row.get("Ip_AS", ""),
             "city": row.get("Ip_Cidade", ""),
             "country": row.get("Ip_Pais", ""),
-            "proxy": bool(row.get("Ip_Proxy", False)),
-            "hosting": bool(row.get("Ip_Hospedagem", False)),
-            "mobile": bool(row.get("Ip_Movel", False)),
+            "proxy": as_bool(row.get("Ip_Proxy"), field="Ip_Proxy"),
+            "hosting": as_bool(row.get("Ip_Hospedagem"), field="Ip_Hospedagem"),
+            "mobile": as_bool(row.get("Ip_Movel"), field="Ip_Movel"),
         })
     out = pd.DataFrame(rows)
     return out.to_csv(index=False)
@@ -108,14 +104,8 @@ def build_stix_bundle(
     col = ip_col or _ip_column(df)
     work = df if df is not None else pd.DataFrame()
     if only_suspicious and not work.empty:
-        mask = False
-        if "Ip_Proxy" in work.columns:
-            mask = work["Ip_Proxy"].astype(bool)
-        if "Ip_Hospedagem" in work.columns:
-            host = work["Ip_Hospedagem"].astype(bool)
-            mask = host if mask is False else (mask | host)
-        if mask is not False:
-            work = work[mask]
+        mask = bool_series(work, "Ip_Proxy") | bool_series(work, "Ip_Hospedagem")
+        work = work[mask]
 
     now = _utcnow()
     identity_id = _stix_id("identity")
@@ -154,16 +144,19 @@ def build_stix_bundle(
             })
 
             labels = []
-            if bool(row.get("Ip_Proxy", False)):
+            if as_bool(row.get("Ip_Proxy"), field="Ip_Proxy"):
                 labels.append("proxy")
-            if bool(row.get("Ip_Hospedagem", False)):
+            if as_bool(row.get("Ip_Hospedagem"), field="Ip_Hospedagem"):
                 labels.append("hosting")
-            if bool(row.get("Ip_Movel", False)):
+            if as_bool(row.get("Ip_Movel"), field="Ip_Movel"):
                 labels.append("mobile")
             if not labels:
                 labels.append("observed")
 
-            pattern = f"[ipv6-addr:value = '{ip}']" if is_v6 else f"[ipv4-addr:value = '{ip}']"
+            # O indicador pode conter caracteres que quebram o literal do
+            # pattern STIX (IOCs malformados são preservados de propósito).
+            ip_pattern = ip.replace("\\", "\\\\").replace("'", "\\'")
+            pattern = f"[ipv6-addr:value = '{ip_pattern}']" if is_v6 else f"[ipv4-addr:value = '{ip_pattern}']"
             desc_parts = [
                 f"org={row.get('Ip_Dono', '')}",
                 f"asn={row.get('Ip_AS', '')}",

@@ -5,7 +5,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 from analysis._config import _vpn_config
-from validators import bool_series, parse_data
+from validators import as_bool, bool_series, parse_data
 
 def calculate_risk_scores(df, ip_col='Ip'):
     """
@@ -38,9 +38,9 @@ def calculate_risk_scores(df, ip_col='Ip'):
         factors = []
         breakdown = []
 
-        is_proxy = row.get('Ip_Proxy', False)
-        is_hosting = row.get('Ip_Hospedagem', False)
-        is_mobile = row.get('Ip_Movel', False)
+        is_proxy = as_bool(row.get('Ip_Proxy'), field='Ip_Proxy')
+        is_hosting = as_bool(row.get('Ip_Hospedagem'), field='Ip_Hospedagem')
+        is_mobile = as_bool(row.get('Ip_Movel'), field='Ip_Movel')
         city = row.get('Ip_Cidade', '')
 
         if is_proxy:
@@ -234,9 +234,9 @@ def compute_ip_confidence(df, date_col='Data'):
             motivos.append('Ocorrência única')
 
         # Proxy/hosting flags
-        is_proxy = ip_data.iloc[0].get('Ip_Proxy', False)
-        is_hosting = ip_data.iloc[0].get('Ip_Hospedagem', False)
-        is_mobile = ip_data.iloc[0].get('Ip_Movel', False)
+        is_proxy = as_bool(ip_data.iloc[0].get('Ip_Proxy'), field='Ip_Proxy')
+        is_hosting = as_bool(ip_data.iloc[0].get('Ip_Hospedagem'), field='Ip_Hospedagem')
+        is_mobile = as_bool(ip_data.iloc[0].get('Ip_Movel'), field='Ip_Movel')
 
         if is_proxy:
             score -= 30

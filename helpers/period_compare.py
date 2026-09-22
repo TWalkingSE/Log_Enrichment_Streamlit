@@ -10,10 +10,14 @@ from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 
+from validators import bool_series, parse_data
+
 
 def _parse_dates(df: pd.DataFrame, date_col: str = "Data") -> pd.DataFrame:
     out = df.copy()
-    out["_dt"] = pd.to_datetime(out[date_col], format="mixed", errors="coerce")
+    # parse_data: caminho rápido no formato canônico do pipeline; 'mixed'
+    # cairia no parser por elemento do dateutil (~50x mais lento em 200k).
+    out["_dt"] = parse_data(out[date_col])
     return out.dropna(subset=["_dt"])
 
 
@@ -48,9 +52,9 @@ def period_kpis(df: pd.DataFrame, *, ip_col: Optional[str] = None) -> Dict[str, 
         }
     col = ip_col or ("Sender IP" if "Sender IP" in df.columns else "Ip")
     n = len(df)
-    proxy_pct = float(df["Ip_Proxy"].astype(bool).sum() / n * 100) if "Ip_Proxy" in df.columns else 0.0
-    host_pct = float(df["Ip_Hospedagem"].astype(bool).sum() / n * 100) if "Ip_Hospedagem" in df.columns else 0.0
-    mobile_pct = float(df["Ip_Movel"].astype(bool).sum() / n * 100) if "Ip_Movel" in df.columns else 0.0
+    proxy_pct = float(bool_series(df, "Ip_Proxy").sum() / n * 100) if "Ip_Proxy" in df.columns else 0.0
+    host_pct = float(bool_series(df, "Ip_Hospedagem").sum() / n * 100) if "Ip_Hospedagem" in df.columns else 0.0
+    mobile_pct = float(bool_series(df, "Ip_Movel").sum() / n * 100) if "Ip_Movel" in df.columns else 0.0
     top_prov = df["Ip_Dono"].value_counts().head(5).to_dict() if "Ip_Dono" in df.columns else {}
     top_ctry = df["Ip_Pais"].value_counts().head(5).to_dict() if "Ip_Pais" in df.columns else {}
     return {
