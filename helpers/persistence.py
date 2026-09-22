@@ -5,6 +5,7 @@ Prefers parquet (pyarrow/fastparquet); falls back to pickle.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -44,6 +45,20 @@ def session_paths(name: str = "current") -> dict:
     }
 
 
+def _sha256_file(path: Path) -> Optional[str]:
+    """SHA-256 do arquivo de dados — proveniência: prova que o que se
+    carrega é byte-a-byte o que foi gravado, e denuncia arquivo trocado."""
+    try:
+        digest = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError as exc:
+        logger.warning("Não foi possível hashear %s: %s", path, exc)
+        return None
+
+
 def _write_meta(meta_path: Path, df: pd.DataFrame, data_path: str) -> None:
     """Grava o manifesto da sessão ao lado do parquet."""
     payload = {
@@ -52,6 +67,7 @@ def _write_meta(meta_path: Path, df: pd.DataFrame, data_path: str) -> None:
         "columns": [str(c) for c in df.columns],
         "saved_at": datetime.now().isoformat(timespec="seconds"),
         "data_file": os.path.basename(data_path),
+        "sha256": _sha256_file(Path(data_path)),
     }
     try:
         tmp = meta_path.with_suffix(".json.part")
@@ -86,14 +102,28 @@ def _check_schema(meta_path: Path, name: str) -> None:
         return
     try:
         with open(meta_path, encoding="utf-8") as fh:
-            versao = json.load(fh).get("schema_version")
+            meta = json.load(fh)
     except (OSError, ValueError):
         return
+    versao = meta.get("schema_version")
     if versao is not None and versao != SCHEMA_VERSION:
         logger.warning(
             "Sessão '%s' foi gravada com schema v%s, mas esta versão usa v%d. "
             "Reprocesse o arquivo original se as classificações parecerem inconsistentes.",
             name, versao, SCHEMA_VERSION)
+    # Proveniência: o arquivo de dados precisa ser byte-a-byte o que o
+    # manifesto declara — divergência = arquivo trocado ou corrompido.
+    sha_meta = meta.get("sha256")
+    data_file = meta.get("data_file")
+    if sha_meta and data_file:
+        data_path = meta_path.parent / data_file
+        if data_path.exists():
+            atual = _sha256_file(data_path)
+            if atual and atual != sha_meta:
+                logger.warning(
+                    "Sessão '%s': arquivo de dados diverge do manifesto "
+                    "(sha256 esperado %s, atual %s) — possível adulteração "
+                    "ou gravação interrompida.", name, sha_meta[:12], atual[:12])
 
 
 def save_dataframe(df: Optional[pd.DataFrame], name: str = "current") -> Optional[str]:

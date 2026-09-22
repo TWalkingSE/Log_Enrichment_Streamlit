@@ -195,6 +195,52 @@ def build_stix_bundle(
     }
 
 
+def validate_stix_bundle(bundle: Dict[str, Any]) -> List[str]:
+    """Validação estrutural de um bundle STIX 2.1 gerado aqui.
+
+    Não substitui um validador STIX completo — cobre o que este emissor pode
+    quebrar: tipos obrigatórios, ids `tipo--uuid`, SCOs com valor, indicators
+    com pattern bem-formado (colchetes e aspas balanceadas após o escape) e
+    relacionamentos apontando para objetos existentes.
+    """
+    errors: List[str] = []
+    if not isinstance(bundle, dict) or bundle.get("type") != "bundle":
+        return ["bundle sem type='bundle'"]
+    objects = bundle.get("objects")
+    if not isinstance(objects, list):
+        return ["bundle sem lista 'objects'"]
+
+    ids = set()
+    for obj in objects:
+        oid = obj.get("id", "")
+        if "--" not in oid:
+            errors.append(f"id malformado: {oid!r}")
+        ids.add(oid)
+
+    for obj in objects:
+        otype = obj.get("type")
+        if otype == "indicator":
+            pattern = obj.get("pattern", "")
+            if not (pattern.startswith("[") and pattern.endswith("]")):
+                errors.append(f"indicator {obj.get('id')} com pattern não delimitado")
+            # Aspas internas só são válidas escapadas (\') — contar as
+            # não-escapadas: ímpar significa literal quebrado.
+            n_aspas = sum(1 for i, c in enumerate(pattern)
+                          if c == "'" and (i == 0 or pattern[i - 1] != "\\"))
+            if n_aspas % 2 != 0:
+                errors.append(f"indicator {obj.get('id')} com aspas não balanceadas no pattern")
+            if "value = '" not in pattern:
+                errors.append(f"indicator {obj.get('id')} sem comparação de value no pattern")
+        elif otype in ("ipv4-addr", "ipv6-addr"):
+            if not obj.get("value"):
+                errors.append(f"SCO {obj.get('id')} sem value")
+        elif otype == "relationship":
+            for ref in ("source_ref", "target_ref"):
+                if obj.get(ref) not in ids:
+                    errors.append(f"relationship {obj.get('id')} com {ref} órfão")
+    return errors
+
+
 def export_stix_json(
     df: pd.DataFrame,
     *,

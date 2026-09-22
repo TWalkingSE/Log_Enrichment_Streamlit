@@ -39,7 +39,7 @@ jobs:
         run: ruff check .
 
       - name: Mypy
-        run: mypy auth_password.py api_client.py validators.py
+        run: mypy auth_password.py api_client.py validators.py helpers/large_data.py helpers/persistence.py export_ioc.py
 
       - name: Run test suite
         run: pytest tests -v --tb=short -m "not slow" --cov=data_processing --cov=auth_password --cov-report=term-missing --cov-fail-under=0

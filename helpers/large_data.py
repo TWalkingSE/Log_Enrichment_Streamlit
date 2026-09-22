@@ -14,6 +14,7 @@ que derruba o websocket com `WebSocketClosedError`.
 
 import hashlib
 import logging
+from typing import Optional
 
 import streamlit as st
 
@@ -98,7 +99,7 @@ def cache_key(*parts) -> str:
 
 
 def gate(label: str, df, key: str, *, threshold: int = LARGE_ROW_THRESHOLD,
-         help: str = None) -> bool:
+         help: Optional[str] = None) -> bool:
     """True quando o trabalho pesado pode rodar.
 
     Datasets pequenos rodam implicitamente (UX inalterada). Datasets grandes
@@ -121,7 +122,7 @@ def gate(label: str, df, key: str, *, threshold: int = LARGE_ROW_THRESHOLD,
 
 def prepare_button(label: str, df, key: str, *,
                    threshold: int = LARGE_ROW_THRESHOLD,
-                   help: str = None) -> bool:
+                   help: Optional[str] = None) -> bool:
     """Portão em dois estágios para downloads.
 
     `st.download_button` exige os bytes prontos no momento da renderização,

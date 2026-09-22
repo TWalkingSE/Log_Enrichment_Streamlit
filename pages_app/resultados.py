@@ -62,6 +62,14 @@ def _generate_json_export(_df_data, key):
     return _df_data.to_json(orient='records', force_ascii=False, indent=2)
 
 
+@st.cache_data(ttl=300, max_entries=4, show_spinner=False)
+def _cache_freshness(cache_file, mtime):
+    """Frescor do cache de IPs; `mtime` na chave invalida quando o arquivo
+    é regravado — sem reler 2 MB de JSON a cada rerun."""
+    from api_client import summarize_ip_cache
+    return summarize_ip_cache(cache_file)
+
+
 @st.cache_data(ttl=1800, max_entries=3, show_spinner=False)
 def _generate_xlsx_export(_df_data, key):
     buf = io.BytesIO()
@@ -136,6 +144,24 @@ def page_resultados():
                 except Exception as e:
                     st.error(f"Erro: {e}")
         return
+
+    # Frescor do enriquecimento: geolocalização de cache pode estar velha —
+    # o analista vê a idade em vez de presumir dado atual.
+    cache_path = 'ip_cache.json'
+    try:
+        stats = _cache_freshness(cache_path, os.path.getmtime(cache_path)) \
+            if os.path.exists(cache_path) else None
+    except OSError:
+        stats = None
+    if stats and (stats['expirados'] or stats['sem_data'] or stats['mais_antigo_dias'] > 25):
+        st.warning(
+            f"⏱️ Cache de IPs: {stats['expirados']} expirada(s), "
+            f"{stats['sem_data']} sem carimbo de data, mais antigo há "
+            f"{stats['mais_antigo_dias']:.0f} dias. O enriquecimento pode "
+            "não refletir o estado atual da rede.")
+    elif stats and stats['total']:
+        st.caption(f"🌐 Enriquecimento: {stats['total']} IPs em cache — "
+                   f"mais antigo há {stats['mais_antigo_dias']:.0f} dias (TTL 30d).")
 
     # Filters
     c_search, c_prov, c_region, c_type = st.columns([2, 1, 1, 1])

@@ -41,6 +41,43 @@ FREE_API_RATE_LIMIT = 45
 FREE_API_PERIOD = 60
 
 
+def summarize_ip_cache(cache_file='ip_cache.json', ttl_seconds=CACHE_TTL_SECONDS):
+    """Resumo de frescor do cache de enriquecimento, para a interface.
+
+    Retorna {'total', 'expirados', 'sem_data', 'mais_antigo_dias'} ou None se
+    o arquivo não existe/está ilegível. Números — não presença/ausência — são
+    o que permite ao analista decidir se a geolocalização servida é atual.
+    """
+    try:
+        with open(cache_file, 'r', encoding='utf-8') as fh:
+            raw = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    now = time.time()
+    expirados = 0
+    sem_data = 0
+    mais_antigo = 0.0
+    for entry in raw.values():
+        if not isinstance(entry, dict):
+            continue
+        ts = entry.get('_cached_at')
+        if not isinstance(ts, (int, float)) or isinstance(ts, bool) or ts <= 0:
+            sem_data += 1
+            continue
+        idade = now - ts
+        mais_antigo = max(mais_antigo, idade)
+        if idade >= ttl_seconds:
+            expirados += 1
+    return {
+        'total': len(raw),
+        'expirados': expirados,
+        'sem_data': sem_data,
+        'mais_antigo_dias': mais_antigo / 86400,
+    }
+
+
 def _atomic_write(path, write_fn, mode='w', **open_kwargs):
     """Escreve via arquivo temporário + os.replace (atômico em NTFS e POSIX).
 

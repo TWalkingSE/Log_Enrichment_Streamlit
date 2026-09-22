@@ -8,7 +8,10 @@ from tests.common import *
 from pathlib import Path
 
 import helpers.persistence as persistence
-from export_ioc import export_ioc_csv, export_ioc_list
+from api_client import summarize_ip_cache
+from export_ioc import (
+    build_stix_bundle, export_ioc_csv, export_ioc_list, validate_stix_bundle,
+)
 from helpers.large_data import (
     bump_data_version, cache_key, data_version, gate, is_large,
     row_count, show_truncation, truncation_notice,
@@ -168,6 +171,70 @@ class TestPersistenciaResistente(unittest.TestCase):
         self.assertFalse(paths['pickle'].with_suffix('.pkl.part').exists())
         loaded = persistence.load_dataframe('alvo6')
         self.assertEqual(len(loaded), 1)
+
+    def test_meta_contem_sha256_e_detecta_arquivo_trocado(self):
+        persistence.save_dataframe(self._df(), name='alvo7')
+        meta = persistence.read_meta('alvo7')
+        self.assertTrue(meta.get('sha256'))
+        # Troca o arquivo de dados por outro parquet — o manifesto deixa de
+        # corresponder e a divergência precisa aparecer no log.
+        paths = persistence.session_paths('alvo7')
+        pd.DataFrame({'Ip': ['9.9.9.9']}).to_parquet(paths['parquet'], index=False)
+        with self.assertLogs('helpers.persistence', level='WARNING') as cm:
+            persistence.load_dataframe('alvo7')
+        self.assertTrue(any('sha256' in m for m in cm.output))
+
+
+class TestCacheFreshness(unittest.TestCase):
+    """summarize_ip_cache alimenta o aviso de frescor da interface."""
+
+    def test_resumo_conta_expirados_e_sem_data(self):
+        import time
+        agora = time.time()
+        cache = {
+            '8.8.8.8': {'Ip_Dono': 'X', '_cached_at': agora - 100},
+            '1.1.1.1': {'Ip_Dono': 'Y', '_cached_at': agora - 40 * 86400},
+            '9.9.9.9': {'Ip_Dono': 'Z'},  # sem carimbo
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, 'ip_cache.json')
+            with open(path, 'w', encoding='utf-8') as fh:
+                json.dump(cache, fh)
+            stats = summarize_ip_cache(path)
+        self.assertEqual(stats['total'], 3)
+        self.assertEqual(stats['expirados'], 1)
+        self.assertEqual(stats['sem_data'], 1)
+        self.assertGreater(stats['mais_antigo_dias'], 39)
+
+    def test_cache_inexistente_retorna_none(self):
+        self.assertIsNone(summarize_ip_cache('caminho/que/nao/existe.json'))
+
+
+class TestStixValidacao(unittest.TestCase):
+    """O bundle emitido precisa passar na validação estrutural — e a
+    validação precisa flagrar patterns quebrados."""
+
+    def test_bundle_valido_sem_erros(self):
+        df = pd.DataFrame({
+            'Ip': ['8.8.8.8', '2001:db8::1', "9.9.9.9' aspas"],
+            'Ip_Proxy': [True, False, False],
+        })
+        erros = validate_stix_bundle(build_stix_bundle(df))
+        self.assertEqual(erros, [])
+
+    def test_flagra_pattern_quebrado(self):
+        bundle = build_stix_bundle(pd.DataFrame({'Ip': ['8.8.8.8']}))
+        ind = next(o for o in bundle['objects'] if o['type'] == 'indicator')
+        ind['pattern'] = "[ipv4-addr:value = '8.8.8.8'"  # colchete aberto
+        erros = validate_stix_bundle(bundle)
+        self.assertTrue(erros)
+
+    def test_flagra_relacionamento_orfao(self):
+        bundle = build_stix_bundle(pd.DataFrame({'Ip': ['8.8.8.8']}))
+        rel = next(o for o in bundle['objects'] if o['type'] == 'relationship')
+        rel['target_ref'] = 'ipv4-addr--nao-existe'
+        erros = validate_stix_bundle(bundle)
+        self.assertTrue(any('órfão' in e or 'rfão' in e for e in erros))
 
 
 class TestIocDedup(unittest.TestCase):
