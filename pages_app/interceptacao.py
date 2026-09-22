@@ -122,13 +122,15 @@ def page_interceptacao():
             try:
                 html_content = intercept_data.decode('utf-8', errors='replace')
                 records = parse_html_records(html_content)
-                c1, c2, c3 = st.columns(3)
+                c1, c2, c3, c4 = st.columns(4)
                 with c1:
                     st.metric("Total", len(records))
                 with c2:
                     st.metric("Messages", len([r for r in records if r['type'].startswith('message')]))
                 with c3:
                     st.metric("Calls", len([r for r in records if r['type'].startswith('call')]))
+                with c4:
+                    st.metric("Logins", len([r for r in records if r['type'].startswith('login')]))
             except Exception as e:
                 logger.warning("Prévia do HTML falhou (%s): %s", uploaded_html.name, e)
                 st.caption(f"⚠️ Não foi possível pré-visualizar o HTML: {e}")
@@ -202,7 +204,7 @@ def page_interceptacao():
 
         st.divider()
         st.subheader("📊 Resultados da Interceptação")
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         with c1:
             st.metric("Registros", len(df_i))
         with c2:
@@ -211,6 +213,8 @@ def page_interceptacao():
             st.metric("Messages", len(df_i[df_i['type'].str.startswith('message', na=False)]))
         with c4:
             st.metric("Calls", len(df_i[df_i['type'].str.startswith('call', na=False)]))
+        with c5:
+            st.metric("Logins", len(df_i[df_i['type'].str.startswith('login', na=False)]))
 
         export_cols = [c for c in COLUNAS_EXPORT_INTERCEPTACAO if c in df_i.columns]
         df_display = df_i[export_cols]

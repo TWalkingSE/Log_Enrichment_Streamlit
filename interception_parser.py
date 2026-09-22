@@ -18,13 +18,18 @@ from data_processor import TZ_LABEL, convert_utc_to_local, format_iso_date, get_
 logger = logging.getLogger(__name__)
 
 # Colunas do modelo de saída para interceptação
+_COLS_PROVENIENCIA = [
+    'To', 'Evento', 'Call_Id', 'Call_Creator', 'Message_Id',
+    'Sender_Device', 'Media_Type', 'Msg_Size', 'Msg_Style', 'Alvo', 'Fonte'
+]
+
 COLUNAS_INTERCEPTACAO = [
     'FROM', 'Sender IP', 'Sender Port', 'Data', 'Data_Fuso',
     'Ip_Dono', 'Ip_AS', 'Ip_Regiao', 'Ip_Cidade',
     'Ip_Pais', 'Ip_Pais_Codigo',
     'Ip_Movel', 'Ip_Proxy', 'Ip_Hospedagem',
     'Ip_Lat', 'Ip_Lon', 'Periodo', 'ISO_Date', 'type'
-]
+] + _COLS_PROVENIENCIA
 
 COLUNAS_EXPORT_INTERCEPTACAO = [
     'FROM', 'Sender IP', 'Sender Port', 'Data', 'Data_Fuso',
@@ -32,24 +37,36 @@ COLUNAS_EXPORT_INTERCEPTACAO = [
     'Ip_Pais', 'Ip_Pais_Codigo',
     'Ip_Movel', 'Ip_Proxy', 'Ip_Hospedagem',
     'Reputação', 'Periodo', 'ISO_Date', 'type'
-]
+] + _COLS_PROVENIENCIA
 
 
-def parse_html_records(html_content, update_callback=None):
+def _extract_target(soup):
+    """Lê o número alvo da seção Request Parameters."""
+    rp = soup.find('div', id='property-request_parameters')
+    if not rp:
+        return ''
+    m = re.search(r'Target\|([+\d]+)', rp.get_text(separator='|', strip=True))
+    return m.group(1).strip() if m else ''
+
+
+def parse_html_records(html_content, update_callback=None, source=None, target=None):
     """
     Parse a WhatsApp Business Record HTML file and extract
-    Message Log and Call Log entries.
+    Message Log, Call Log and Prospective Login IPs entries.
 
     Returns:
-        list of dicts with keys: from_number, ip, port, timestamp, type
+        list of dicts with keys: from_number, ip, port, timestamp, type,
+        to, event, call_id, creator, message_id, device, media_type,
+        size, style, target, source
     """
     records = []
 
     # Use BeautifulSoup to extract text with separators
     soup = BeautifulSoup(html_content, 'html.parser')
 
-    # Extract Account Identifier (target phone)
-    full_text = soup.get_text(separator='|', strip=True)
+    # Alvo desta interceptação (proveniência por arquivo)
+    target_param = target if target is not None else _extract_target(soup)
+    source_name = source or ''
 
     # --- Parse Message Log ---
     msg_section = soup.find('div', id='property-message_log')
@@ -90,16 +107,42 @@ def parse_html_records(html_content, update_callback=None):
                 elif key == 'Type' and i + 1 < len(fields):
                     entry['msg_type'] = fields[i + 1].strip()
                     i += 2
+                elif key == 'Media Type' and i + 1 < len(fields):
+                    entry['media_type'] = fields[i + 1].strip()
+                    i += 2
+                elif key == 'Message Id' and i + 1 < len(fields):
+                    entry['message_id'] = fields[i + 1].strip()
+                    i += 2
+                elif key == 'Recipients' and i + 1 < len(fields):
+                    entry['to'] = fields[i + 1].strip()
+                    i += 2
+                elif key == 'Sender Device' and i + 1 < len(fields):
+                    entry['device'] = fields[i + 1].strip()
+                    i += 2
+                elif key == 'Message Size' and i + 1 < len(fields):
+                    entry['size'] = fields[i + 1].strip()
+                    i += 2
+                elif key == 'Message Style' and i + 1 < len(fields):
+                    entry['style'] = fields[i + 1].strip()
+                    i += 2
                 else:
                     i += 1
 
-            if entry.get('ip') and entry.get('timestamp'):
+            # Registro sem IP ainda é evidência (mensagem existe no log)
+            if entry.get('timestamp'):
+                media = entry.get('msg_type') or entry.get('media_type') or 'unknown'
                 records.append({
                     'from_number': entry.get('from', ''),
-                    'ip': entry['ip'],
+                    'to': entry.get('to', ''),
+                    'ip': entry.get('ip', ''),
                     'port': entry.get('port', ''),
                     'timestamp': entry['timestamp'],
-                    'type': f"message/{entry.get('msg_type', 'unknown')}"
+                    'type': f"message/{media}",
+                    'media_type': media,
+                    'message_id': entry.get('message_id', ''),
+                    'device': entry.get('device', ''),
+                    'size': entry.get('size', ''),
+                    'style': entry.get('style', ''),
                 })
 
     # --- Parse Call Log ---
@@ -131,56 +174,122 @@ def parse_html_records(html_content, update_callback=None):
 
             fields = call.split('|')
             # Each call can have multiple events (offer, accept, terminate)
-            # Each event has its own From, From Ip, From Port
-            current_call_id = ''
-            media_type = ''
-            i = 0
+            # Each event has its own Type, Timestamp, From, To, From Ip/Port
+            call_id = ''
+            creator = ''
             events = []
-            current_event = {}
+            evt = None
+            i = 0
 
             while i < len(fields):
                 key = fields[i].strip()
                 if key == 'Call Id' and i + 1 < len(fields):
-                    current_call_id = fields[i + 1].strip()
+                    call_id = fields[i + 1].strip()
                     i += 2
-                elif key == 'Media Type' and i + 1 < len(fields):
-                    media_type = fields[i + 1].strip()
+                elif key == 'Call Creator' and i + 1 < len(fields):
+                    creator = fields[i + 1].strip()
                     i += 2
                 elif key == 'Type' and i + 1 < len(fields):
-                    # New event starts
-                    if current_event.get('ip'):
-                        events.append(current_event.copy())
-                    current_event = {'event_type': fields[i + 1].strip()}
+                    if evt is not None and evt.get('timestamp'):
+                        events.append(evt)
+                    evt = {'event': fields[i + 1].strip(),
+                           'call_id': call_id, 'creator': creator}
                     i += 2
-                elif key == 'Timestamp' and i + 1 < len(fields):
-                    current_event['timestamp'] = fields[i + 1].strip()
-                    i += 2
-                elif key == 'From' and i + 1 < len(fields):
-                    current_event['from'] = fields[i + 1].strip()
-                    i += 2
-                elif key == 'From Ip' and i + 1 < len(fields):
-                    current_event['ip'] = fields[i + 1].strip()
-                    i += 2
-                elif key == 'From Port' and i + 1 < len(fields):
-                    current_event['port'] = fields[i + 1].strip()
-                    i += 2
+                elif evt is not None and i + 1 < len(fields):
+                    if key == 'Timestamp':
+                        evt['timestamp'] = fields[i + 1].strip()
+                        i += 2
+                    elif key == 'From':
+                        evt['from'] = fields[i + 1].strip()
+                        i += 2
+                    elif key == 'To':
+                        evt['to'] = fields[i + 1].strip()
+                        i += 2
+                    elif key == 'From Ip':
+                        evt['ip'] = fields[i + 1].strip()
+                        i += 2
+                    elif key == 'From Port':
+                        evt['port'] = fields[i + 1].strip()
+                        i += 2
+                    elif key == 'Media Type':
+                        evt['media_type'] = fields[i + 1].strip()
+                        i += 2
+                    else:
+                        i += 1
                 else:
                     i += 1
 
             # Don't forget last event
-            if current_event.get('ip'):
-                events.append(current_event)
+            if evt is not None and evt.get('timestamp'):
+                events.append(evt)
 
             for evt in events:
-                if evt.get('ip') and evt.get('timestamp'):
-                    call_type = f"call/{media_type}" if media_type else "call"
+                media = evt.get('media_type', '')
+                records.append({
+                    'from_number': evt.get('from', ''),
+                    'to': evt.get('to', ''),
+                    'ip': evt.get('ip', ''),
+                    'port': evt.get('port', ''),
+                    'timestamp': evt['timestamp'],
+                    'type': f"call/{media}" if media else "call",
+                    'event': evt.get('event', ''),
+                    'call_id': evt.get('call_id', ''),
+                    'creator': evt.get('creator', ''),
+                    'media_type': media,
+                })
+
+    # --- Parse Prospective Login IPs ---
+    # IPs/portas de login da própria conta do alvo — atribuição direta.
+    login_section = soup.find('div', id='property-prospective_login_ips')
+    if login_section:
+        login_text = login_section.get_text(separator='|', strip=True)
+        login_text = re.sub(r'WhatsApp Business Record Page \d+\|?', '', login_text)
+        # Dados começam após o rótulo da seção (definições ficam antes)
+        login_parts = login_text.split('Prospective Login IPs|', 1)
+        login_data = login_parts[1] if len(login_parts) > 1 else login_text
+
+        fields = login_data.split('|')
+        cur = None
+        i = 0
+        while i < len(fields):
+            key = fields[i].strip()
+            if key == 'Timestamp' and i + 1 < len(fields):
+                if cur is not None and cur.get('timestamp'):
                     records.append({
-                        'from_number': evt.get('from', ''),
-                        'ip': evt['ip'],
-                        'port': evt.get('port', ''),
-                        'timestamp': evt['timestamp'],
-                        'type': call_type
+                        'from_number': target_param,
+                        'ip': cur.get('ip', ''),
+                        'port': cur.get('port', ''),
+                        'timestamp': cur['timestamp'],
+                        'type': 'login',
+                        'event': 'login',
                     })
+                cur = {'timestamp': fields[i + 1].strip()}
+                i += 2
+            elif cur is not None and i + 1 < len(fields):
+                if key == 'IP Address':
+                    cur['ip'] = fields[i + 1].strip()
+                    i += 2
+                elif key == 'Port':
+                    cur['port'] = fields[i + 1].strip()
+                    i += 2
+                else:
+                    i += 1
+            else:
+                i += 1
+        if cur is not None and cur.get('timestamp'):
+            records.append({
+                'from_number': target_param,
+                'ip': cur.get('ip', ''),
+                'port': cur.get('port', ''),
+                'timestamp': cur['timestamp'],
+                'type': 'login',
+                'event': 'login',
+            })
+
+    # Proveniência: alvo e arquivo de origem de cada registro
+    for rec in records:
+        rec.setdefault('target', target_param)
+        rec['source'] = source_name
 
     if update_callback:
         update_callback(f"Extraídos {len(records)} registros do HTML")
@@ -192,12 +301,18 @@ def records_to_dataframe(records, update_callback=None):
     """
     Convert parsed records to a DataFrame with standardized columns.
     Converts timestamps from UTC to GMT-3.
+
+    Registros sem IP são mantidos (eventos de chamada sem From Ip, mensagens
+    sem Sender Ip continuam sendo evidência). IPs não vazios mas malformados
+    também são preservados com o valor bruto e contados em log — o
+    enriquecimento os ignora naturalmente via `is_valid_ip`.
     """
+    invalid_ips = 0
     rows = []
     for rec in records:
         ip = rec.get('ip', '').strip()
-        if not ip or not is_valid_ip(ip):
-            continue
+        if ip and not is_valid_ip(ip):
+            invalid_ips += 1
 
         port = rec.get('port', '').strip()
         timestamp_str = rec.get('timestamp', '').strip()
@@ -238,8 +353,25 @@ def records_to_dataframe(records, update_callback=None):
             'Ip_Lon': None,
             'Periodo': periodo,
             'ISO_Date': iso_date,
-            'type': rec.get('type', '')
+            'type': rec.get('type', ''),
+            'To': rec.get('to', ''),
+            'Evento': rec.get('event', ''),
+            'Call_Id': rec.get('call_id', ''),
+            'Call_Creator': rec.get('creator', ''),
+            'Message_Id': rec.get('message_id', ''),
+            'Sender_Device': rec.get('device', ''),
+            'Media_Type': rec.get('media_type', ''),
+            'Msg_Size': rec.get('size', ''),
+            'Msg_Style': rec.get('style', ''),
+            'Alvo': rec.get('target', ''),
+            'Fonte': rec.get('source', ''),
         })
+
+    if invalid_ips:
+        msg = f"{invalid_ips} registros com IP inválido (valor bruto preservado)"
+        logger.warning(msg)
+        if update_callback:
+            update_callback(f"⚠️ {msg}")
 
     if not rows:
         return pd.DataFrame(columns=COLUNAS_INTERCEPTACAO)
@@ -352,7 +484,10 @@ def parse_zip_interception(zip_path_or_bytes, update_callback=None):
                             logger.warning(f"Arquivo {inner_name} excede limite, ignorando")
                             continue
                         html = inner_zf.read(inner_name).decode('utf-8', errors='replace')
-                        records = parse_html_records(html, update_callback)
+                        records = parse_html_records(
+                            html, update_callback,
+                            source=name.split('/')[-1]
+                        )
                         all_records.extend(records)
                         file_count += 1
                         if update_callback:
@@ -371,7 +506,10 @@ def parse_zip_interception(zip_path_or_bytes, update_callback=None):
                     logger.warning(f"Arquivo {name} excede limite ({info.file_size} bytes), ignorando")
                     continue
                 html = zf.read(name).decode('utf-8', errors='replace')
-                records = parse_html_records(html, update_callback)
+                records = parse_html_records(
+                    html, update_callback,
+                    source=name.split('/')[-1]
+                )
                 all_records.extend(records)
                 file_count += 1
                 if update_callback:
@@ -388,9 +526,17 @@ def parse_zip_interception(zip_path_or_bytes, update_callback=None):
 
 
 def _add_reputacao_interceptacao(df):
-    """Adiciona coluna Reputação (delega à implementação compartilhada)."""
+    """Adiciona coluna Reputação (delega à implementação compartilhada).
+
+    Linhas sem IP válido não recebem rótulo — classificar um evento sem
+    endereço como "Residencial" seria fabricar evidência.
+    """
     from analysis import add_reputacao_column
-    return add_reputacao_column(df)
+    df = add_reputacao_column(df)
+    if 'Reputação' in df.columns and 'Sender IP' in df.columns:
+        sem_ip = ~df['Sender IP'].astype(str).map(is_valid_ip)
+        df.loc[sem_ip, 'Reputação'] = ''
+    return df
 
 
 def processar_resultados_interceptacao(df, resultados_api):
