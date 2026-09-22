@@ -110,7 +110,7 @@ def correlate_subnets_cross_target(dataframes_dict, ipv4_mask=24, ipv6_mask=48):
                 addr = ipa(str(ip_str).strip())
                 mask = ipv6_mask if addr.version == 6 else ipv4_mask
                 net = str(ip_network(f"{ip_str}/{mask}", strict=False))
-            except Exception:
+            except ValueError:
                 continue
             if net not in subnet_targets:
                 subnet_targets[net] = {}
@@ -150,18 +150,20 @@ def compute_subnet_consistency(df, ipv4_mask=24, ipv6_mask=48, ip_col=None, date
         df_work['_dt'] = parse_data(df_work[date_col])
         df_work = df_work.dropna(subset=['_dt']).sort_values('_dt')
 
-    subnets_seen = []
-    for _, row in df_work.iterrows():
-        ip_str = str(row.get(ip_col, '')).strip()
+    # Subrede por IP distinto; a ordem temporal das linhas é preservada
+    # pelo map, então a sequência de transições sai igual à varredura.
+    ip_series = df_work[ip_col].astype(str).str.strip()
+    subnet_map = {}
+    for ip_str in ip_series.unique():
         if not ip_str:
             continue
         try:
             addr = ipa(ip_str)
             mask = ipv6_mask if addr.version == 6 else ipv4_mask
-            net = str(ip_network(f"{ip_str}/{mask}", strict=False))
-            subnets_seen.append(net)
-        except Exception:
+            subnet_map[ip_str] = str(ip_network(f"{ip_str}/{mask}", strict=False))
+        except ValueError:
             continue
+    subnets_seen = ip_series.map(subnet_map).dropna().tolist()
 
     if not subnets_seen:
         return {'consistency_score': 0, 'primary_subnet': '', 'subnet_changes': 0, 'total_subnets': 0}
