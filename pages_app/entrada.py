@@ -327,6 +327,12 @@ def page_entrada():
                     try:
                         st.write(t('entrada.extracting_ips'))
                         st.caption(t('entrada.cancel_hint'))
+                        if (not st.session_state.api_key
+                                and not st.session_state.get('air_gapped')):
+                            st.warning(
+                                "🔓 Tier gratuito do IP-API usa **HTTP em claro** — "
+                                "os IPs da investigação trafegam sem criptografia. "
+                                "Configure `IPAPI_KEY` para o endpoint HTTPS.")
                         progress_bar = st.progress(0, text=t('entrada.starting_label'))
 
                         def update_progress(current, total, total_records=0):

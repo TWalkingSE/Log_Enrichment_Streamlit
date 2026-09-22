@@ -71,6 +71,31 @@ def _cache_freshness(cache_file, mtime):
 
 
 @st.cache_data(ttl=1800, max_entries=3, show_spinner=False)
+def _data_quality(_df, key):
+    """Resumo de proveniência: quanto do dataset chegou incompleto.
+
+    Registros sem data, sem IP ou sem enriquecimento não são removidos do
+    laudo — são contados aqui para o analista saber o que a análise cobre
+    e o que ficou de fora.
+    """
+    from validators import parse_data
+    q = {'linhas': len(_df)}
+    if 'Ip' in _df.columns:
+        ip_str = _df['Ip'].astype(str).str.strip()
+        q['ips_unicos'] = int(_df['Ip'].nunique())
+        q['sem_ip'] = int((_df['Ip'].isna() | ip_str.isin(['', 'nan', 'None'])).sum())
+    if 'Data' in _df.columns:
+        q['sem_data'] = int(parse_data(_df['Data']).isna().sum())
+    if 'Periodo' in _df.columns:
+        q['sem_periodo'] = int(_df['Periodo'].isna().sum())
+    if 'Ip_Dono' in _df.columns:
+        dono = _df['Ip_Dono'].astype(str)
+        q['erro_enriquecimento'] = int(dono.str.startswith('Erro').sum()
+                                     + dono.isin(['', 'nan', 'None']).sum())
+    return q
+
+
+@st.cache_data(ttl=1800, max_entries=3, show_spinner=False)
 def _generate_xlsx_export(_df_data, key):
     buf = io.BytesIO()
     export_xlsx_colored(_df_data, buf)
@@ -162,6 +187,21 @@ def page_resultados():
     elif stats and stats['total']:
         st.caption(f"🌐 Enriquecimento: {stats['total']} IPs em cache — "
                    f"mais antigo há {stats['mais_antigo_dias']:.0f} dias (TTL 30d).")
+
+    # Proveniência consolidada: o que o dataset cobre e o que ficou de fora.
+    with st.expander("🧾 Proveniência do dataset", expanded=False):
+        q = _data_quality(df, cache_key('dq', len(df)))
+        qc1, qc2, qc3, qc4 = st.columns(4)
+        qc1.metric("Registros", fmt(q['linhas']))
+        qc2.metric("IPs únicos", fmt(q.get('ips_unicos', 0)))
+        qc3.metric("Sem data parseável", fmt(q.get('sem_data', 0)))
+        qc4.metric("Sem enriquecimento", fmt(q.get('erro_enriquecimento', 0)))
+        faltas = [f"{fmt(v)} {label}" for label, v in (
+            ('sem IP', q.get('sem_ip', 0)),
+            ('sem período', q.get('sem_periodo', 0)),
+        ) if v]
+        if faltas:
+            st.caption("Também ausentes: " + ", ".join(faltas) + ".")
 
     # Filters
     c_search, c_prov, c_region, c_type = st.columns([2, 1, 1, 1])
