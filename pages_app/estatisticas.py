@@ -300,7 +300,7 @@ def page_estatisticas():
                     accent='#d4d4d8',
                     tickangle=-35,
                 )
-                st.plotly_chart(fig, use_container_width=True, key='stats_spotlight_provider')
+                st.plotly_chart(fig, width='stretch', key='stats_spotlight_provider')
             else:
                 st.info(t('estatisticas.no_provider_data'))
 
@@ -308,7 +308,7 @@ def page_estatisticas():
         with st.container(border=True):
             mix_fig = _build_connection_mix_chart(df)
             if mix_fig is not None:
-                st.plotly_chart(mix_fig, use_container_width=True, key='stats_connection_mix')
+                st.plotly_chart(mix_fig, width='stretch', key='stats_connection_mix')
             else:
                 st.info(t('estatisticas.no_connection_data'))
 
@@ -330,7 +330,7 @@ def page_estatisticas():
                     accent='#e5e7eb',
                     tickangle=-45,
                 )
-                st.plotly_chart(fig, use_container_width=True, key='stats_hourly')
+                st.plotly_chart(fig, width='stretch', key='stats_hourly')
             else:
                 st.info(t('estatisticas.no_hourly_data'))
 
@@ -350,7 +350,7 @@ def page_estatisticas():
                     t('estatisticas.weekdays_subtitle'),
                     accent=COLORS['primary'],
                 )
-                st.plotly_chart(fig, use_container_width=True, key='stats_weekday')
+                st.plotly_chart(fig, width='stretch', key='stats_weekday')
             else:
                 st.info(t('estatisticas.no_weekday_data'))
 
@@ -376,7 +376,7 @@ def page_estatisticas():
                     accent=COLORS['accent'],
                 )
                 fig.update_xaxes(tickformat='%d/%m')
-                st.plotly_chart(fig, use_container_width=True, key='stats_daily_timeline')
+                st.plotly_chart(fig, width='stretch', key='stats_daily_timeline')
             else:
                 st.info(t('estatisticas.no_timeline_data'))
 
@@ -387,7 +387,7 @@ def page_estatisticas():
                 region_df.columns = ['Regiao', 'Qtd']
                 fig = _build_horizontal_bar_chart(region_df, 'Regiao', 'Qtd',
                                                   t('estatisticas.most_active_regions'), COLORS['secondary'])
-                st.plotly_chart(fig, use_container_width=True, key='stats_regions')
+                st.plotly_chart(fig, width='stretch', key='stats_regions')
             else:
                 st.info(t('estatisticas.no_region_data'))
 
@@ -400,7 +400,7 @@ def page_estatisticas():
                 top_ips_df.columns = ['IP', 'Ocorrencias']
                 fig = _build_horizontal_bar_chart(top_ips_df, 'IP', 'Ocorrencias', t('estatisticas.top_ips'),
                                                   COLORS['info'], height=360)
-                st.plotly_chart(fig, use_container_width=True, key='stats_top_ips')
+                st.plotly_chart(fig, width='stretch', key='stats_top_ips')
             else:
                 st.info(t('estatisticas.no_ip_column'))
 
@@ -441,7 +441,7 @@ def page_estatisticas():
                     xaxis=dict(tickfont=dict(color=COLORS['text_muted'])),
                     yaxis=dict(tickfont=dict(color=COLORS['text_muted'])),
                 )
-                st.plotly_chart(fig, use_container_width=True, key='stats_heatmap')
+                st.plotly_chart(fig, width='stretch', key='stats_heatmap')
             else:
                 st.info(t('estatisticas.no_heatmap_data'))
 
@@ -450,7 +450,7 @@ def page_estatisticas():
         anomalies = detect_anomalies(df)
         if anomalies:
             st.warning(t('estatisticas.anomalies_found', count=len(anomalies)))
-            st.dataframe(pd.DataFrame(anomalies), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(anomalies), width='stretch', hide_index=True)
         else:
             st.success(t('estatisticas.no_anomalies'))
 
@@ -464,4 +464,4 @@ def page_estatisticas():
         ).sort_values('Total', ascending=False).reset_index()
         provider_table.columns = [t('common.provider'), t('common.total'), t('common.unique'),
                                   t('common.cities'), t('common.regions')]
-        st.dataframe(provider_table, use_container_width=True, height=380, hide_index=True)
+        st.dataframe(provider_table, width='stretch', height=380, hide_index=True)

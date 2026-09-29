@@ -185,7 +185,7 @@ def page_entrada():
                                 if 'Porta' in preview_df.columns:
                                     cols_preview.insert(1, 'Porta')
                                 available = [c for c in cols_preview if c in preview_df.columns]
-                                st.dataframe(preview_df[available].head(20), use_container_width=True, hide_index=True)
+                                st.dataframe(preview_df[available].head(20), width='stretch', hide_index=True)
                                 show_truncation(min(20, len(preview_df)), len(preview_df))
                             else:
                                 st.warning(t('entrada.no_ip_html'))
@@ -258,7 +258,7 @@ def page_entrada():
                                     if 'User_ID' in preview_df.columns:
                                         cols_preview.insert(1, 'User_ID')
                                     available = [c for c in cols_preview if c in preview_df.columns]
-                                    st.dataframe(preview_df[available].head(20), use_container_width=True, hide_index=True)
+                                    st.dataframe(preview_df[available].head(20), width='stretch', hide_index=True)
                                     show_truncation(min(20, len(preview_df)), len(preview_df))
                                 else:
                                     st.warning(t('entrada.no_ip_pdf'))
@@ -285,7 +285,7 @@ def page_entrada():
                             if 'User_ID' in preview_df.columns:
                                 cols_preview.insert(1, 'User_ID')
                             available = [c for c in cols_preview if c in preview_df.columns]
-                            st.dataframe(preview_df[available].head(20), use_container_width=True, hide_index=True)
+                            st.dataframe(preview_df[available].head(20), width='stretch', hide_index=True)
                             show_truncation(min(20, len(preview_df)), len(preview_df))
                         else:
                             st.warning(t('entrada.no_ip_file'))
@@ -353,7 +353,7 @@ def page_entrada():
                     if 'User_ID' in preview_df.columns:
                         cols_preview.insert(1, 'User_ID')
                     available = [c for c in cols_preview if c in preview_df.columns]
-                    st.dataframe(preview_df[available].head(20), use_container_width=True, hide_index=True)
+                    st.dataframe(preview_df[available].head(20), width='stretch', hide_index=True)
                     show_truncation(min(20, len(preview_df)), len(preview_df))
                 else:
                     st.warning(t('entrada.no_ip_detected'))
@@ -530,7 +530,7 @@ def page_entrada():
     if st.session_state.history:
         with st.expander(t('entrada.history_title'), expanded=False):
             hist_df = pd.DataFrame(st.session_state.history)
-            st.dataframe(hist_df, use_container_width=True, hide_index=True)
+            st.dataframe(hist_df, width='stretch', hide_index=True)
 
     # Load existing result
     output_file = st.session_state.output_file

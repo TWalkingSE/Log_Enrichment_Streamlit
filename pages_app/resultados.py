@@ -287,9 +287,9 @@ def page_resultados():
     preview = df_display.head(PREVIEW_ROWS)
     if 'Reputação' in preview.columns:
         styled = preview.style.map(_color_reputacao_text, subset=['Reputação'])
-        st.dataframe(styled, height=500, hide_index=True, use_container_width=True)
+        st.dataframe(styled, height=500, hide_index=True, width='stretch')
     else:
-        st.dataframe(preview, height=500, hide_index=True, use_container_width=True)
+        st.dataframe(preview, height=500, hide_index=True, width='stretch')
     show_truncation(len(preview), len(df_display))
     st.caption(t('resultados.records_of_total', filtered=len(df_display), total=len(df)))
 

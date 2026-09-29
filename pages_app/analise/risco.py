@@ -71,7 +71,7 @@ def page_risco():
                               showlegend=False, coloraxis_showscale=False)
             st.plotly_chart(fig, key='risk_chart')
             show_truncation(len(top), len(scores), t('risco.unit_chart_ips'))
-            st.dataframe(scores, use_container_width=True, height=400, hide_index=True)
+            st.dataframe(scores, width='stretch', height=400, hide_index=True)
 
     # ── VirusTotal + AbuseIPDB ──
     with st.container(border=True):
@@ -105,7 +105,7 @@ def page_risco():
                             st.session_state['vt_scores'] = pd.DataFrame(vt_scores)
                             status.update(label=t('risco.ips_done', count=len(vt_scores)), state="complete")
         if 'vt_scores' in st.session_state:
-            st.dataframe(st.session_state['vt_scores'], use_container_width=True, height=400, hide_index=True)
+            st.dataframe(st.session_state['vt_scores'], width='stretch', height=400, hide_index=True)
 
     # ── Shodan ──
     with st.container(border=True):
@@ -145,7 +145,7 @@ def page_risco():
             flagged = [r for r in risk if r.get('risk_level') in ('Alto', 'Crítico')]
             if flagged:
                 st.warning(t('risco.shodan_risk_found', count=len(flagged)))
-                st.dataframe(pd.DataFrame(flagged), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(flagged), width='stretch', hide_index=True)
             else:
                 st.success(t('risco.no_shodan_risk'))
         if 'shodan_results' in st.session_state:
@@ -201,7 +201,7 @@ def page_risco():
                     st.error(t('risco.tor_found', count=len(tor_ips)))
                     timeline = result.get('tor_timeline', [])
                     if timeline:
-                        st.dataframe(pd.DataFrame(timeline), use_container_width=True, hide_index=True)
+                        st.dataframe(pd.DataFrame(timeline), width='stretch', hide_index=True)
                     else:
                         for ip in tor_ips:
                             st.code(ip, language=None)

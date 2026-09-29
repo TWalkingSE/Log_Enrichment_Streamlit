@@ -259,7 +259,7 @@ def page_interceptacao():
         df_display = df_i[export_cols]
 
         preview = df_display.head(PREVIEW_ROWS)
-        st.dataframe(preview, height=400, hide_index=True, use_container_width=True)
+        st.dataframe(preview, height=400, hide_index=True, width='stretch')
         show_truncation(len(preview), len(df_display))
 
         st.subheader(t('interceptacao.downloads_title'))

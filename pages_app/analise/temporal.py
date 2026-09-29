@@ -98,7 +98,7 @@ def page_temporal():
             inconsistent = tz_result.get('inconsistencies', [])
             if inconsistent:
                 st.warning(t('temporal.tz_inconsistencies', count=len(inconsistent)))
-                st.dataframe(pd.DataFrame(inconsistent), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(inconsistent), width='stretch', hide_index=True)
             else:
                 st.success(t('temporal.tz_consistent'))
 
@@ -156,11 +156,11 @@ def page_temporal():
         sandwiches = trans.get('sandwich_patterns', [])
         if sandwiches:
             st.warning(t('temporal.sandwich_found', count=len(sandwiches)))
-            st.dataframe(pd.DataFrame(sandwiches), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(sandwiches), width='stretch', hide_index=True)
         transitions = trans.get('transitions', [])
         if transitions:
             shown = transitions[:10]
-            st.dataframe(pd.DataFrame(shown), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(shown), width='stretch', hide_index=True)
             show_truncation(len(shown), len(transitions), t('temporal.unit_transitions'))
         elif not sandwiches:
             st.success(t('temporal.no_transitions'))

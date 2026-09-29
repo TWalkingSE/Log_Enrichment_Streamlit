@@ -716,7 +716,7 @@ def page_mapa():
             if not jumps.empty:
                 st.error(t('mapa.jumps_found', count=len(jumps), speed=max_speed))
                 shown = jumps.head(PREVIEW_ROWS)
-                st.dataframe(shown, hide_index=True, use_container_width=True)
+                st.dataframe(shown, hide_index=True, width='stretch')
                 show_truncation(len(shown), len(jumps), t('mapa.unit_jumps'))
             else:
                 st.success(t('mapa.no_jumps'))
@@ -790,7 +790,7 @@ def page_mapa():
                         plot_bgcolor='rgba(0,0,0,0)',
                         paper_bgcolor='rgba(0,0,0,0)',
                     )
-                    st.plotly_chart(fig_timeline, use_container_width=True, key='map_profile_timeline')
+                    st.plotly_chart(fig_timeline, width='stretch', key='map_profile_timeline')
 
                     profile_df['_hour'] = profile_df['_dt'].dt.hour
                     profile_df['_dow'] = profile_df['_dt'].dt.day_name()
@@ -810,7 +810,7 @@ def page_mapa():
                         plot_bgcolor='rgba(0,0,0,0)',
                         paper_bgcolor='rgba(0,0,0,0)',
                     )
-                    st.plotly_chart(fig_heat, use_container_width=True, key='map_profile_heatmap')
+                    st.plotly_chart(fig_heat, width='stretch', key='map_profile_heatmap')
 
     with tool_tabs[4]:
         st.subheader(t('mapa.compare_title'))
@@ -936,7 +936,7 @@ def page_mapa():
             if segments:
                 travel_df = pd.DataFrame(segments)
                 st.metric(t('mapa.trips_detected'), len(travel_df))
-                st.dataframe(travel_df, use_container_width=True, hide_index=True)
+                st.dataframe(travel_df, width='stretch', hide_index=True)
 
                 route = [segments[0]['De']]
                 for segment in segments:

@@ -50,7 +50,9 @@ jobs:
         run: mypy
 
       - name: Run test suite
-        run: pytest tests -v --tb=short -m "not slow" --cov=data_processing --cov=auth_password --cov-report=term-missing --cov-fail-under=0
+        # Escopo e piso de cobertura em pyproject.toml ([tool.coverage]): o
+        # projeto inteiro, e o job falha abaixo de `fail_under`.
+        run: pytest tests -v --tb=short -m "not slow" --cov --cov-report=term-missing
 
       # Carga sobre um DataFrame de 202k linhas: pega regressoes de
       # complexidade (O(n^2), copias do frame inteiro, exports sem teto) que

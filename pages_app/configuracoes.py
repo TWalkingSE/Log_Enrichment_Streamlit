@@ -468,7 +468,7 @@ def page_configuracoes():
                 if 'timestamp' in trail_df.columns:
                     trail_df = trail_df.sort_values('timestamp', ascending=False)
                 display_cols = [c for c in ['timestamp', 'action', 'user', 'details'] if c in trail_df.columns]
-                st.dataframe(trail_df[display_cols], use_container_width=True, hide_index=True, height=400)
+                st.dataframe(trail_df[display_cols], width='stretch', hide_index=True, height=400)
                 if st.button(t('configuracoes.audit_verify'), key="audit_verify"):
                     integrity = verify_audit_integrity()
                     is_valid = integrity.get('invalid', 0) == 0 and integrity.get('chain_breaks', 0) == 0
@@ -484,7 +484,7 @@ def page_configuracoes():
                     if integrity.get('details'):
                         with st.expander(t('configuracoes.audit_problem_events')):
                             st.dataframe(pd.DataFrame(integrity['details']),
-                                         use_container_width=True, hide_index=True)
+                                         width='stretch', hide_index=True)
             else:
                 st.info(t('configuracoes.audit_no_events'))
         else:

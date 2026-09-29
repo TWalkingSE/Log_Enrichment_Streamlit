@@ -105,7 +105,7 @@ def page_geo():
             st.markdown(t('geo.top_subnets'))
             dom_df = pd.DataFrame(result['dominant_subnets'])
             display_cols = [c for c in ['subnet', 'ip_count', 'record_count', 'providers', 'cities'] if c in dom_df.columns]
-            st.dataframe(dom_df[display_cols], use_container_width=True, hide_index=True)
+            st.dataframe(dom_df[display_cols], width='stretch', hide_index=True)
 
         if consistency.get('top_subnets'):
             st.markdown(t('geo.primary_subnet', subnet=consistency['primary_subnet'],
@@ -124,7 +124,7 @@ def page_geo():
                         t('geo.col_subnet'): s['subnet'],
                         t('geo.col_targets'): ', '.join(s['targets']),
                         t('geo.col_total_ips'): s['total_ips']
-                    } for s in shared]), use_container_width=True, hide_index=True)
+                    } for s in shared]), width='stretch', hide_index=True)
                 else:
                     st.success(t('geo.no_shared_subnets'))
 

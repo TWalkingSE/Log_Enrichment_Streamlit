@@ -161,7 +161,7 @@ def page_operacional():
                                             'Score': ip_info.get('score', 0),
                                             t('operacional.col_reason'): ip_info.get('motivo', ''),
                                         })
-                                    st.dataframe(pd.DataFrame(ip_rows), hide_index=True, use_container_width=True)
+                                    st.dataframe(pd.DataFrame(ip_rows), hide_index=True, width='stretch')
 
                     # Alertas
                     alertas = data.get('alertas', [])
@@ -292,7 +292,7 @@ def page_operacional():
                             'Δ': diff_str,
                         })
 
-                    st.dataframe(pd.DataFrame(comp_data), hide_index=True, use_container_width=True)
+                    st.dataframe(pd.DataFrame(comp_data), hide_index=True, width='stretch')
 
                     # IPs que mudaram
                     ips_a = set(a.get('ips_selecionados', []))

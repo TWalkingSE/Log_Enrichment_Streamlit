@@ -50,7 +50,7 @@ def page_correlacao():
                 corr = cross_target_correlation(targets)
                 if not corr.empty:
                     st.success(t('correlacao.ips_in_common', count=len(corr)))
-                    st.dataframe(corr, use_container_width=True, hide_index=True)
+                    st.dataframe(corr, width='stretch', hide_index=True)
         if st.session_state.alvo and df is not None:
             if st.button(t('correlacao.save_for_correlation'), key="save_target"):
                 stored_now = st.session_state.stored_targets
@@ -74,7 +74,7 @@ def page_correlacao():
             if st.button(t('correlacao.correlate_stored'), key="corr_stored"):
                 corr = cross_target_correlation(st.session_state.stored_targets)
                 if not corr.empty:
-                    st.dataframe(corr, use_container_width=True, hide_index=True)
+                    st.dataframe(corr, width='stretch', hide_index=True)
             st.divider()
             st.subheader(t('correlacao.side_by_side'))
             names = list(st.session_state.stored_targets.keys())
@@ -101,7 +101,7 @@ def page_correlacao():
             if gate(t('correlacao.gate_wifi'), df, 'corr_wifi'):
                 shared = detect_shared_wifi(stored, tolerance_seconds=tolerance)
                 if shared:
-                    st.dataframe(pd.DataFrame(shared), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(shared), width='stretch', hide_index=True)
                 else:
                     st.success(t('correlacao.no_shared_wifi'))
         else:

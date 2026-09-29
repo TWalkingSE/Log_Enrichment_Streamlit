@@ -917,7 +917,7 @@ def render_analise_investigativa(df):
                     t('inv.col_pct_total'): f"{qtd / total_validos * 100:.1f}%",
                 })
             df_prov = pd.DataFrame(prov_data).sort_values(t('inv.col_records'), ascending=False)
-            st.dataframe(df_prov, use_container_width=True, hide_index=True)
+            st.dataframe(df_prov, width='stretch', hide_index=True)
             st.caption(t('inv.coverage', pct=pct_cobertura, total=total_validos))
         else:
             st.warning(t('inv.no_provider'))
@@ -939,7 +939,7 @@ def render_analise_investigativa(df):
         preview = df_show.head(PREVIEW_ROWS)
         st.dataframe(
             preview.style.background_gradient(subset=['Score'], cmap='RdYlGn', vmin=0, vmax=100),
-            use_container_width=True, height=500, hide_index=True
+            width='stretch', height=500, hide_index=True
         )
         show_truncation(len(preview), len(df_show))
 
@@ -1012,7 +1012,7 @@ def render_analise_investigativa(df):
 
             st.dataframe(
                 df_of_show.style.background_gradient(subset=['Score'], cmap='RdYlGn', vmin=0, vmax=100),
-                use_container_width=True, height=400, hide_index=True
+                width='stretch', height=400, hide_index=True
             )
 
             st.divider()
@@ -1039,7 +1039,7 @@ def render_analise_investigativa(df):
                 col_score = t('inv.col_avg_score')
                 resumo.columns = [t('inv.col_provider'), t('inv.col_qty_ips'), 'IPv6', col_score]
                 resumo[col_score] = resumo[col_score].round(1)
-                st.dataframe(resumo, use_container_width=True, hide_index=True)
+                st.dataframe(resumo, width='stretch', hide_index=True)
 
         # ---- ASSISTENTE AI ----
             st.divider()
@@ -1115,7 +1115,7 @@ def render_analise_investigativa(df):
                             st.caption(prov.get('justificativa', ''))
                             df_ai_ips = pd.DataFrame(prov.get('ips_selecionados', []))
                             if not df_ai_ips.empty:
-                                st.dataframe(df_ai_ips, hide_index=True, use_container_width=True)
+                                st.dataframe(df_ai_ips, hide_index=True, width='stretch')
                     with st.expander(t('inv.ai_narrative'), expanded=False):
                         st.code(data.get('resumo_narrativo', ''), language=None)
                         st.download_button(t('inv.ai_download'),
@@ -1134,7 +1134,7 @@ def render_analise_investigativa(df):
         if df_atencao.empty:
             st.success(t('inv.no_attention'))
         else:
-            st.dataframe(df_atencao, use_container_width=True, hide_index=True)
+            st.dataframe(df_atencao, width='stretch', hide_index=True)
             st.caption(t('inv.attention_count', count=len(df_atencao)))
 
     # ---- ABA 6: IPv6 /64 e CGNAT ----
@@ -1148,7 +1148,7 @@ def render_analise_investigativa(df):
         if df_v6_groups is None:  # resultado de antes desta versão
             df_v6_groups = agrupar_ipv6_por_prefixo(df_scored)
         if not df_v6_groups.empty:
-            st.dataframe(df_v6_groups, use_container_width=True, hide_index=True)
+            st.dataframe(df_v6_groups, width='stretch', hide_index=True)
             n_prefixes = len(df_v6_groups)
             n_single = (df_v6_groups['Qtd_IPs'] == 1).sum()
             st.markdown(t('inv.v6_summary', prefixes=n_prefixes, multi=n_prefixes - n_single))

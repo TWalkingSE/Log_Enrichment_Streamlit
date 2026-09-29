@@ -52,3 +52,14 @@ timeout = 600
 markers = [
     "slow: teste de carga sobre dataset de tamanho real (pytest -m 'not slow' para pular)",
 ]
+
+[tool.coverage.run]
+# Mede o projeto inteiro (antes: só data_processing e auth_password).
+source = ["."]
+omit = ["tests/*", "venv/*", ".venv/*"]
+
+[tool.coverage.report]
+# Piso real: abaixo dele o CI falha. Suba quando a cobertura subir; não
+# desça para acomodar código novo sem teste.
+fail_under = 63
+skip_empty = true

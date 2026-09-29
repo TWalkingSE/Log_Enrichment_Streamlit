@@ -85,7 +85,7 @@ def page_comparacao():
             "B": f"{vb}{suffix}",
             "Δ (B−A)": f"{d:+}{suffix}",
         })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
 
     col_a, col_b = st.columns(2)
     with col_a:
@@ -94,7 +94,7 @@ def page_comparacao():
             st.dataframe(
                 pd.DataFrame(list(ka["top_providers"].items()), columns=[t("comparacao.provider"), t("comparacao.count")]),
                 hide_index=True,
-                use_container_width=True,
+                width='stretch',
             )
         else:
             st.info("—")
@@ -107,7 +107,7 @@ def page_comparacao():
             st.dataframe(
                 pd.DataFrame(list(kb["top_providers"].items()), columns=[t("comparacao.provider"), t("comparacao.count")]),
                 hide_index=True,
-                use_container_width=True,
+                width='stretch',
             )
         else:
             st.info("—")

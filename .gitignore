@@ -50,3 +50,9 @@ _reversa_sdd/
 *.bak
 .tmp_cache_*.part
 *.parquet.part
+
+# Cobertura (pytest --cov)
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml

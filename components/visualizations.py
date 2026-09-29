@@ -83,7 +83,7 @@ def render_health_gauges(health_metrics):
                 plot_bgcolor='rgba(0,0,0,0)',
                 font={'color': COLORS['text']},
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
     # Additional metrics as a row
     c1, c2, c3, c4 = st.columns(4)
@@ -150,7 +150,7 @@ def render_side_by_side_comparison(df1, df2, name1='Alvo 1', name2='Alvo 2'):
                     daily.columns = [col_data, col_reg]
                     fig = px.area(daily, x=col_data, y=col_reg, title=name)
                     fig.update_layout(height=250, margin=dict(l=10, r=10, t=40, b=10))
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
 
     # Provider comparison
     st.subheader(t('viz.providers'))
@@ -168,7 +168,7 @@ def render_side_by_side_comparison(df1, df2, name1='Alvo 1', name2='Alvo 2'):
                 fig.update_layout(height=300, margin=dict(l=10, r=10, t=40, b=10),
                                   showlegend=False, coloraxis_showscale=False,
                                   yaxis={'categoryorder': 'total ascending'})
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
                 if len(todos) > 10:
                     st.caption(t('viz.top10_providers', total=len(todos)))
 

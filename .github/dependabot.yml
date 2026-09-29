@@ -1,0 +1,21 @@
+version: 2
+updates:
+  # Os pins de requirements*.txt são exatos: sem o dependabot, correção de
+  # segurança só entra quando alguém lembra de olhar.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dev-tools:
+        patterns:
+          - pytest*
+          - ruff
+          - mypy
+          - pip-audit
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
