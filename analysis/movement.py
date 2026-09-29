@@ -2,6 +2,7 @@
 import pandas as pd
 import numpy as np
 import logging
+from analysis._geo_math import haversine_km
 from validators import parse_data
 
 logger = logging.getLogger(__name__)
@@ -27,35 +28,44 @@ def detect_impossible_jumps(df, max_speed_kmh=900, date_col='Data',
                                      'Distancia_km', 'Tempo_h', 'Velocidade_kmh',
                                      'Data_De', 'Data_Para'])
 
-    R = 6371
-    rows = []
-    prev = None
-    for _, cur in df_j.iterrows():
-        if prev is not None:
-            dlat = np.radians(cur[lat_col] - prev[lat_col])
-            dlon = np.radians(cur[lon_col] - prev[lon_col])
-            a = np.sin(dlat/2)**2 + np.cos(np.radians(prev[lat_col])) * \
-                np.cos(np.radians(cur[lat_col])) * np.sin(dlon/2)**2
-            dist = R * 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+    # Cada registro contra o anterior na ordem temporal, vetorizado: o laço
+    # `iterrows()` anterior fazia uma passada Python por linha (202k num caso
+    # real). Mesma ordem, mesmas contas, mesmos arredondamentos.
+    lat = df_j[lat_col].to_numpy(dtype=float)
+    lon = df_j[lon_col].to_numpy(dtype=float)
+    dts = df_j['_dt']
+    dist = haversine_km(lat[:-1], lon[:-1], lat[1:], lon[1:])
+    # ns -> segundos -> horas, na mesma ordem de `Timedelta.total_seconds() / 3600`
+    # (dividir direto por 1 h muda o último bit e, às vezes, o arredondamento).
+    delta_ns = (dts.iloc[1:].to_numpy() - dts.iloc[:-1].to_numpy()).astype('int64')
+    delta_h = (delta_ns / 1e9) / 3600
+    positivo = delta_h > 0
+    speed = np.divide(dist, delta_h, out=np.zeros_like(dist), where=positivo)
+    hit = positivo & (dist > 10) & (speed > max_speed_kmh)
+    if not hit.any():
+        return pd.DataFrame()
 
-            delta_h = (cur['_dt'] - prev['_dt']).total_seconds() / 3600
-            if delta_h > 0 and dist > 10:
-                speed = dist / delta_h
-                if speed > max_speed_kmh:
-                    rows.append({
-                        'De_IP': prev.get('Ip', ''),
-                        'Para_IP': cur.get('Ip', ''),
-                        'De_Cidade': prev.get('Ip_Cidade', ''),
-                        'Para_Cidade': cur.get('Ip_Cidade', ''),
-                        'Distancia_km': round(dist, 1),
-                        'Tempo_h': round(delta_h, 2),
-                        'Velocidade_kmh': round(speed, 0),
-                        'Data_De': prev['_dt'].strftime('%Y-%m-%d %H:%M'),
-                        'Data_Para': cur['_dt'].strftime('%Y-%m-%d %H:%M'),
-                    })
-        prev = cur
+    idx_para = np.flatnonzero(hit) + 1
+    idx_de = idx_para - 1
 
-    return pd.DataFrame(rows)
+    def _col(nome, pos):
+        if nome not in df_j.columns:
+            return [''] * len(pos)
+        return df_j[nome].iloc[pos].tolist()
+
+    return pd.DataFrame({
+        'De_IP': _col('Ip', idx_de),
+        'Para_IP': _col('Ip', idx_para),
+        'De_Cidade': _col('Ip_Cidade', idx_de),
+        'Para_Cidade': _col('Ip_Cidade', idx_para),
+        'Distancia_km': np.round(dist[hit], 1),
+        # `round` do Python (decimal exato), como antes: `np.round` multiplica
+        # por 100 e arredonda 0,295 h para 0,30 em vez de 0,29.
+        'Tempo_h': [round(float(h), 2) for h in delta_h[hit]],
+        'Velocidade_kmh': np.round(speed[hit], 0),
+        'Data_De': dts.iloc[idx_de].dt.strftime('%Y-%m-%d %H:%M').tolist(),
+        'Data_Para': dts.iloc[idx_para].dt.strftime('%Y-%m-%d %H:%M').tolist(),
+    })
 
 
 # ============================================================
@@ -321,15 +331,8 @@ def calculate_movement_area(df, lat_col='Ip_Lat', lon_col='Ip_Lon'):
     area_km2 = area_deg2 * lat_km * lon_km
 
     # Max distance from center
-    R = 6371
-    max_dist = 0
-    for pt in points:
-        dlat = np.radians(pt[0] - center_lat)
-        dlon = np.radians(pt[1] - center_lon)
-        a = np.sin(dlat/2)**2 + np.cos(np.radians(center_lat)) * \
-            np.cos(np.radians(pt[0])) * np.sin(dlon/2)**2
-        d = R * 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
-        max_dist = max(max_dist, d)
+    max_dist = max(0, float(np.max(haversine_km(center_lat, center_lon,
+                                                 points[:, 0], points[:, 1]))))
 
     return {
         'area_km2': round(area_km2, 1),

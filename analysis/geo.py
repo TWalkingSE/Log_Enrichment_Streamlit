@@ -6,6 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 from analysis._config import _analysis_config
 from analysis.movement import detect_base_locations
+from analysis._geo_math import haversine_km
 from validators import as_bool, parse_data
 
 def check_geofence(df, center_lat, center_lon, radius_km, lat_col='Ip_Lat', lon_col='Ip_Lon'):
@@ -41,17 +42,8 @@ def check_geofence(df, center_lat, center_lon, radius_km, lat_col='Ip_Lat', lon_
     if df_geo.empty:
         return df_geo, pd.DataFrame()
 
-    # Haversine distance
-    R = 6371  # Earth radius in km
-    lat1 = np.radians(center_lat)
-    lat2 = np.radians(df_geo[lat_col].values)
-    dlat = np.radians(df_geo[lat_col].values - center_lat)
-    dlon = np.radians(df_geo[lon_col].values - center_lon)
-
-    a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
-    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1-a))
-    distances = R * c
-
+    distances = haversine_km(center_lat, center_lon,
+                             df_geo[lat_col].values, df_geo[lon_col].values)
     df_geo['_distance_km'] = distances
     inside = df_geo[df_geo['_distance_km'] <= radius_km].drop(columns=['_distance_km'])
     outside = df_geo[df_geo['_distance_km'] > radius_km]
@@ -285,12 +277,7 @@ def detect_travel_pattern(df, date_col='Data', lat_col='Ip_Lat', lon_col='Ip_Lon
         if not city or pd.isna(city):
             continue
         if prev_city and city != prev_city:
-            R = 6371
-            dlat = np.radians(row[lat_col] - prev_lat)
-            dlon = np.radians(row[lon_col] - prev_lon)
-            a = np.sin(dlat/2)**2 + np.cos(np.radians(prev_lat)) * \
-                np.cos(np.radians(row[lat_col])) * np.sin(dlon/2)**2
-            dist = R * 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+            dist = haversine_km(prev_lat, prev_lon, row[lat_col], row[lon_col])
             delta_h = (row['_dt'] - prev_dt).total_seconds() / 3600 if prev_dt else 0
 
             segments.append({

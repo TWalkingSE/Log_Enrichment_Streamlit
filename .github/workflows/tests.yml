@@ -9,13 +9,20 @@ on:
 
 jobs:
   pytest:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os:
+          - ubuntu-latest
         python-version:
           - "3.11"
           - "3.12"
+        include:
+          # A ferramenta roda em Windows: `os.replace` sobre arquivo aberto,
+          # codificação padrão cp1252 e bloqueio de arquivo só aparecem lá.
+          - os: windows-latest
+            python-version: "3.12"
 
     steps:
       - name: Checkout repository
@@ -49,4 +56,7 @@ jobs:
       # complexidade (O(n^2), copias do frame inteiro, exports sem teto) que
       # fixtures de poucas linhas nao revelam.
       - name: Load test (dataset de tamanho real)
+        # Uma vez por versão do Python, no Linux: o custo é de memória/tempo,
+        # não de plataforma.
+        if: runner.os == 'Linux'
         run: pytest tests/test_load.py -v --tb=short -m slow

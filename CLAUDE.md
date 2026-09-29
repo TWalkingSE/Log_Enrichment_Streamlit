@@ -125,8 +125,16 @@ funde os resultados no DataFrame.
 - **`analysis/`** — pacote de análise (substituiu um monólito `analysis.py`).
   `__init__.py` reexporta ~47 nomes para preservar a superfície histórica.
   Mantenha-o **livre de `streamlit`**: `@st.cache_data` fica na página.
-- **`data_processor.py`** — fachada pública sobre `data_processing/`; os imports
-  no topo marcados `# noqa: F401` são re-exports intencionais, não código morto.
+- **`data_processor.py`** — fachada pública sobre `data_processing/`
+  (`formats`, `parsers/` por plataforma, `merge`); os imports marcados
+  `# noqa: F401` são re-exports intencionais, não código morto.
+- **`advanced_analysis.py`** — fachada sobre `analysis/heuristics.py` e
+  `intel/` (VirusTotal, AbuseIPDB, Shodan, Tor). `analysis/__init__` importa
+  direto desses módulos, **nunca** da fachada (import circular). Patch em
+  teste vai no módulo onde a função mora (`intel.tor.fetch_tor_exit_nodes`),
+  não na fachada — senão não tem efeito.
+- **`intel/`** — tudo que sai para a rede passa por
+  `helpers.runtime_flags.ensure_network_allowed` (modo air-gapped).
 - **`helpers/`** — quase tudo é importado **preguiçosamente dentro de funções**.
   Um grep só no topo dos arquivos faz esses módulos parecerem órfãos; não são.
 - **`validators.py`** e **`api_client.py`** estão sob `mypy` no CI — anote tipos.

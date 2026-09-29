@@ -742,6 +742,13 @@ Log Enrichment/
 ├── enrich_service.py              # Serviço de enriquecimento (fachada do pipeline)
 ├── data_processor.py              # Fachada pública sobre data_processing/ (re-exports com # noqa: F401)
 ├── data_processing/               # Parsers de log e normalizações
+│   ├── formats.py                 # Colunas do modelo/export e exemplos de formato
+│   ├── parsers/                   # Um módulo por plataforma + detecção de formato
+│   │   ├── meta.py                # Meta Platforms e WhatsApp
+│   │   ├── google.py              # Google (IP ACTIVITY) e Preservation Google
+│   │   ├── discord.py, tiktok.py
+│   │   └── texto.py               # Texto livre: data da própria linha
+│   ├── merge.py                   # Fusão dos resultados da API no DataFrame
 │   ├── providers.py               # Normalização de provedores (Claro/Vivo/NXT/GVT...)
 │   └── timezone.py                # Conversão de fuso e helpers de período (emoji-safe)
 ├── file_handler.py                # Processamento assíncrono + CSV + Excel colorido em streaming
@@ -763,8 +770,12 @@ Log Enrichment/
 │   ├── correlation.py             # Correlação cruzada entre alvos
 │   ├── subnet.py                  # Padrões de sub-rede /24 e /48
 │   ├── profile.py                 # Perfil comportamental, WiFi compartilhado
-│   ├── comms.py, cache_ops.py, export_kml.py, _config.py
-├── advanced_analysis.py           # VirusTotal, AbuseIPDB, relay chains
+│   ├── heuristics.py              # Relay chains, silêncio digital, fuso, Wi-Fi, saúde dos dados
+│   ├── comms.py, cache_ops.py, export_kml.py, _config.py, _geo_math.py
+├── intel/                         # Fontes externas (respeitam o modo air-gapped)
+│   ├── threat.py                  # AbuseIPDB, VirusTotal, Shodan
+│   └── tor.py                     # Lista de Tor exit nodes (download, cache, cruzamento)
+├── advanced_analysis.py           # Fachada histórica sobre analysis.heuristics e intel/
 ├── tor_updater.py                 # Atualizador local do cache Tor (torbulkexitlist + Onionoo)
 ├── audit_logger.py                # Audit trail forense (SHA-256, JSONL)
 ├── validators.py                  # Validação de dados (3 camadas)

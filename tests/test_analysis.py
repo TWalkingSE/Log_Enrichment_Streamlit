@@ -507,8 +507,8 @@ class TestTorExitNodes(unittest.TestCase):
         result = check_tor_exit_nodes(pd.DataFrame({'Ip': ips}), set(ips), ip_col='Ip')
         self.assertEqual(result['total_tor'], 2)
 
-    @patch('advanced_analysis.fetch_tor_exit_nodes_from_onionoo')
-    @patch('advanced_analysis.fetch_tor_exit_nodes')
+    @patch('intel.tor.fetch_tor_exit_nodes_from_onionoo')
+    @patch('intel.tor.fetch_tor_exit_nodes')
     def test_update_tor_exit_nodes_cache_deduplicates_sources(self, mock_bulk, mock_onionoo):
         mock_bulk.return_value = ({'1.1.1.1', '2.2.2.2'}, None)
         mock_onionoo.return_value = ({'2.2.2.2', '2001:4860:4860::8888'}, None)
@@ -527,7 +527,7 @@ class TestTorExitNodes(unittest.TestCase):
 
             self.assertEqual(set(saved['nodes']), {'1.1.1.1', '2.2.2.2', '2001:4860:4860::8888'})
 
-    @patch('advanced_analysis.update_tor_exit_nodes_cache')
+    @patch('intel.tor.update_tor_exit_nodes_cache')
     def test_get_tor_exit_nodes_uses_stale_cache_when_refresh_fails(self, mock_update):
         mock_update.return_value = {
             'success': False,
