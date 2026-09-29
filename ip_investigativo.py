@@ -48,6 +48,11 @@ def _is_ipv6(ip_str):
     return ':' in ip_str
 
 
+def _mask_ipv6(serie):
+    """Máscara vetorizada equivalente a `_is_ipv6(str(x))` por linha."""
+    return serie.astype(str).str.contains(':', regex=False)
+
+
 def _strip_tz(dt_fato):
     """Remove timezone de um datetime se presente."""
     if hasattr(dt_fato, 'tzinfo') and dt_fato.tzinfo is not None:
@@ -81,11 +86,14 @@ def agrupar_ipv6_por_prefixo(df):
     if df.empty or 'Ip' not in df.columns:
         return pd.DataFrame()
 
-    df_v6 = df[df['Ip'].apply(lambda x: _is_ipv6(str(x)))].copy()
+    df_v6 = df[_mask_ipv6(df['Ip'])].copy()
     if df_v6.empty:
         return pd.DataFrame()
 
-    df_v6['Prefixo_64'] = df_v6['Ip'].apply(_get_ipv6_prefix64)
+    # Um cálculo por IP distinto, não por registro.
+    unicos = df_v6['Ip'].astype(str).unique()
+    prefixos = {ip: _get_ipv6_prefix64(ip) for ip in unicos}
+    df_v6['Prefixo_64'] = df_v6['Ip'].astype(str).map(prefixos)
     df_v6 = df_v6.dropna(subset=['Prefixo_64'])
 
     if df_v6.empty:
@@ -357,7 +365,8 @@ def detectar_usuario_unico(df, dt_fato):
 
     # 5. Proxy
     if 'Ip_Proxy' in df.columns:
-        n_proxy = df['Ip_Proxy'].apply(_parse_bool).sum()
+        from validators import bool_series
+        n_proxy = bool_series(df, 'Ip_Proxy').sum()
         if n_proxy == 0:
             score += 10
             indicadores['Proxy'] = "✅ Nenhum registro com proxy"
@@ -401,7 +410,7 @@ def sugerir_ips_investigativos(df, dt_fato, provedores_sel, contagem_prov, ips_p
     df_work['_dt'] = _safe_datetime(df_work.get('Data', pd.Series(dtype='object')))
     if df_work['_dt'].dt.tz is not None:
         df_work['_dt'] = df_work['_dt'].dt.tz_localize(None)
-    df_work['_is_v6'] = df_work['Ip'].apply(lambda x: _is_ipv6(str(x))) if 'Ip' in df_work.columns else False
+    df_work['_is_v6'] = _mask_ipv6(df_work['Ip']) if 'Ip' in df_work.columns else False
 
     resultados = []
     fato_date = dt_fato.date() if hasattr(dt_fato, 'date') else dt_fato
@@ -572,9 +581,12 @@ def detectar_ips_atencao(df, dt_fato, provedores_sel):
                 'Motivo': '📅 IP no dia do fato (provedor fora do top 3)',
             })
 
-    # IPs com Score alto (>60) fora dos top 3
-    high_score_fora = fora_top3[fora_top3['Score'] > 60]
-    for _, row in high_score_fora.head(5).iterrows():
+    # IPs com Score alto (>60) fora dos top 3 — um por IP, o de maior Score.
+    # Antes a lista parava em 5 LINHAS (não IPs) sem dizer quantos havia.
+    high_score_fora = (fora_top3[fora_top3['Score'] > 60]
+                       .sort_values('Score', ascending=False)
+                       .drop_duplicates(subset=['Ip']))
+    for _, row in high_score_fora.iterrows():
         ip = row.get('Ip', '')
         if not any(a['Ip'] == ip for a in atencao):
             atencao.append({
@@ -586,11 +598,10 @@ def detectar_ips_atencao(df, dt_fato, provedores_sel):
                 'Motivo': '⭐ Score alto (provedor fora do top 3)',
             })
 
-    # IPs de proxy/hosting/datacenter
-    proxy_mask = df_work.get('Ip_Proxy', pd.Series(False, index=df_work.index)).apply(_parse_bool)
-    hosting_mask = df_work.get('Ip_Hospedagem', pd.Series(False, index=df_work.index)).apply(_parse_bool)
-    suspicious = df_work[proxy_mask | hosting_mask]
-    for _, row in suspicious.drop_duplicates(subset=['Ip']).head(5).iterrows():
+    # IPs de proxy/hosting/datacenter — todos, um registro por IP (antes: 5).
+    from validators import bool_series
+    suspicious = df_work[bool_series(df_work, 'Ip_Proxy') | bool_series(df_work, 'Ip_Hospedagem')]
+    for _, row in suspicious.drop_duplicates(subset=['Ip']).iterrows():
         ip = row.get('Ip', '')
         if not any(a['Ip'] == ip for a in atencao):
             atencao.append({
@@ -601,13 +612,70 @@ def detectar_ips_atencao(df, dt_fato, provedores_sel):
                 'Score': row.get('Score', 0),
                 'Motivo': '🛡️ Proxy/VPN/Datacenter',
             })
-
     return pd.DataFrame(atencao) if atencao else pd.DataFrame()
 
 
 # ============================================================
 # 4c. RESUMO NARRATIVO
 # ============================================================
+
+def _conclusao_narrativa(df_sel, provedores_sel, dt_fato, n_v6, n_v4):
+    """Frases da conclusão, cada uma sustentada por um fato verificado."""
+    frases = []
+    if provedores_sel:
+        frases.append(f"Os registros concentram-se nos provedores {', '.join(provedores_sel)}.")
+    if n_v6 == 0:
+        frases.append("Não há endereços IPv6 entre os IPs analisados.")
+    elif n_v6 > n_v4:
+        frases.append(f"Há predominância de endereços IPv6 ({n_v6} IPv6 e {n_v4} IPv4 únicos).")
+    else:
+        frases.append(f"Há predominância de endereços IPv4 ({n_v4} IPv4 e {n_v6} IPv6 únicos).")
+
+    if df_sel is None or df_sel.empty:
+        frases.append("Nenhum endereço foi selecionado para investigação.")
+        return frases
+
+    fato_date = dt_fato.date() if hasattr(dt_fato, 'date') else dt_fato
+    dts = _safe_datetime(df_sel.get('Data', pd.Series(dtype='object'))).dropna()
+    fases = []
+    if (dts.dt.date < fato_date).any():
+        fases.append("antes")
+    if (dts.dt.date == fato_date).any():
+        fases.append("no dia")
+    if (dts.dt.date > fato_date).any():
+        fases.append("depois")
+    data_fato = dt_fato.strftime('%d/%m/%Y')
+    if fases:
+        frases.append(f"Os endereços selecionados têm registros {', '.join(fases)} "
+                      f"da data do fato ({data_fato}).")
+    else:
+        frases.append("Os endereços selecionados não têm data válida.")
+    faltando = [f for f in ("antes", "no dia", "depois") if f not in fases and fases]
+    if faltando:
+        frases.append(f"Não há registro selecionado {' nem '.join(faltando)} da data do fato.")
+
+    horas = dts.dt.hour
+    diurno = bool(((horas >= 6) & (horas < 18)).any())
+    noturno = bool(((horas < 6) | (horas >= 18)).any())
+    if diurno and noturno:
+        frases.append("Há registros selecionados em horário diurno e noturno.")
+    elif diurno or noturno:
+        frases.append(f"Os registros selecionados estão apenas em horário "
+                      f"{'diurno' if diurno else 'noturno'}.")
+
+    from validators import bool_series
+    anon = int((bool_series(df_sel, 'Ip_Proxy') | bool_series(df_sel, 'Ip_Hospedagem')).sum())
+    if anon:
+        frases.append(f"{anon} dos endereços selecionados estão classificados como "
+                      "proxy/VPN ou hospedagem e podem não identificar o usuário final.")
+    else:
+        frases.append("Nenhum dos endereços selecionados está classificado como "
+                      "proxy/VPN ou hospedagem.")
+        if "antes" in fases and "depois" in fases:
+            frases.append("O conjunto é compatível com uso continuado da mesma conexão "
+                          "antes e depois do fato.")
+    return frases
+
 
 def gerar_resumo_narrativo(df, df_selecionados, provedores_sel, contagem_prov, dt_fato, alvo=''):
     """
@@ -624,10 +692,13 @@ def gerar_resumo_narrativo(df, df_selecionados, provedores_sel, contagem_prov, d
     if df.empty:
         return "Sem dados para análise."
 
-    # Estatísticas gerais
+    # Estatísticas gerais. IPv6/IPv4 contados sobre IPs ÚNICOS: antes o IPv6
+    # somava registros e era subtraído dos IPs únicos — o IPv4 saía errado e
+    # podia ficar negativo no texto do laudo.
     total = len(df)
-    unicos = df['Ip'].nunique() if 'Ip' in df.columns else 0
-    n_v6 = df['Ip'].apply(lambda x: _is_ipv6(str(x))).sum() if 'Ip' in df.columns else 0
+    ips_unicos = pd.Series(df['Ip'].dropna().astype(str).unique()) if 'Ip' in df.columns else pd.Series([], dtype=str)
+    unicos = len(ips_unicos)
+    n_v6 = int(_mask_ipv6(ips_unicos).sum()) if unicos else 0
     n_v4 = unicos - n_v6
 
     dt_col = _safe_datetime(df.get('Data', pd.Series(dtype='object'))).dropna()
@@ -646,7 +717,7 @@ def gerar_resumo_narrativo(df, df_selecionados, provedores_sel, contagem_prov, d
         if prov_df.empty:
             continue
 
-        prov_v6 = prov_df['Ip'].apply(lambda x: _is_ipv6(str(x))).sum() if 'Ip' in prov_df.columns else 0
+        prov_v6 = int(_mask_ipv6(prov_df['Ip']).sum()) if 'Ip' in prov_df.columns else 0
         cidades = prov_df['Ip_Cidade'].dropna().unique() if 'Ip_Cidade' in prov_df.columns else []
         cidade_str = ', '.join(str(c) for c in cidades[:3])
 
@@ -672,16 +743,13 @@ def gerar_resumo_narrativo(df, df_selecionados, provedores_sel, contagem_prov, d
         lines.append(f"  - {n_sel} endereços IP selecionados para investigação")
         lines.append("")
 
-    # Conclusão
+    # Conclusão: só afirma o que os dados mostram. O texto anterior era fixo —
+    # "predominância de IPv6", "antes, durante e após o fato", "diferentes
+    # horários", "uso residencial" — mesmo sem nenhum IPv6, sem registro após
+    # o fato ou com os IPs selecionados sendo proxy. Num laudo, isso é
+    # conclusão inventada.
     lines.append("CONCLUSÃO:")
-    lines.append(f"Os registros indicam utilização concentrada nos provedores "
-                 f"{', '.join(provedores_sel)}, com predominância de endereços IPv6, "
-                 f"sugerindo continuidade de uso pelo mesmo usuário. "
-                 f"Os endereços selecionados demonstram atividade antes, durante e após "
-                 f"a data do fato ({dt_fato.strftime('%d/%m/%Y')}), "
-                 f"em diferentes horários do dia, reforçando a hipótese de utilização "
-                 f"residencial/pessoal da conexão.")
-
+    lines.extend(_conclusao_narrativa(df_selecionados, provedores_sel, dt_fato, n_v6, n_v4))
     return '\n'.join(lines)
 
 
