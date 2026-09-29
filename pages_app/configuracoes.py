@@ -253,6 +253,7 @@ def page_configuracoes():
             check_model_available,
             check_ollama_status,
             get_default_ai_tier,
+            ollama_remote_host,
             test_ollama_inference,
         )
 
@@ -286,6 +287,9 @@ def page_configuracoes():
                 key="cfg_ai_url"
             )
             st.session_state['ai_ollama_url'] = ai_url
+            remote_host = ollama_remote_host(ai_url)
+            if remote_host:
+                st.warning(t('common.ai_remote_warning', host=remote_host))
 
             btn_col1, btn_col2 = st.columns(2)
             with btn_col1:

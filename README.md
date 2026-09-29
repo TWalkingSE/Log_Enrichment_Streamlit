@@ -837,7 +837,7 @@ Log Enrichment/
 
 Módulo de inteligência artificial local para análise investigativa:
 
-- **100% offline** — dados nunca saem da máquina (Ollama local)
+- **Local por padrão** — com o Ollama em `localhost`, os dados do caso não saem da máquina. Se a URL apontar para outra máquina, o prompt (IPs, datas, provedores) sai por ela: as telas avisam e o modo air-gapped bloqueia a consulta
 - **3 tiers de modelo**: Lite (4B/8GB), Standard (9B/16GB), Premium (27B/24GB)
 - **Structured output** — resposta JSON via Pydantic schema
 - **Segunda opinião** — complementa o algoritmo determinístico existente

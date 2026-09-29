@@ -4,6 +4,7 @@ Integração com Ollama (modelos locais) para análise investigativa assistida.
 Usa requests para API REST — sem dependência da lib ollama.
 """
 
+import ipaddress
 import json
 import logging
 import time
@@ -12,8 +13,10 @@ import requests
 import pandas as pd
 from datetime import datetime
 from typing import Optional, Tuple, List
+from urllib.parse import urlsplit
 
 from api_client import is_cgnat_ip
+from helpers.runtime_flags import AirGappedError, ensure_network_allowed
 from validators import as_bool, bool_series, parse_data
 
 logger = logging.getLogger(__name__)
@@ -47,6 +50,40 @@ AI_MODELS = {
 }
 
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
+
+_LOOPBACK_NAMES = {'localhost', 'localhost.localdomain', 'ip6-localhost', 'ip6-loopback'}
+
+
+def ollama_remote_host(base_url: str) -> Optional[str]:
+    """Host do Ollama quando ele NÃO está nesta máquina; None se for loopback.
+
+    O prompt leva IPs, datas e provedores do caso. Com a URL apontando para
+    outra máquina, esses dados saem por ela — a tela precisa dizer isso e o
+    modo air-gapped precisa bloquear. Só nome ou endereço literalmente
+    loopback conta como local: resolver DNS para decidir seria confiar no
+    resolvedor. URL ilegível conta como remota.
+    """
+    texto = (base_url or '').strip()
+    try:
+        host = urlsplit(texto).hostname
+    except ValueError:
+        host = None
+    if not host:
+        return texto or '?'
+    host = host.lower()
+    if host in _LOOPBACK_NAMES or host.endswith('.localhost'):
+        return None
+    try:
+        return None if ipaddress.ip_address(host).is_loopback else host
+    except ValueError:
+        return host
+
+
+def _ensure_ollama_allowed(base_url: str) -> None:
+    """Levanta `AirGappedError` para Ollama fora desta máquina em modo air-gapped."""
+    host = ollama_remote_host(base_url)
+    if host is not None:
+        ensure_network_allowed(f"Ollama remoto ({host})")
 
 # ============================================================
 # PYDANTIC SCHEMAS (structured output)
@@ -127,6 +164,10 @@ def _load_ai_config():
 # ============================================================
 def check_ollama_status(base_url: str = DEFAULT_OLLAMA_URL) -> dict:
     """Verifica se o Ollama está rodando e quais modelos estão disponíveis."""
+    try:
+        _ensure_ollama_allowed(base_url)
+    except AirGappedError as e:
+        return {'online': False, 'models': [], 'model_names': [], 'error': str(e)}
     try:
         resp = requests.get(f"{base_url}/api/tags", timeout=5)
         resp.raise_for_status()
@@ -444,6 +485,10 @@ def query_ollama(
     request_timeout: int = None,
 ) -> Tuple[Optional[dict], Optional[str]]:
     """Envia consulta ao Ollama e retorna resposta parseada."""
+    try:
+        _ensure_ollama_allowed(base_url)
+    except AirGappedError as e:
+        return None, str(e)
     url = f"{base_url}/api/chat"
 
     payload = {

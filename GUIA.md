@@ -364,7 +364,7 @@ Módulo especializado para investigação policial:
 5. Rode **Testar Conexão** e depois **Teste de Inferência** para validar geração real do modelo
 6. O app prioriza o tier configurado e pode fazer fallback automático para um modelo mais leve em caso de indisponibilidade ou timeout
 7. Na página **📋 Operacional → Análise Investigativa**, a AI fornece uma segunda opinião sobre a seleção de IPs
-8. **100% offline** — dados investigativos não saem da máquina
+8. **Local por padrão**: com a URL em `localhost`, os dados investigativos não saem da máquina. Uma URL de outra máquina (servidor com GPU, por exemplo) recebe os IPs, datas e provedores do prompt; a tela avisa quando é o caso, e o modo air-gapped bloqueia a consulta
 
 ---
 
@@ -460,7 +460,7 @@ Se tiver dados de **múltiplos alvos**, use a página de **Correlação** para e
 Antes de fazer qualquer análise, cheque a seção **Saúde dos Dados** na página **Operacional** para garantir que o dataset tem cobertura suficiente de IP, geolocalização e datas.
 
 ### Use o Assistente AI
-Na página **Operacional**, o Assistente AI (Ollama) oferece uma segunda opinião sobre a seleção de IPs. Ele opera 100% offline — dados investigativos nunca saem da máquina.
+Na página **Operacional**, o Assistente AI (Ollama) oferece uma segunda opinião sobre a seleção de IPs. Com o Ollama em `localhost` (o padrão), os dados investigativos não saem da máquina; se a URL configurada for de outra máquina, a página avisa.
 
 ---
 

@@ -58,7 +58,8 @@
     "prepare_csv": "⚙️ Preparar CSV",
     "prepare_json": "⚙️ Preparar JSON",
     "prepare_excel": "⚙️ Preparar Excel",
-    "excel_colored": "📥 Excel (coloreado)"
+    "excel_colored": "📥 Excel (coloreado)",
+    "ai_remote_warning": "⚠️ El Ollama configurado (`{host}`) no está en esta máquina: las IPs, fechas y proveedores del caso enviados a la IA salen por él. Use un Ollama local (`localhost`) para mantener los datos aquí. Con el modo air-gapped activo, la consulta se bloquea."
   },
   "auth": {
     "password": "Contraseña",

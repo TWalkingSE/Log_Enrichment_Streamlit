@@ -185,6 +185,46 @@ class TestAirGapped(unittest.TestCase):
             self.assertIn('air-gapped', erro)
 
 
+class TestOllamaRemoto(unittest.TestCase):
+    """O prompt da IA leva IPs e datas do caso: fora do loopback, eles saem da máquina."""
+
+    def test_so_loopback_literal_conta_como_local(self):
+        from ai_assistant import ollama_remote_host
+        for url in ('http://localhost:11434', 'http://127.0.0.1:11434', 'http://127.8.9.1',
+                    'http://[::1]:11434', 'http://LOCALHOST:11434', 'http://ollama.localhost'):
+            self.assertIsNone(ollama_remote_host(url), url)
+        self.assertEqual(ollama_remote_host('http://192.168.0.10:11434'), '192.168.0.10')
+        self.assertEqual(ollama_remote_host('https://gpu.exemplo.org'), 'gpu.exemplo.org')
+        self.assertEqual(ollama_remote_host('http://0.0.0.0:11434'), '0.0.0.0')
+        # Sem esquema o host não é legível: tratado como remoto, não como local.
+        self.assertIsNotNone(ollama_remote_host('localhost:11434'))
+        self.assertEqual(ollama_remote_host(''), '?')
+
+    def test_air_gapped_bloqueia_ollama_remoto_sem_tocar_a_rede(self):
+        from ai_assistant import check_ollama_status, query_ollama
+        with patch.dict(os.environ, {'AIR_GAPPED': '1'}), \
+                patch('ai_assistant.requests.get') as get, \
+                patch('ai_assistant.requests.post') as post:
+            status = check_ollama_status('http://10.0.0.5:11434')
+            resposta, erro = query_ollama('s', 'u', 'm', {}, base_url='http://10.0.0.5:11434')
+        get.assert_not_called()
+        post.assert_not_called()
+        self.assertFalse(status['online'])
+        self.assertIn('air-gapped', status['error'])
+        self.assertIsNone(resposta)
+        self.assertIn('air-gapped', erro)
+
+    def test_air_gapped_nao_bloqueia_ollama_local(self):
+        from ai_assistant import check_ollama_status
+        resp = MagicMock()
+        resp.json.return_value = {'models': [{'name': 'qwen3.5:4b'}]}
+        with patch.dict(os.environ, {'AIR_GAPPED': '1'}), \
+                patch('ai_assistant.requests.get', return_value=resp) as get:
+            status = check_ollama_status('http://localhost:11434')
+        get.assert_called_once()
+        self.assertTrue(status['online'])
+
+
 class TestZipDeInterceptacao(unittest.TestCase):
     """`RECORDS.HTML` e `x.ZIP` eram descartados em silêncio."""
 

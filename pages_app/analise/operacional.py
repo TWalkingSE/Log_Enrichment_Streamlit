@@ -14,7 +14,9 @@ from analysis import compute_data_health
 from helpers.large_data import gate
 from ip_investigativo import calcular_score, render_analise_investigativa, selecionar_provedores
 from components.visualizations import render_health_gauges
-from ai_assistant import AI_MODELS, check_ollama_status, get_default_ai_tier, run_ai_analysis
+from ai_assistant import (
+    AI_MODELS, check_ollama_status, get_default_ai_tier, ollama_remote_host, run_ai_analysis,
+)
 from i18n import t, t_or
 from helpers.atomic_io import atomic_write_json
 
@@ -66,6 +68,9 @@ def page_operacional():
 
         # Status do Ollama
         ollama_url = st.session_state.get('ai_ollama_url', 'http://localhost:11434')
+        remote_host = ollama_remote_host(ollama_url)
+        if remote_host:
+            st.warning(t('common.ai_remote_warning', host=remote_host))
         status = check_ollama_status(ollama_url)
 
         if status['online']:

@@ -1051,6 +1051,7 @@ def render_analise_investigativa(df):
                 check_model_available,
                 check_ollama_status,
                 get_default_ai_tier,
+                ollama_remote_host,
                 run_ai_analysis,
             )
 
@@ -1058,6 +1059,9 @@ def render_analise_investigativa(df):
             if ai_tier not in AI_MODELS:
                 ai_tier = get_default_ai_tier()
             ai_url = st.session_state.get('ai_ollama_url', 'http://localhost:11434')
+            remote_host = ollama_remote_host(ai_url)
+            if remote_host:
+                st.warning(t('common.ai_remote_warning', host=remote_host))
 
             col_ai1, col_ai2 = st.columns([2, 1])
             with col_ai1:
@@ -1084,7 +1088,7 @@ def render_analise_investigativa(df):
                             provedores_sel=provedores_sel,
                             contagem_prov=contagem_prov,
                             dt_fato=dt_fato,
-                            periodo_fato=st.session_state.get('inv_periodo', '☀️ Diurno'),
+                            periodo_fato=st.session_state.get('inv_periodo', 'Diurno'),
                             janela_horas=st.session_state.get('inv_janela', 72),
                             ips_por_provedor=st.session_state.get('inv_ips_prov', 5),
                             tier=ai_tier,
