@@ -449,16 +449,22 @@ def _pagina_entrada_com_sessao_gravada():
     import streamlit as st
     import helpers.persistence as persistence
     import audit_logger
+    # O script roda no processo do teste: sem restaurar, os caminhos
+    # temporarios (ja apagados) valeriam para os testes seguintes.
+    anteriores = (persistence.DATA_DIR, audit_logger.AUDIT_LOG_DIR, audit_logger.AUDIT_LOG_FILE)
     persistence.DATA_DIR = Path(os.environ['LE_TEST_SESSIONS'])
     audit_logger.AUDIT_LOG_DIR = os.environ['LE_TEST_SESSIONS']
     audit_logger.AUDIT_LOG_FILE = os.path.join(os.environ['LE_TEST_SESSIONS'], 'audit.jsonl')
-    from pages_app.entrada import page_entrada
-    defaults = {'df_resultado': None, 'alvo': '', 'output_file': 'resultado_logs.csv',
-                'processing': False, 'log_messages': [], 'history': [], 'batch_size': 500,
-                'period': 0, 'use_cache': True, 'incremental': True, 'api_key': ''}
-    for k, v in defaults.items():
-        st.session_state.setdefault(k, v)
-    page_entrada()
+    try:
+        from pages_app.entrada import page_entrada
+        defaults = {'df_resultado': None, 'alvo': '', 'output_file': 'resultado_logs.csv',
+                    'processing': False, 'log_messages': [], 'history': [], 'batch_size': 500,
+                    'period': 0, 'use_cache': True, 'incremental': True, 'api_key': ''}
+        for k, v in defaults.items():
+            st.session_state.setdefault(k, v)
+        page_entrada()
+    finally:
+        persistence.DATA_DIR, audit_logger.AUDIT_LOG_DIR, audit_logger.AUDIT_LOG_FILE = anteriores
 
 
 class TestRestauracaoSoComClique(unittest.TestCase):
