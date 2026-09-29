@@ -56,7 +56,7 @@ python -m pytest tests -q
 
 ## Tests
 
-418 tests automatizados (409 rápidos + 9 `slow` de carga sobre 202.128 filas), incluidas todas las páginas en pt/en/es.
+447 tests automatizados (438 rápidos + 9 `slow` de carga sobre 202.128 filas), incluidas todas las páginas en pt/en/es y flujos de punta a punta por la interfaz. La suite nunca escribe en datos de casos (`tests/conftest.py`).
 
 ## Documentación
 

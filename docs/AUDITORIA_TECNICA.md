@@ -155,6 +155,25 @@ casavam no score; Entrada gravava `unknown` como alvo em inglês (o parser do
 Discord só reconhece `desconhecido`); comparação lado a lado somava `Ip_Proxy`
 textual; listas de IPs cortadas sem total (A/B, CGNAT, sparklines).
 
+### Lote 11 — o que faltava do roadmap (2026-09)
+
+| ID | Achado | Status |
+|----|--------|--------|
+| N1 | Resumo narrativo investigativo afirmava predominância de IPv6 e uso "antes e depois do fato" sem verificar; contava IPv6/IPv4 por registro; proxy/hospedagem cortados em 5 | **Corrigido** (`tests/test_investigativo.py`) |
+| A1 | `AUTH_PASSWORD_HASH` aceitava SHA-256 sem salt; `passlib` sem manutenção | **Corrigido** (`argon2-cffi`/`bcrypt`; SHA-256 recusado com mensagem) |
+| D1 | pip-audit: CVEs em streamlit (SSRF/NTLM só em Windows), requests, jinja2, python-dotenv, pyarrow, pdfminer.six, pillow | **Corrigido** (pins atualizados; `use_container_width` → `width='stretch'`) |
+| D2 | Sem auditoria de dependências nem atualização automática | **Corrigido** (`audit.yml` semanal, dependabot) |
+| D3 | Cobertura medida só em 2 módulos, piso 0 | **Corrigido** (projeto inteiro, `fail_under = 63`; medido 64,3%) |
+| C5 | `processing_cancelled` ignorava `_persisted` | **Corrigido** |
+| C6 | A suíte gravava `test_action`/recibos de teste no audit trail real a cada execução (43 + 43 eventos desde 25/08) | **Corrigido** (`tests/conftest.py` desvia e verifica; o trail não foi reescrito e está íntegro) |
+| S10 | Ollama remoto recebia o prompt do caso sem aviso e fora do air-gapped; README dizia "100% offline" | **Corrigido** (`ai_assistant.ollama_remote_host`) |
+| U1 | Chips do filtro "Tipo" do mapa truncados | **Corrigido** |
+
+Verificação de ponta a ponta pela interface (`tests/test_ponta_a_ponta.py`): dois
+filtros de mesmo tamanho exportam CSVs diferentes; "Limpar" e "Restaurar sessão" de
+outro alvo apagam IA/VirusTotal do anterior. Os três testes falham com o defeito
+reintroduzido.
+
 ## 4. Roadmap 30 / 60 / 90 dias
 
 ### 30 dias
@@ -195,7 +214,7 @@ python -m pytest tests -q
 
 Critérios de aceite do plano: exports sanitizados, HTML escapado, paths em `output/`, audit com cadeia, testes de regressão nos helpers.
 
-**Última verificação:** 418 testes (409 rápidos + 9 `slow`), Lote 10.
+**Última verificação:** 447 testes (438 rápidos + 9 `slow`), cobertura 64,3%, `pip-audit` sem vulnerabilidades conhecidas, Lote 11.
 
 ## 7. Mapa de módulos novos (referência)
 

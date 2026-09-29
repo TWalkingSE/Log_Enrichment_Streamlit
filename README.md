@@ -858,14 +858,14 @@ Teste de carga sobre dataset de tamanho real — 202.128 linhas, alguns minutos:
 python -m pytest tests/test_load.py -m slow
 ```
 
-**418 testes automatizados** (409 rápidos + 9 marcados `slow`) organizados em `tests/` por domínio, cobrindo: validação de IP, IPs privados, rDNS, fuso horário, parsers (WhatsApp, Meta, Google, genérico e HTML), risk score, padrões temporais, geofencing, correlação cruzada, números descartáveis, cliente API, definição de colunas, **validators** (schema, domain, CSV injection), **VPN heuristics**, **IP confidence**, **life patterns**, **impossible jumps**, **base locations**, **movement area**, **infrastructure classification**, **audit logger**, **report generator** (rápido/profissional), **cache compression**, **relay chains**, **device fingerprinting**, **shared Wi-Fi**, **digital silence**, **timezone validation**, **data health**, **helpers de período**, **score unificado**, **VPN timing**, **correlação temporal**, **perfil de uso**, **precisão geográfica**, **KML animado**, **AI assistant** (prompts, validação, offline), **detecção tipo IP**, **ZIP security** (bomb detection, path traversal), **input sanitization**, **geofence coordinate validation**, updater Tor oficial com fallback de cache smoke tests cobrindo entrada simples, relatório, exportação XLSX e enriquecimento de interceptação, e smoke tests de **todas as páginas nos três idiomas** ([`tests/test_paginas.py`](tests/test_paginas.py)) mais a paridade dos locales ([`tests/test_i18n.py`](tests/test_i18n.py)). A suíte `slow` ([`tests/test_load.py`](tests/test_load.py)) roda análises, relatório e exportação sobre 202.128 linhas, medindo pico de memória e tempo — é ela que pega regressões de complexidade que fixtures de poucas linhas não revelam.
+**447 testes automatizados** (438 rápidos + 9 marcados `slow`) organizados em `tests/` por domínio, cobrindo: validação de IP, IPs privados, rDNS, fuso horário, parsers (WhatsApp, Meta, Google, genérico e HTML), risk score, padrões temporais, geofencing, correlação cruzada, números descartáveis, cliente API, definição de colunas, **validators** (schema, domain, CSV injection), **VPN heuristics**, **IP confidence**, **life patterns**, **impossible jumps**, **base locations**, **movement area**, **infrastructure classification**, **audit logger**, **report generator** (rápido/profissional), **cache compression**, **relay chains**, **device fingerprinting**, **shared Wi-Fi**, **digital silence**, **timezone validation**, **data health**, **helpers de período**, **score unificado**, **VPN timing**, **correlação temporal**, **perfil de uso**, **precisão geográfica**, **KML animado**, **AI assistant** (prompts, validação, offline), **detecção tipo IP**, **ZIP security** (bomb detection, path traversal), **input sanitization**, **geofence coordinate validation**, updater Tor oficial com fallback de cache smoke tests cobrindo entrada simples, relatório, exportação XLSX e enriquecimento de interceptação, smoke tests de **todas as páginas nos três idiomas** ([`tests/test_paginas.py`](tests/test_paginas.py)), fluxos de ponta a ponta pela interface ([`tests/test_ponta_a_ponta.py`](tests/test_ponta_a_ponta.py)) e a paridade dos locales ([`tests/test_i18n.py`](tests/test_i18n.py)). A suíte nunca grava em dado de caso: [`tests/conftest.py`](tests/conftest.py) desvia audit trail, sessões, histórico e cache de IPs para um temporário e falha se algum arquivo real mudar. A suíte `slow` ([`tests/test_load.py`](tests/test_load.py)) roda análises, relatório e exportação sobre 202.128 linhas, medindo pico de memória e tempo — é ela que pega regressões de complexidade que fixtures de poucas linhas não revelam.
 
 ## 🔐 Governança
 
 - **Licença**: MIT
 - **Segurança**: reporte responsável descrito em `SECURITY.md`
 - **Contribuição**: fluxo básico descrito em `CONTRIBUTING.md`
-- **CI**: workflow em `.github/workflows/tests.yml` para rodar a suíte automatizada
+- **CI**: `.github/workflows/tests.yml` roda ruff, mypy e a suíte (Linux e Windows) com piso de cobertura do projeto inteiro (`fail_under` em `pyproject.toml`); `.github/workflows/audit.yml` roda `pip-audit` nos pins a cada mudança de dependência e toda semana; o dependabot abre PRs semanais para pip e GitHub Actions
 
 ## 📜 Licença
 
@@ -919,6 +919,15 @@ Regressões em [`tests/test_evidencia.py`](tests/test_evidencia.py).
 - Relatório HTML com autoescape (popups do mapa interpolavam provedor/cidade crus)
 - Limite global de tentativas de login (o limite por sessão zerava com nova sessão)
 - Chaves do `.env` não pré-preenchem mais campos do navegador
+- Senha: `passlib` (sem manutenção) trocado por `argon2-cffi`/`bcrypt`; hashes Argon2 e
+  bcrypt existentes continuam válidos. O **SHA-256 sem salt não é mais aceito** — a tela
+  de login explica e pede para regerar o hash
+- Dependências com CVE atualizadas, entre elas o Streamlit 1.41 → 1.54 (SSRF com
+  vazamento de hash NTLM em servidores **Windows**), requests, jinja2, python-dotenv,
+  pyarrow, pdfplumber/pdfminer.six e pillow
+- Ollama com URL fora do loopback: as telas avisam que o prompt (IPs, datas,
+  provedores) sai da máquina, e o modo air-gapped bloqueia a consulta. O README dizia
+  "100% offline"
 
 **Limpeza**
 - Removidos `docs/Portuguese/` (cópia antiga dos `.md` da raiz), `analysis/io_scan.py`
@@ -935,6 +944,14 @@ Regressões em [`tests/test_evidencia.py`](tests/test_evidencia.py).
   (um parser por plataforma), `analysis/heuristics.py` e `intel/`; saltos impossíveis e
   relay chains vetorizados, com saída idêntica à anterior
 - CI também em Windows
+- Resumo narrativo da análise investigativa só afirma o que os dados mostram: contava
+  IPv6/IPv4 por registro (não por IP), afirmava predominância de IPv6 e uso "antes e
+  depois do fato" sem verificar, e cortava em 5 os IPs de proxy/hospedagem sem dizer
+- Evento de cancelamento que não foi gravado no audit trail passa a aparecer na tela
+- A suíte de testes gravava `test_action` e recibos de `test_target` no audit trail
+  real a cada execução (desde 25/08/2026). Os eventos que entraram continuam lá — o
+  trail não é reescrito, e a cadeia segue íntegra —; a suíte agora é isolada
+- Mapa: os chips do filtro "Tipo" saíam truncados ("R…", "M…")
 
 ### v5.3 (2026)
 

@@ -27,6 +27,17 @@ venv/Scripts/python.exe -m ruff check . && venv/Scripts/python.exe -m mypy
 — a mesma que o CI roda.)
 
 ```bash
+venv/Scripts/python.exe -m pytest tests -q -m "not slow" --cov
+```
+
+```bash
+venv/Scripts/python.exe -m pip_audit -r requirements.txt --strict
+```
+
+(Escopo e piso de cobertura em `[tool.coverage]` do `pyproject.toml`: suba o
+`fail_under` quando a cobertura subir, não o desça para acomodar código sem teste.)
+
+```bash
 venv/Scripts/python.exe -m streamlit run app.py
 ```
 
@@ -118,6 +129,19 @@ do Discord reconhece `desconhecido`, não `unknown`. `tests/test_i18n.py` exige
 paridade de chaves/placeholders e que toda chave usada exista;
 `tests/test_paginas.py` renderiza as 15 páginas nos três idiomas.
 
+**Teste nunca grava em dado de caso.** [tests/conftest.py](tests/conftest.py)
+desvia audit trail, sessões, histórico e cache de IPs para um temporário e
+falha a sessão se algum desses arquivos reais mudar. Foi por falta disso que o
+`audit_trail.jsonl` real acumulou dezenas de `test_action` — e o trail não se
+reescreve para limpar. Caminho novo de dado de caso entra no conftest. Script de
+`AppTest` roda no processo do teste: se trocar atributo de módulo, restaure no
+`finally`.
+
+**Texto do laudo só afirma o que os dados mostram.** O resumo narrativo da
+análise investigativa afirmava "predominância de IPv6" e uso "antes e depois do
+fato" sem conferir. Toda frase gerada tem de sair de uma contagem sobre os dados
+selecionados, e a ausência também se declara ("não há registro ... depois").
+
 **Nunca `except Exception: pass`.** Isso engole `MemoryError` e apresenta "sem
 dados" como se estivesse tudo bem. Use `logger.exception` e mostre o erro.
 
@@ -144,7 +168,9 @@ funde os resultados no DataFrame.
   teste vai no módulo onde a função mora (`intel.tor.fetch_tor_exit_nodes`),
   não na fachada — senão não tem efeito.
 - **`intel/`** — tudo que sai para a rede passa por
-  `helpers.runtime_flags.ensure_network_allowed` (modo air-gapped).
+  `helpers.runtime_flags.ensure_network_allowed` (modo air-gapped). O Ollama
+  também, quando a URL não é loopback (`ai_assistant.ollama_remote_host`): o
+  prompt leva IPs e datas do caso.
 - **`helpers/`** — quase tudo é importado **preguiçosamente dentro de funções**.
   Um grep só no topo dos arquivos faz esses módulos parecerem órfãos; não são.
 - **`validators.py`** e **`api_client.py`** estão sob `mypy` no CI — anote tipos.
@@ -153,6 +179,9 @@ funde os resultados no DataFrame.
 
 - `format='mixed'` no `to_datetime` cai no parser por elemento do dateutil.
   O pipeline grava `Data` sempre como `'%Y-%m-%d %H:%M:%S'`; use `parse_data`.
+- Largura de elemento é `width='stretch'`, não `use_container_width=True`
+  (descontinuado no Streamlit 1.54, com remoção anunciada). O `st_folium` é
+  exceção: o parâmetro é da biblioteca dele.
 - `pd.set_option` é **global e permanente no processo**. Nunca chame de dentro
   de um render — já houve um caso que desprotegia o Styler de outras páginas.
 - `@st.cache_data` com DataFrame como argumento normal **hasheia os bytes do

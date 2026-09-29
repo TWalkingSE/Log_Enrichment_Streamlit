@@ -92,7 +92,7 @@ tests/
 python -m pytest tests -q
 ```
 
-418 automated tests (409 fast + 9 `slow` load tests over 202,128 rows), including every page rendered in pt/en/es.
+447 automated tests (438 fast + 9 `slow` load tests over 202,128 rows), including every page rendered in pt/en/es and end-to-end UI flows. The suite never writes to case data (`tests/conftest.py`).
 
 ## Docs
 
