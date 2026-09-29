@@ -34,6 +34,7 @@ from validators import as_bool, bool_series, parse_data
 from helpers.large_data import (
     bump_data_version, fmt, gate, show_truncation, truncation_notice, PREVIEW_ROWS,
 )
+from i18n import t, t_or
 
 # Tetos de exportação/renderização desta página. Toda truncagem é declarada.
 MAX_GEOJSON_FEATURES = 20000
@@ -46,13 +47,30 @@ logger = logging.getLogger(__name__)
 from helpers.geo import DEFAULT_TILE, TILE_SOURCES, add_base_layer
 
 LEGEND_INFRA = [
-    ('Residencial', '#22c55e', 'normal'),
-    ('Movel', '#3b82f6', 'mobile'),
-    ('Hosting', '#f97316', 'hosting'),
-    ('Cloud', '#f59e0b', 'cloud'),
-    ('Datacenter/VPN', '#f87171', 'datacenter_vpn'),
-    ('Proxy/VPN/Tor', '#ef4444', 'proxy'),
+    ('mapa.legend.residential', '#22c55e', 'normal'),
+    ('mapa.legend.mobile', '#3b82f6', 'mobile'),
+    ('mapa.legend.hosting', '#f97316', 'hosting'),
+    ('mapa.legend.cloud', '#f59e0b', 'cloud'),
+    ('mapa.legend.datacenter_vpn', '#f87171', 'datacenter_vpn'),
+    ('mapa.legend.proxy', '#ef4444', 'proxy'),
 ]
+
+# Códigos internos dos filtros e das visualizações: a lógica compara o
+# código, e só o rótulo exibido vem do idioma.
+CONNECTION_FILTERS = {
+    'residential': 'common.residential',
+    'mobile': 'common.mobile',
+    'proxy': 'common.proxy_vpn',
+    'hosting': 'common.hosting',
+}
+MAP_VIEWS = {
+    'markers': 'mapa.markers',
+    'clusters': 'mapa.clusters',
+    'heatmap': 'mapa.heatmap',
+    'route': 'mapa.temporal_route',
+    'investigative': 'mapa.investigative',
+}
+_ALL = '__all__'
 
 
 def _is_true(value):
@@ -90,7 +108,8 @@ def _create_base_map(df_map, tile_style, zoom_start=4):
 def _render_legend(df_map):
     counts = df_map['_infra_category'].value_counts().to_dict() if '_infra_category' in df_map.columns else {}
     items = []
-    for label, color, category in LEGEND_INFRA:
+    for label_key, color, category in LEGEND_INFRA:
+        label = t(label_key)
         count = counts.get(category, 0)
         if count <= 0:
             continue
@@ -123,8 +142,7 @@ def _declarar_corte(exibidos, total, unidade):
     mostra tudo.
     """
     if exibidos < total:
-        st.caption(f"⚠️ Mapa: {truncation_notice(exibidos, total, unidade)} "
-                   "Use os filtros para ver o restante.")
+        st.caption(t('mapa.cut_notice', notice=truncation_notice(exibidos, total, unidade)))
 
 
 def _prepare_point_dataframe(df_map, ip_col, limit):
@@ -133,7 +151,7 @@ def _prepare_point_dataframe(df_map, ip_col, limit):
     dedupe_cols = [column for column in [ip_col, 'Ip_Lat', 'Ip_Lon', 'Ip_Cidade', 'Ip_Dono'] if column in point_df.columns]
     point_df = point_df.sort_values('_marker_count', ascending=False).drop_duplicates(subset=dedupe_cols)
     if len(point_df) > limit:
-        _declarar_corte(limit, len(point_df), 'pontos distintos (os mais frequentes)')
+        _declarar_corte(limit, len(point_df), t('mapa.unit_points_top'))
         point_df = point_df.head(limit)
     return point_df.sort_values('_marker_count')
 
@@ -184,7 +202,7 @@ def _render_clusters_map(df_map, ip_col, tile_style):
     ip_counts = df_map[ip_col].value_counts().to_dict()
 
     groups = cluster_df.groupby(['_lat_key', '_lon_key'], sort=False)
-    _declarar_corte(min(groups.ngroups, 600), groups.ngroups, 'agrupamentos de localização')
+    _declarar_corte(min(groups.ngroups, 600), groups.ngroups, t('mapa.unit_groups'))
     total_groups = 0
     for _, group in groups:
         total_groups += 1
@@ -237,7 +255,7 @@ def _render_heatmap_map(df_map, ip_col, tile_style):
         },
     ).add_to(fmap)
 
-    _declarar_corte(min(len(point_df), 150), len(point_df), 'pontos com marcador clicável')
+    _declarar_corte(min(len(point_df), 150), len(point_df), t('mapa.unit_clickable'))
     for _, row in point_df.head(150).iterrows():
         popup_row = _prepare_popup_row(row.to_dict(), ip_col)
         infra = classify_infrastructure(popup_row)
@@ -263,7 +281,7 @@ def _prepare_route_dataframe(df_map, max_points=450):
         step = max(1, len(route_df) // max_points)
         total = len(route_df)
         route_df = route_df.iloc[::step].copy()
-        _declarar_corte(len(route_df), total, f'pontos da rota (amostrados 1 a cada {step})')
+        _declarar_corte(len(route_df), total, t('mapa.unit_route', step=step))
     return route_df
 
 
@@ -296,13 +314,13 @@ def _render_route_map(df_map, ip_col, tile_style):
     end_row = _prepare_popup_row(route_df.iloc[-1].to_dict(), ip_col)
     folium.Marker(
         location=[route_df.iloc[0]['Ip_Lat'], route_df.iloc[0]['Ip_Lon']],
-        tooltip='Inicio da sequencia',
+        tooltip=t('mapa.route_start'),
         popup=folium.Popup(build_rich_popup(start_row, ip_counts), max_width=360),
         icon=folium.DivIcon(html="<div style='font-size:18px;'>🟢</div>"),
     ).add_to(fmap)
     folium.Marker(
         location=[route_df.iloc[-1]['Ip_Lat'], route_df.iloc[-1]['Ip_Lon']],
-        tooltip='Ultimo ponto observado',
+        tooltip=t('mapa.route_end'),
         popup=folium.Popup(build_rich_popup(end_row, ip_counts), max_width=360),
         icon=folium.DivIcon(html="<div style='font-size:18px;'>🔴</div>"),
     ).add_to(fmap)
@@ -351,16 +369,16 @@ def _render_investigative_map(df_map, ip_col, tile_style):
         home = bases['home']
         folium.Marker(
             location=[home['lat'], home['lon']],
-            tooltip='Provavel residencia',
-            popup=f"Residencia provavel: {home['city']}, {home['region']} ({home['count']} acessos noturnos)",
+            tooltip=t('mapa.probable_home'),
+            popup=t('mapa.home_popup', city=home['city'], region=home['region'], count=home['count']),
             icon=folium.DivIcon(html="<div style='font-size:22px;'>🏠</div>"),
         ).add_to(fmap)
     if bases.get('work'):
         work = bases['work']
         folium.Marker(
             location=[work['lat'], work['lon']],
-            tooltip='Provavel trabalho',
-            popup=f"Trabalho provavel: {work['city']}, {work['region']} ({work['count']} acessos diurnos)",
+            tooltip=t('mapa.probable_work'),
+            popup=t('mapa.work_popup', city=work['city'], region=work['region'], count=work['count']),
             icon=folium.DivIcon(html="<div style='font-size:22px;'>🏢</div>"),
         ).add_to(fmap)
 
@@ -396,16 +414,16 @@ def _render_travel_preview_map(df_map, tile_style):
 
 
 def page_mapa():
-    st.header('🗺️ Mapa de Geolocalizacao', divider='blue')
-    st.caption('Mapa 2D investigativo com Leaflet/Folium — marcadores, clusters, heatmap, rota temporal e visao operacional.')
+    st.header(t('mapa.title'), divider='blue')
+    st.caption(t('mapa.subtitle'))
 
     df = st.session_state.df_resultado
     if df is None or df.empty:
-        st.info('📭 Nenhum dado. Processe na aba **Entrada**.')
+        st.info(t('mapa.no_data_hint'))
         return
 
     if 'Ip_Lat' not in df.columns or 'Ip_Lon' not in df.columns:
-        st.warning('⚠️ Sem coordenadas. Reprocesse os IPs.')
+        st.warning(t('mapa.no_coordinates'))
         return
 
     df_m = df.copy()
@@ -422,8 +440,7 @@ def page_mapa():
                 # como atuais, e o envelope assinado é desembrulhado.
                 ip_cache, expiradas = filter_fresh_cache(read_ip_cache())
                 if expiradas:
-                    st.caption(f"⏱️ {expiradas} entrada(s) do cache ignorada(s) por estarem "
-                               "expiradas ou sem data.")
+                    st.caption(t('mapa.cache_expired', count=expiradas))
                 df_m = df.copy()
                 df_m['Ip_Lat'] = df_m['Ip'].map(lambda ip: ip_cache.get(ip, {}).get('Ip_Lat'))
                 df_m['Ip_Lon'] = df_m['Ip'].map(lambda ip: ip_cache.get(ip, {}).get('Ip_Lon'))
@@ -441,41 +458,46 @@ def page_mapa():
                     # O conteúdo do dataset mudou — portões e caches por
                     # versão precisam ser invalidados como numa atribuição.
                     bump_data_version()
-                    st.toast(f'📍 Coordenadas recuperadas do cache para {len(df_m)} registros')
+                    st.toast(t('mapa.coords_recovered', count=len(df_m)))
             except MemoryError:
                 raise
             except Exception as exc:
                 logger.exception('Erro ao recuperar coordenadas do cache')
-                st.warning(f'⚠️ Não foi possível recuperar coordenadas do cache: {exc}')
+                st.warning(t('mapa.coords_error', error=exc))
 
     if df_m.empty:
-        st.warning('⚠️ Nenhum IP com coordenadas validas.')
+        st.warning(t('mapa.no_valid_coords'))
         return
     sem_coord = len(df) - len(df_m)
     if sem_coord > 0:
-        st.caption(f"⚠️ {fmt(sem_coord)} de {fmt(len(df))} registros sem coordenadas "
-                   "válidas não aparecem no mapa.")
+        st.caption(t('mapa.without_coords', missing=fmt(sem_coord), total=fmt(len(df))))
 
     ip_col = 'Sender IP' if 'Sender IP' in df.columns else 'Ip'
 
     filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns([1.45, 1.4, 1.05, 1.25, 1])
     with filter_col1:
-        providers = ['Todos'] + sorted(df_m['Ip_Dono'].dropna().unique().tolist()) if 'Ip_Dono' in df_m.columns else ['Todos']
-        selected_provider = st.selectbox('Provedor', providers, key='map_provider')
+        providers = [_ALL] + (sorted(df_m['Ip_Dono'].dropna().unique().tolist())
+                              if 'Ip_Dono' in df_m.columns else [])
+        selected_provider = st.selectbox(t('mapa.provider_filter'), providers, key='map_provider',
+                                         format_func=lambda v: t('common.all') if v == _ALL else v)
     with filter_col2:
-        cities = ['Todas'] + sorted(df_m['Ip_Cidade'].dropna().unique().tolist()) if 'Ip_Cidade' in df_m.columns else ['Todas']
-        selected_city = st.selectbox('Cidade', cities, key='map_city')
+        cities = [_ALL] + (sorted(df_m['Ip_Cidade'].dropna().unique().tolist())
+                           if 'Ip_Cidade' in df_m.columns else [])
+        selected_city = st.selectbox(t('mapa.city_filter'), cities, key='map_city',
+                                     format_func=lambda v: t('mapa.all_cities') if v == _ALL else v)
     with filter_col3:
         selected_types = st.multiselect(
-            'Tipo',
-            ['Residencial', 'Movel', 'Proxy/VPN', 'Hosting'],
-            default=['Residencial', 'Movel', 'Proxy/VPN', 'Hosting'],
+            t('mapa.type_filter'),
+            list(CONNECTION_FILTERS),
+            default=list(CONNECTION_FILTERS),
+            format_func=lambda k: t(CONNECTION_FILTERS[k]),
             key='map_types',
         )
     with filter_col4:
         map_view = st.selectbox(
-            'Visualizacao',
-            ['Marcadores', 'Clusters', 'Heatmap', 'Rota Temporal', 'Visao Investigativa'],
+            t('mapa.view'),
+            list(MAP_VIEWS),
+            format_func=lambda k: t(MAP_VIEWS[k]),
             key='map_view',
         )
     with filter_col5:
@@ -483,7 +505,8 @@ def page_mapa():
         # levantar exceção; melhor voltar ao padrão do que derrubar a página.
         if st.session_state.get('map_tile_style') not in TILE_SOURCES:
             st.session_state['map_tile_style'] = DEFAULT_TILE
-        tile_style = st.selectbox('Estilo do Mapa', list(TILE_SOURCES.keys()), key='map_tile_style')
+        tile_style = st.selectbox(t('mapa.map_style'), list(TILE_SOURCES.keys()), key='map_tile_style',
+                                  format_func=lambda k: t_or(f'mapa.tile.{k}', k))
 
     if 'Data' in df_m.columns:
         df_m['_dt_filter'] = parse_data(df_m['Data'])
@@ -493,7 +516,7 @@ def page_mapa():
             max_date = valid_dates.max().date()
             if min_date < max_date:
                 selected_dates = st.slider(
-                    'Periodo no mapa',
+                    t('mapa.date_range'),
                     min_value=min_date,
                     max_value=max_date,
                     value=(min_date, max_date),
@@ -506,9 +529,9 @@ def page_mapa():
                 df_m = df_m[(df_m['_dt_filter'] >= start_ts) & (df_m['_dt_filter'] <= end_ts)]
         df_m = df_m.drop(columns=['_dt_filter'], errors='ignore')
 
-    if selected_provider != 'Todos' and 'Ip_Dono' in df_m.columns:
+    if selected_provider != _ALL and 'Ip_Dono' in df_m.columns:
         df_m = df_m[df_m['Ip_Dono'] == selected_provider]
-    if selected_city != 'Todas' and 'Ip_Cidade' in df_m.columns:
+    if selected_city != _ALL and 'Ip_Cidade' in df_m.columns:
         df_m = df_m[df_m['Ip_Cidade'] == selected_city]
 
     if selected_types and all(column in df_m.columns for column in ['Ip_Proxy', 'Ip_Hospedagem', 'Ip_Movel']):
@@ -516,13 +539,13 @@ def page_mapa():
         hosting_series = _series_bool(df_m, 'Ip_Hospedagem')
         mobile_series = _series_bool(df_m, 'Ip_Movel')
         filters = []
-        if 'Residencial' in selected_types:
+        if 'residential' in selected_types:
             filters.append(~proxy_series & ~hosting_series & ~mobile_series)
-        if 'Movel' in selected_types:
+        if 'mobile' in selected_types:
             filters.append(mobile_series)
-        if 'Proxy/VPN' in selected_types:
+        if 'proxy' in selected_types:
             filters.append(proxy_series)
-        if 'Hosting' in selected_types:
+        if 'hosting' in selected_types:
             filters.append(hosting_series)
         if filters:
             combined = filters[0]
@@ -531,7 +554,7 @@ def page_mapa():
             df_m = df_m[combined]
 
     if df_m.empty:
-        st.warning('Nenhum IP com os filtros selecionados.')
+        st.warning(t('mapa.no_ip_filters'))
         return
 
     proxy_series = _series_bool(df_m, 'Ip_Proxy')
@@ -539,13 +562,13 @@ def page_mapa():
 
     metric_col1, metric_col2, metric_col3, metric_col4, metric_col5 = st.columns(5)
     with metric_col1:
-        st.metric('Registros no Mapa', len(classified_df))
+        st.metric(t('mapa.records_on_map'), len(classified_df))
     with metric_col2:
-        st.metric('IPs Unicos', classified_df[ip_col].nunique() if ip_col in classified_df.columns else 0)
+        st.metric(t('common.unique_ips'), classified_df[ip_col].nunique() if ip_col in classified_df.columns else 0)
     with metric_col3:
-        st.metric('Cidades', classified_df['Ip_Cidade'].dropna().nunique() if 'Ip_Cidade' in classified_df.columns else 0)
+        st.metric(t('common.cities'), classified_df['Ip_Cidade'].dropna().nunique() if 'Ip_Cidade' in classified_df.columns else 0)
     with metric_col4:
-        st.metric('Paises', classified_df['Ip_Pais'].dropna().nunique() if 'Ip_Pais' in classified_df.columns else 0)
+        st.metric(t('common.countries'), classified_df['Ip_Pais'].dropna().nunique() if 'Ip_Pais' in classified_df.columns else 0)
     with metric_col5:
         st.metric('🛡️ Proxy/VPN', int(proxy_series.sum()))
 
@@ -556,36 +579,32 @@ def page_mapa():
         alert_rows = classified_df[classified_df['_infra_category'].isin(['proxy', 'datacenter_vpn'])]
         alert_ip_set = alert_rows[ip_col].astype(str).unique()
         alert_ips = ', '.join(alert_ip_set[:5])
-        alert_providers = ', '.join(alert_rows['Ip_Dono'].dropna().astype(str).unique()[:5]) if 'Ip_Dono' in alert_rows.columns else 'N/A'
-        st.error(
-            f'🛡️ **{n_datacenter} registro(s) com Proxy/VPN/Datacenter detectados**\n\n'
-            f'IPs ({len(alert_ip_set)} únicos, até 5 exibidos): {alert_ips or "N/A"}  \n'
-            f'Provedores: {alert_providers or "N/A"}  \n'
-            '*A localizacao exibida pode representar o servidor, nao o usuario final.*'
-        )
+        alert_prov_set = (alert_rows['Ip_Dono'].dropna().astype(str).unique()
+                          if 'Ip_Dono' in alert_rows.columns else [])
+        st.error(t('mapa.alert_datacenter', count=n_datacenter, ips_total=len(alert_ip_set),
+                   ips=alert_ips or "N/A", prov_total=len(alert_prov_set),
+                   providers=', '.join(alert_prov_set[:5]) or "N/A"))
 
     if n_cloud > 0:
         cloud_rows = classified_df[classified_df['_infra_category'] == 'cloud']
         cloud_ip_set = cloud_rows[ip_col].astype(str).unique()
         cloud_ips = ', '.join(cloud_ip_set[:5])
-        cloud_providers = ', '.join(cloud_rows['Ip_Dono'].dropna().astype(str).unique()[:5]) if 'Ip_Dono' in cloud_rows.columns else 'N/A'
-        st.warning(
-            f'☁️ **{n_cloud} registro(s) em Cloud Publica**\n\n'
-            f'IPs ({len(cloud_ip_set)} únicos, até 5 exibidos): {cloud_ips or "N/A"}  \n'
-            f'Provedores: {cloud_providers or "N/A"}  \n'
-            '*O IP pode pertencer a aplicacao, bot ou infraestrutura compartilhada.*'
-        )
+        cloud_prov_set = (cloud_rows['Ip_Dono'].dropna().astype(str).unique()
+                          if 'Ip_Dono' in cloud_rows.columns else [])
+        st.warning(t('mapa.alert_cloud', count=n_cloud, ips_total=len(cloud_ip_set),
+                     ips=cloud_ips or "N/A", prov_total=len(cloud_prov_set),
+                     providers=', '.join(cloud_prov_set[:5]) or "N/A"))
 
     main_map = None
-    if map_view == 'Clusters':
+    if map_view == 'clusters':
         main_map = _render_clusters_map(classified_df, ip_col, tile_style)
-    elif map_view == 'Heatmap':
+    elif map_view == 'heatmap':
         main_map = _render_heatmap_map(classified_df, ip_col, tile_style)
-    elif map_view == 'Rota Temporal':
+    elif map_view == 'route':
         main_map = _render_route_map(classified_df, ip_col, tile_style)
         if main_map is None:
-            st.warning('Sem dados temporais suficientes para montar a rota cronologica.')
-    elif map_view == 'Visao Investigativa':
+            st.warning(t('mapa.no_route'))
+    elif map_view == 'investigative':
         main_map = _render_investigative_map(classified_df, ip_col, tile_style)
     else:
         main_map = _render_markers_map(classified_df, ip_col, tile_style)
@@ -595,30 +614,34 @@ def page_mapa():
         _render_legend(classified_df)
 
     st.divider()
-    tool_tabs = st.tabs(['🌐 Exportar', '📍 Geofencing', '⚡ Anomalias', '🧠 Perfil', '📅 Comparacao', '📊 Estatisticas', '📐 Area', '✈️ Viagens'])
+    tool_tabs = st.tabs([t('mapa.export_tab'), t('mapa.geofencing_tab'), t('mapa.anomalies_tab'),
+                         t('mapa.profile_tab'), t('mapa.comparison_tab'), t('mapa.stats_tab'),
+                         t('mapa.area_tab'), t('mapa.travel_tab')])
 
     with tool_tabs[0]:
         export_col1, export_col2, export_col3 = st.columns(3)
         with export_col1:
-            st.subheader('🌐 KML (Google Earth)')
-            if st.button('Gerar KML', key='map_kml_btn'):
+            st.subheader(t('mapa.kml_title'))
+            if st.button(t('mapa.kml_generate'), key='map_kml_btn'):
                 try:
                     kml_data = export_kml(df, ip_col=ip_col)
-                    st.download_button('📥 Baixar KML', kml_data, 'ip_locations.kml', 'application/vnd.google-earth.kml+xml', key='map_kml_dl')
+                    st.download_button(t('mapa.kml_download'), kml_data, 'ip_locations.kml', 'application/vnd.google-earth.kml+xml', key='map_kml_dl')
                 except Exception as exc:
-                    st.error(f'Erro ao gerar KML: {exc}')
+                    logger.exception('Falha ao gerar KML')
+                    st.error(t('mapa.kml_error', error=exc))
         with export_col2:
-            st.subheader('🎬 KML Animado')
-            if st.button('Gerar KML Temporal', key='map_kml_anim_btn'):
+            st.subheader(t('mapa.kml_anim_title'))
+            if st.button(t('mapa.kml_anim_generate'), key='map_kml_anim_btn'):
                 try:
                     kml_anim = export_kml_animated(df, ip_col=ip_col)
-                    st.download_button('📥 Baixar KML Animado', kml_anim, 'rota_temporal.kml', 'application/vnd.google-earth.kml+xml', key='map_kml_anim_dl')
-                    st.caption('Abra no Google Earth Pro para ver a animacao temporal.')
+                    st.download_button(t('mapa.kml_anim_download'), kml_anim, 'rota_temporal.kml', 'application/vnd.google-earth.kml+xml', key='map_kml_anim_dl')
+                    st.caption(t('mapa.kml_anim_hint'))
                 except Exception as exc:
-                    st.error(f'Erro ao gerar KML temporal: {exc}')
+                    logger.exception('Falha ao gerar KML temporal')
+                    st.error(t('mapa.kml_anim_error', error=exc))
         with export_col3:
-            st.subheader('📦 GeoJSON')
-            if st.button('Exportar GeoJSON', key='map_geojson_btn'):
+            st.subheader(t('mapa.geojson_title'))
+            if st.button(t('mapa.geojson_export'), key='map_geojson_btn'):
                 # `iterrows()` sobre 200k linhas construía 200k dicts e o
                 # `json.dumps(indent=2)` uma única string de centenas de MB,
                 # empurrada inteira pelo websocket. Aqui os registros são
@@ -654,85 +677,86 @@ def page_mapa():
                 } for _, r in agrupado.iterrows()]
                 geojson = json.dumps({'type': 'FeatureCollection', 'features': features},
                                      ensure_ascii=False)
-                show_truncation(len(features), total_pontos, 'pontos distintos')
-                st.download_button('📥 Baixar GeoJSON', geojson, 'ip_locations.geojson',
+                show_truncation(len(features), total_pontos, t('mapa.unit_points'))
+                st.download_button(t('mapa.geojson_download'), geojson, 'ip_locations.geojson',
                                    'application/geo+json', key='map_geojson_dl')
 
     with tool_tabs[1]:
-        st.subheader('📍 Geofencing')
+        st.subheader(t('mapa.geofencing_tab'))
         geo_col1, geo_col2, geo_col3 = st.columns(3)
         with geo_col1:
-            geo_lat = st.number_input('Latitude centro', value=-15.7801, format='%.4f', key='map_geo_lat')
+            geo_lat = st.number_input(t('mapa.center_lat'), value=-15.7801, format='%.4f', key='map_geo_lat')
         with geo_col2:
-            geo_lon = st.number_input('Longitude centro', value=-47.9292, format='%.4f', key='map_geo_lon')
+            geo_lon = st.number_input(t('mapa.center_lon'), value=-47.9292, format='%.4f', key='map_geo_lon')
         with geo_col3:
-            geo_radius = st.number_input('Raio (km)', value=500, min_value=1, key='map_geo_radius')
+            geo_radius = st.number_input(t('mapa.radius_km'), value=500, min_value=1, key='map_geo_radius')
 
-        if st.button('Verificar Geofence', key='map_geo_btn'):
+        if st.button(t('mapa.geofence_check'), key='map_geo_btn'):
             inside, outside = check_geofence(df, geo_lat, geo_lon, geo_radius)
             if len(outside) > 0:
-                st.warning(f'⚠️ **{len(outside)}** IPs fora da cerca ({geo_radius} km).')
+                st.warning(t('mapa.geofence_outside', count=len(outside), radius=geo_radius))
                 out_columns = [ip_col, 'Ip_Cidade', 'Ip_Regiao', 'Ip_Pais', 'Ip_Dono', 'Data']
                 available_columns = [column for column in out_columns if column in outside.columns]
                 st.dataframe(
-                    outside[available_columns + ['_distance_km']].rename(columns={'_distance_km': 'Distancia (km)'}),
+                    outside[available_columns + ['_distance_km']].rename(
+                        columns={'_distance_km': t('mapa.distance_km')}),
                     hide_index=True,
                 )
             else:
-                st.success(f'✅ Todos os IPs ficaram dentro da cerca de {geo_radius} km.')
+                st.success(t('mapa.geofence_inside', radius=geo_radius))
 
     with tool_tabs[2]:
         # st.tabs executa o corpo de TODAS as abas a cada rerun, visíveis ou
         # não. Sem estes portões, arrastar o slider abaixo disparava três
         # varreduras completas do DataFrame — mesmo com a aba fechada.
-        st.subheader('⚡ Deteccao de Saltos Impossiveis')
-        max_speed = st.slider('Velocidade maxima (km/h)', 100, 2000, 900, key='map_anom_speed')
-        if gate('⚡ Detectar saltos impossiveis', df, 'map_jumps'):
+        st.subheader(t('mapa.jumps_title'))
+        max_speed = st.slider(t('mapa.max_speed'), 100, 2000, 900, key='map_anom_speed')
+        if gate(t('mapa.gate_jumps'), df, 'map_jumps'):
             jumps = detect_impossible_jumps(df, max_speed_kmh=max_speed)
             if not jumps.empty:
-                st.error(f'🚨 **{len(jumps)}** saltos impossiveis detectados (>{max_speed} km/h).')
+                st.error(t('mapa.jumps_found', count=len(jumps), speed=max_speed))
                 shown = jumps.head(PREVIEW_ROWS)
                 st.dataframe(shown, hide_index=True, use_container_width=True)
-                show_truncation(len(shown), len(jumps), 'saltos')
+                show_truncation(len(shown), len(jumps), t('mapa.unit_jumps'))
             else:
-                st.success('✅ Nenhum salto impossivel detectado.')
+                st.success(t('mapa.no_jumps'))
 
         st.divider()
-        st.subheader('🏠 Deteccao de Locais Base')
+        st.subheader(t('mapa.bases_title'))
         bases = (detect_base_locations(df)
-                 if gate('🏠 Detectar locais base', df, 'map_bases') else {})
+                 if gate(t('mapa.gate_bases'), df, 'map_bases') else {})
         base_col1, base_col2 = st.columns(2)
         with base_col1:
             if bases.get('home'):
                 home = bases['home']
-                st.metric('🏠 Provavel Residencia', f"{home['city']}, {home['region']}")
-                st.caption(f"Provedor: {home['provider']} | {home['count']} acessos noturnos")
+                st.metric(t('mapa.home_metric'), f"{home['city']}, {home['region']}")
+                st.caption(t('mapa.home_caption', provider=home['provider'], count=home['count']))
             else:
-                st.info('Sem dados suficientes para detectar residencia.')
+                st.info(t('mapa.no_home'))
         with base_col2:
             if bases.get('work'):
                 work = bases['work']
-                st.metric('🏢 Provavel Trabalho', f"{work['city']}, {work['region']}")
-                st.caption(f"Provedor: {work['provider']} | {work['count']} acessos diurnos")
+                st.metric(t('mapa.work_metric'), f"{work['city']}, {work['region']}")
+                st.caption(t('mapa.work_caption', provider=work['provider'], count=work['count']))
             else:
-                st.info('Sem dados suficientes para detectar trabalho.')
+                st.info(t('mapa.no_work'))
 
     with tool_tabs[3]:
-        st.subheader('🧠 Perfil Comportamental')
+        st.subheader(t('mapa.profile_title'))
         target_name = st.session_state.alvo or 'desconhecido'
         # st.tabs executa este corpo a cada rerun, mesmo com a aba fechada.
-        if gate('🧠 Gerar perfil comportamental', df, 'map_profile'):
+        if gate(t('mapa.gate_profile'), df, 'map_profile'):
             profile = generate_behavioral_profile(df, alvo=target_name)
 
             profile_col1, profile_col2, profile_col3, profile_col4 = st.columns(4)
             with profile_col1:
-                st.metric('📅 Dias Monitorados', profile['dias_monitorados'])
+                st.metric(t('mapa.days_monitored'), profile['dias_monitorados'])
             with profile_col2:
-                st.metric('🔢 Registros', profile['total_registros'])
+                st.metric(t('mapa.records_metric'), profile['total_registros'])
             with profile_col3:
-                st.metric('🌐 IPs Unicos', profile['ips_unicos'])
+                st.metric(t('mapa.unique_ips_metric'), profile['ips_unicos'])
             with profile_col4:
-                st.metric('⏰ Padrao', profile['padrao_atividade'] or 'N/A')
+                st.metric(t('mapa.pattern_metric'), profile['padrao_atividade'] or 'N/A')
 
             if profile['resumo']:
                 st.code(profile['resumo'], language=None)
@@ -740,18 +764,18 @@ def page_mapa():
             profile_list_col1, profile_list_col2 = st.columns(2)
             with profile_list_col1:
                 if profile['provedores']:
-                    st.markdown('**Provedores utilizados:**')
+                    st.markdown(t('mapa.providers_used'))
                     for provider in profile['provedores']:
                         st.markdown(f'- {provider}')
             with profile_list_col2:
                 if profile['cidades_visitadas']:
-                    st.markdown('**Cidades visitadas:**')
+                    st.markdown(t('mapa.cities_visited'))
                     for city in profile['cidades_visitadas']:
                         st.markdown(f'- {city}')
 
             if 'Data' in df.columns:
                 st.divider()
-                st.subheader('📈 Timeline de Atividade')
+                st.subheader(t('mapa.activity_timeline'))
                 profile_df = df.copy()
                 profile_df['_dt'] = parse_data(profile_df['Data'])
                 profile_df = profile_df.dropna(subset=['_dt'])
@@ -789,30 +813,30 @@ def page_mapa():
                     st.plotly_chart(fig_heat, use_container_width=True, key='map_profile_heatmap')
 
     with tool_tabs[4]:
-        st.subheader('📅 Comparacao Temporal')
+        st.subheader(t('mapa.compare_title'))
         # st.tabs executa este corpo a cada rerun, mesmo com a aba fechada.
         if 'Data' not in df.columns:
-            st.info('Sem dados de data para comparacao.')
-        elif gate('📅 Comparar períodos', df, 'map_compare'):
+            st.info(t('mapa.no_dates_compare'))
+        elif gate(t('mapa.gate_compare'), df, 'map_compare'):
             date_series = parse_data(df['Data']).dropna()
             if not date_series.empty:
                 min_date = date_series.min().date()
                 max_date = date_series.max().date()
                 mid_date = min_date + (max_date - min_date) / 2
-                split_date = st.date_input('Data de divisao', value=mid_date, min_value=min_date, max_value=max_date, key='map_cmp_split')
+                split_date = st.date_input(t('mapa.split_date'), value=mid_date, min_value=min_date, max_value=max_date, key='map_cmp_split')
                 comparison = compare_split_periods(df, split_date=str(split_date))
                 if comparison:
                     comp_col1, comp_col2 = st.columns(2)
                     period_a = comparison['periodo_a']
                     period_b = comparison['periodo_b']
                     with comp_col1:
-                        st.markdown('### Periodo A')
-                        st.metric('Registros', period_a['registros'])
-                        st.metric('IPs Unicos', period_a['ips_unicos'])
+                        st.markdown(t('mapa.period_a'))
+                        st.metric(t('relatorio.records'), period_a['registros'])
+                        st.metric(t('common.unique_ips'), period_a['ips_unicos'])
                     with comp_col2:
-                        st.markdown('### Periodo B')
-                        st.metric('Registros', period_b['registros'])
-                        st.metric('IPs Unicos', period_b['ips_unicos'])
+                        st.markdown(t('mapa.period_b'))
+                        st.metric(t('relatorio.records'), period_b['registros'])
+                        st.metric(t('common.unique_ips'), period_b['ips_unicos'])
 
                     if comparison.get('mudancas'):
                         st.divider()
@@ -820,14 +844,14 @@ def page_mapa():
                             st.warning(f'📌 {change}')
 
     with tool_tabs[5]:
-        st.subheader('📊 Estatisticas Geograficas')
+        st.subheader(t('mapa.geo_stats_title'))
         geo_col1, geo_col2 = st.columns(2)
         with geo_col1:
             if 'Ip_Pais' in classified_df.columns:
                 todos_paises = classified_df['Ip_Pais'].value_counts()
                 country_counts = todos_paises.head(15).reset_index()
                 country_counts.columns = ['Pais', 'Qtd']
-                show_truncation(len(country_counts), len(todos_paises), 'países')
+                show_truncation(len(country_counts), len(todos_paises), t('mapa.unit_countries'))
                 fig = px.bar(country_counts, x='Qtd', y='Pais', orientation='h', color='Qtd', color_continuous_scale='Viridis')
                 fig.update_layout(
                     height=400,
@@ -843,7 +867,7 @@ def page_mapa():
                 todas_cidades = classified_df['Ip_Cidade'].value_counts()
                 city_counts = todas_cidades.head(15).reset_index()
                 city_counts.columns = ['Cidade', 'Qtd']
-                show_truncation(len(city_counts), len(todas_cidades), 'cidades')
+                show_truncation(len(city_counts), len(todas_cidades), t('mapa.unit_cities'))
                 fig = px.bar(city_counts, x='Qtd', y='Cidade', orientation='h', color='Qtd', color_continuous_scale='Magma')
                 fig.update_layout(
                     height=400,
@@ -856,17 +880,17 @@ def page_mapa():
                 st.plotly_chart(fig, key='map_geo_city')
 
     with tool_tabs[6]:
-        st.subheader('📐 Area de Movimentacao')
-        if gate('📐 Calcular área de movimentação', classified_df, 'map_area'):
+        st.subheader(t('mapa.area_title'))
+        if gate(t('mapa.gate_area'), classified_df, 'map_area'):
             try:
                 area_data = calculate_movement_area(classified_df)
                 area_col1, area_col2, area_col3 = st.columns(3)
                 with area_col1:
-                    st.metric('📐 Area Total', f"{area_data['area_km2']:,.1f} km²")
+                    st.metric(t('mapa.area_total'), f"{area_data['area_km2']:,.1f} km²")
                 with area_col2:
-                    st.metric('📏 Raio Maximo', f"{area_data['max_distance_km']:,.1f} km")
+                    st.metric(t('mapa.max_radius'), f"{area_data['max_distance_km']:,.1f} km")
                 with area_col3:
-                    st.metric('📍 Localizacoes', area_data['num_points'])
+                    st.metric(t('mapa.locations'), area_data['num_points'])
 
                 if area_data['area_km2'] > 0:
                     hull_map = folium.Map(location=area_data['center'], zoom_start=5, tiles=None)
@@ -896,40 +920,40 @@ def page_mapa():
                             fill_opacity=0.85,
                             tooltip=f"{row.get(ip_col, '')} - {row.get('Ip_Cidade', '')}",
                         ).add_to(hull_map)
-                    show_truncation(len(marcadores), total_marcadores, 'IPs no mapa de área')
+                    show_truncation(len(marcadores), total_marcadores, t('mapa.unit_area_ips'))
                     st_folium(hull_map, use_container_width=True, height=400, returned_objects=[], key='map_hull_map')
             except MemoryError:
                 raise
             except Exception as exc:
                 logger.exception('Falha ao calcular a área de movimentação')
-                st.warning(f'Nao foi possivel calcular a area: {exc}')
+                st.warning(t('mapa.area_error', error=exc))
 
     with tool_tabs[7]:
-        st.subheader('✈️ Padrao de Viagem')
+        st.subheader(t('mapa.travel_title'))
         # `detect_travel_pattern` varre o frame linha a linha: atrás de portão.
-        if gate('✈️ Detectar viagens', df, 'map_travel'):
+        if gate(t('mapa.gate_travel'), df, 'map_travel'):
             segments = detect_travel_pattern(df)
             if segments:
                 travel_df = pd.DataFrame(segments)
-                st.metric('Deslocamentos detectados', len(travel_df))
+                st.metric(t('mapa.trips_detected'), len(travel_df))
                 st.dataframe(travel_df, use_container_width=True, hide_index=True)
 
                 route = [segments[0]['De']]
                 for segment in segments:
                     if segment['Para'] != route[-1]:
                         route.append(segment['Para'])
-                st.markdown(f"**Rota:** {' → '.join(route)}")
+                st.markdown(t('mapa.route', route=' → '.join(route)))
                 total_km = sum(segment['Distancia_km'] for segment in segments)
-                st.caption(f'Distancia total percorrida: **{total_km:,.0f} km**')
+                st.caption(t('mapa.total_distance', km=f"{total_km:,.0f}"))
 
                 travel_map = _render_travel_preview_map(classified_df, tile_style)
                 if travel_map is not None:
                     st_folium(travel_map, use_container_width=True, height=350, returned_objects=[], key='map_travel_preview')
             else:
-                st.info('Nenhum deslocamento entre cidades detectado.')
+                st.info(t('mapa.no_trips'))
 
     st.divider()
-    st.subheader('▶️ Replay Temporal no Mapa')
+    st.subheader(t('mapa.replay_title'))
     # O replay copia, converte e ordena o frame inteiro a cada rerun.
-    if gate('▶️ Montar replay temporal', df, 'map_replay'):
+    if gate(t('mapa.gate_replay'), df, 'map_replay'):
         render_map_replay(df)

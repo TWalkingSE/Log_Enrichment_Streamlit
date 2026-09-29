@@ -13,7 +13,8 @@ import plotly.express as px
 import pandas as pd
 import json
 from styles.theme import COLORS
-from validators import as_bool, parse_data
+from i18n import t
+from validators import as_bool, bool_series, parse_data
 
 
 # ============================================================
@@ -26,15 +27,15 @@ def render_health_gauges(health_metrics):
     with traffic-light colors (red/yellow/green).
     """
     if not health_metrics or health_metrics.get('total', 0) == 0:
-        st.info("Nenhuma métrica de saúde disponível.")
+        st.info(t('viz.no_health'))
         return
 
     gauges = [
-        ('Score Geral', health_metrics.get('overall_score', 0), '%'),
-        ('Cobertura IP', health_metrics.get('ip_coverage', 0), '%'),
-        ('Provedores', health_metrics.get('provider_coverage', 0), '%'),
-        ('Geolocalização', health_metrics.get('geo_coverage', 0), '%'),
-        ('Datas', health_metrics.get('date_coverage', 0), '%'),
+        (t('viz.g_overall'), health_metrics.get('overall_score', 0), '%'),
+        (t('viz.g_ip'), health_metrics.get('ip_coverage', 0), '%'),
+        (t('viz.g_providers'), health_metrics.get('provider_coverage', 0), '%'),
+        (t('viz.g_geo'), health_metrics.get('geo_coverage', 0), '%'),
+        (t('viz.g_dates'), health_metrics.get('date_coverage', 0), '%'),
     ]
 
     cols = st.columns(len(gauges))
@@ -87,15 +88,16 @@ def render_health_gauges(health_metrics):
     # Additional metrics as a row
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.metric("Total Registros", health_metrics.get('total', 0))
+        st.metric(t('viz.total_records'), health_metrics.get('total', 0))
     with c2:
         st.metric("IPv4 / IPv6", f"{health_metrics.get('ipv4_ratio', 0)}% / {health_metrics.get('ipv6_ratio', 0)}%")
     with c3:
         st.metric("Proxy/VPN", f"{health_metrics.get('proxy_ratio', 0)}%")
     with c4:
         overall = health_metrics.get('overall_score', 0)
-        label = 'Excelente' if overall >= 80 else 'Bom' if overall >= 60 else 'Regular' if overall >= 40 else 'Ruim'
-        st.metric("Qualidade", label)
+        label = (t('viz.q_excellent') if overall >= 80 else t('viz.q_good') if overall >= 60
+                 else t('viz.q_fair') if overall >= 40 else t('viz.q_poor'))
+        st.metric(t('viz.quality'), label)
 
 
 # ============================================================
@@ -106,7 +108,7 @@ def render_side_by_side_comparison(df1, df2, name1='Alvo 1', name2='Alvo 2'):
     """
     Render a split-screen comparison of two targets with maps, timelines, and stats.
     """
-    st.subheader(f"📊 Comparação: {name1} vs {name2}")
+    st.subheader(t('viz.comparison', a=name1, b=name2))
 
     # Stats comparison
     col1, col2 = st.columns(2)
@@ -119,19 +121,21 @@ def render_side_by_side_comparison(df1, df2, name1='Alvo 1', name2='Alvo 2'):
             unique = df[ip_col].nunique() if ip_col in df.columns else 0
             providers = df['Ip_Dono'].dropna().nunique() if 'Ip_Dono' in df.columns else 0
             cities = df['Ip_Cidade'].dropna().nunique() if 'Ip_Cidade' in df.columns else 0
-            proxy_pct = df['Ip_Proxy'].sum() / max(total, 1) * 100 if 'Ip_Proxy' in df.columns else 0
+            # `bool_series`: com flags de CSV ('1'/'VERDADEIRO') a soma direta
+            # da coluna dava percentual errado ou quebrava.
+            proxy_pct = bool_series(df, 'Ip_Proxy').sum() / max(total, 1) * 100
 
             m1, m2, m3 = st.columns(3)
-            m1.metric("Registros", total)
-            m2.metric("IPs Únicos", unique)
-            m3.metric("Provedores", providers)
+            m1.metric(t('viz.records'), total)
+            m2.metric(t('common.unique_ips'), unique)
+            m3.metric(t('common.providers'), providers)
 
             m4, m5 = st.columns(2)
-            m4.metric("Cidades", cities)
-            m5.metric("Proxy %", f"{proxy_pct:.1f}%")
+            m4.metric(t('common.cities'), cities)
+            m5.metric(t('viz.proxy_pct'), f"{proxy_pct:.1f}%")
 
     # Timeline comparison
-    st.subheader("📅 Timeline Comparativa")
+    st.subheader(t('viz.timeline'))
     col1, col2 = st.columns(2)
 
     for col, df, name in [(col1, df1, name1), (col2, df2, name2)]:
@@ -142,29 +146,34 @@ def render_side_by_side_comparison(df1, df2, name1='Alvo 1', name2='Alvo 2'):
                 df_t = df_t.dropna(subset=['_dt'])
                 if not df_t.empty:
                     daily = df_t.groupby(df_t['_dt'].dt.date).size().reset_index(name='count')
-                    daily.columns = ['Data', 'Registros']
-                    fig = px.area(daily, x='Data', y='Registros', title=name)
+                    col_data, col_reg = t('common.day'), t('viz.records')
+                    daily.columns = [col_data, col_reg]
+                    fig = px.area(daily, x=col_data, y=col_reg, title=name)
                     fig.update_layout(height=250, margin=dict(l=10, r=10, t=40, b=10))
                     st.plotly_chart(fig, use_container_width=True)
 
     # Provider comparison
-    st.subheader("🏢 Provedores")
+    st.subheader(t('viz.providers'))
     col1, col2 = st.columns(2)
     for col, df, name in [(col1, df1, name1), (col2, df2, name2)]:
         with col:
             if 'Ip_Dono' in df.columns:
-                pc = df['Ip_Dono'].value_counts().head(10).reset_index()
-                pc.columns = ['Provedor', 'Qtd']
-                fig = px.bar(pc, x='Qtd', y='Provedor', orientation='h',
+                todos = df['Ip_Dono'].value_counts()
+                pc = todos.head(10).reset_index()
+                col_prov, col_qtd = t('common.provider'), t('common.count')
+                pc.columns = [col_prov, col_qtd]
+                fig = px.bar(pc, x=col_qtd, y=col_prov, orientation='h',
                              title=name,
-                             color='Qtd', color_continuous_scale='Viridis')
+                             color=col_qtd, color_continuous_scale='Viridis')
                 fig.update_layout(height=300, margin=dict(l=10, r=10, t=40, b=10),
                                   showlegend=False, coloraxis_showscale=False,
                                   yaxis={'categoryorder': 'total ascending'})
                 st.plotly_chart(fig, use_container_width=True)
+                if len(todos) > 10:
+                    st.caption(t('viz.top10_providers', total=len(todos)))
 
     # Convergence highlights
-    st.subheader("🔗 Pontos de Convergência")
+    st.subheader(t('viz.convergence'))
     ip_col1 = 'Sender IP' if 'Sender IP' in df1.columns else 'Ip'
     ip_col2 = 'Sender IP' if 'Sender IP' in df2.columns else 'Ip'
     ips1 = set(df1[ip_col1].dropna().unique()) if ip_col1 in df1.columns else set()
@@ -172,18 +181,18 @@ def render_side_by_side_comparison(df1, df2, name1='Alvo 1', name2='Alvo 2'):
     shared = ips1 & ips2
 
     if shared:
-        st.success(f"🔗 {len(shared)} IPs compartilhados encontrados!")
-        shared_df = pd.DataFrame({'IP Compartilhado': sorted(shared)})
+        st.success(t('viz.shared_ips', count=len(shared)))
+        shared_df = pd.DataFrame({t('viz.shared_ip_col'): sorted(shared)})
         st.dataframe(shared_df, hide_index=True)
     else:
-        st.info("Nenhum IP compartilhado entre os alvos.")
+        st.info(t('viz.no_shared_ips'))
 
     # Shared cities
     cities1 = set(df1['Ip_Cidade'].dropna().unique()) if 'Ip_Cidade' in df1.columns else set()
     cities2 = set(df2['Ip_Cidade'].dropna().unique()) if 'Ip_Cidade' in df2.columns else set()
     shared_cities = cities1 & cities2
     if shared_cities:
-        st.info(f"🏙️ Cidades em comum: {', '.join(sorted(shared_cities))}")
+        st.info(t('viz.shared_cities', cities=', '.join(sorted(shared_cities))))
 
 
 # ============================================================
@@ -196,7 +205,7 @@ def render_map_replay(df, height=600):
     Uses the embedded Leaflet.js replay to keep the experience consistent with the 2D map page.
     """
     if df is None or df.empty:
-        st.info("Nenhum dado para animação.")
+        st.info(t('viz.no_replay_data'))
         return
 
     df_m = df.copy()
@@ -208,7 +217,7 @@ def render_map_replay(df, height=600):
     df_m = df_m.sort_values('_dt')
 
     if df_m.empty:
-        st.warning("Nenhum dado com coordenadas e datas válidas.")
+        st.warning(t('viz.no_replay_coords'))
         return
 
     _render_leaflet_replay(df_m, height)
@@ -222,7 +231,7 @@ def _render_leaflet_replay(df_m, height=600):
     """
     # Limit for performance
     if len(df_m) > 500:
-        st.info(f"Limitando animação a 500 pontos (total: {len(df_m)}).")
+        st.info(t('viz.replay_limit', total=len(df_m)))
         df_m = df_m.head(500)
 
     markers = []
@@ -368,12 +377,12 @@ def render_ip_table_with_sparklines(df):
     each IP's frequency over time.
     """
     if df is None or df.empty:
-        st.info("Nenhum dado disponível.")
+        st.info(t('viz.no_data'))
         return
 
     ip_col = 'Sender IP' if 'Sender IP' in df.columns else 'Ip'
     if ip_col not in df.columns or 'Data' not in df.columns:
-        st.warning("Colunas necessárias (IP, Data) não encontradas.")
+        st.warning(t('viz.missing_cols'))
         return
 
     df_s = df.copy()
@@ -384,7 +393,8 @@ def render_ip_table_with_sparklines(df):
         return
 
     # Get top IPs
-    top_ips = df_s[ip_col].value_counts().head(30)
+    contagem_ips = df_s[ip_col].value_counts()
+    top_ips = contagem_ips.head(30)
 
     # Build sparkline data per IP
     date_range = pd.date_range(df_s['_dt'].min().date(), df_s['_dt'].max().date(), freq='D')
@@ -408,18 +418,18 @@ def render_ip_table_with_sparklines(df):
         persistence = active_days / total_days
 
         if persistence > 0.7:
-            pattern = '🟢 Persistente'
+            pattern = t('viz.persistent')
         elif persistence > 0.3:
-            pattern = '🟡 Regular'
+            pattern = t('viz.regular')
         else:
-            pattern = '🔴 Pontual'
+            pattern = t('viz.sporadic')
 
         rows.append({
             'IP': str(ip),
             'Contagem': count,
             'Provedor': str(provider)[:25] if pd.notna(provider) else '',
             'Cidade': str(city) if pd.notna(city) else '',
-            'Tipo': '🛡️ Proxy' if is_proxy else '� Residencial',
+            'Tipo': t('viz.type_proxy') if is_proxy else t('viz.type_residential'),
             'Padrão': pattern,
             'Dias Ativos': active_days,
             '_sparkline': spark_vals,
@@ -434,7 +444,7 @@ def render_ip_table_with_sparklines(df):
         .spark-svg {{ vertical-align: middle; }}
     </style>
     <table class="spark-table">
-    <tr><th>IP</th><th>Qtd</th><th>Provedor</th><th>Cidade</th><th>Tipo</th><th>Padrão</th><th>Atividade</th></tr>'''
+    <tr><th>IP</th><th>{t('viz.h_count')}</th><th>{t('viz.h_provider')}</th><th>{t('viz.h_city')}</th><th>{t('viz.h_type')}</th><th>{t('viz.h_pattern')}</th><th>{t('viz.h_activity')}</th></tr>'''
 
     for row in rows:
         spark = row['_sparkline']
@@ -461,3 +471,5 @@ def render_ip_table_with_sparklines(df):
 
     table_html += '</table>'
     st.markdown(table_html, unsafe_allow_html=True)
+    from helpers.large_data import show_truncation
+    show_truncation(len(top_ips), len(contagem_ips), t('viz.unit_ips_top'))

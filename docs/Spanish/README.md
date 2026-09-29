@@ -56,7 +56,7 @@ python -m pytest tests -q
 
 ## Tests
 
-350 tests automatizados (341 rápidos + 9 `slow` de carga sobre 202.128 filas).
+418 tests automatizados (409 rápidos + 9 `slow` de carga sobre 202.128 filas), incluidas todas las páginas en pt/en/es.
 
 ## Documentación
 

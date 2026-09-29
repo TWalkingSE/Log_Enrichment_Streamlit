@@ -13,6 +13,7 @@ from datetime import datetime
 from api_client import is_cgnat_ip
 from data_processor import periodo_matches as _periodo_matches
 from styles.theme import COLORS
+from i18n import t
 
 logger = logging.getLogger(__name__)
 
@@ -700,40 +701,41 @@ def render_analise_investigativa(df):
             background:radial-gradient(circle,{COLORS['danger']}14 0%,transparent 70%);"></div>
         <h2 style="margin:0;background:linear-gradient(135deg,{COLORS['danger']},{COLORS['warning']});
             -webkit-background-clip:text;-webkit-text-fill-color:transparent;position:relative;">
-            🔍 Análise Investigativa de IPs v2.0</h2>
+            {t('inv.header_title')}</h2>
         <p style="color:{COLORS['text_muted']};margin:4px 0 0 0;position:relative;">
-            Prioridade IPv6 · Âncoras temporais · Diversificação de horário · Resumo narrativo</p>
+            {t('inv.header_subtitle')}</p>
     </div>""", unsafe_allow_html=True)
 
     if df is None or df.empty:
-        st.warning("⚠️ Nenhum dado disponível. Processe dados na aba **Entrada** primeiro.")
+        st.warning(t('inv.no_data'))
         return
 
     # ---- PAINEL DE CONFIGURAÇÃO ----
-    with st.expander("⚙️ Configuração da Análise", expanded=True):
+    with st.expander(t('inv.config'), expanded=True):
         c1, c2, c3 = st.columns(3)
 
         with c1:
-            data_fato = st.date_input("📅 Data do Fato *", value=datetime.now().date(),
+            data_fato = st.date_input(t('inv.fact_date'), value=datetime.now().date(),
                                        key="inv_data_fato")
-            hora_fato = st.time_input("🕐 Horário do Fato (opcional)",
+            hora_fato = st.time_input(t('inv.fact_time'),
                                        value=None, key="inv_hora_fato")
 
         with c2:
-            periodo_fato = st.selectbox("🌗 Período do Fato",
-                                         ["Diurno", "Noturno"], key="inv_periodo")
-            janela_horas = st.slider("⏱️ Janela temporal (horas)",
+            periodo_fato = st.selectbox(t('inv.fact_period'), ["Diurno", "Noturno"],
+                                        format_func=lambda k: t(f'common.period.{k}'),
+                                        key="inv_periodo")
+            janela_horas = st.slider(t('inv.time_window'),
                                       min_value=6, max_value=168, value=72,
                                       key="inv_janela")
 
         with c3:
-            ips_por_prov = st.slider("🔢 IPs por provedor",
+            ips_por_prov = st.slider(t('inv.ips_per_provider'),
                                       min_value=3, max_value=10, value=5,
                                       key="inv_ips_prov")
-            st.caption("IPv6 tem prioridade sobre IPv4")
+            st.caption(t('inv.ipv6_priority'))
 
     # ---- BOTÃO DE EXECUÇÃO ----
-    if st.button("🚀 Executar Análise Investigativa", type="primary",
+    if st.button(t('inv.run'), type="primary",
                   key="inv_executar"):
 
         if hora_fato is not None:
@@ -741,15 +743,14 @@ def render_analise_investigativa(df):
         else:
             dt_fato = datetime.combine(data_fato, datetime.min.time())
 
-        with st.spinner("Executando análise investigativa..."):
+        with st.spinner(t('inv.running')):
             provedores_sel, contagem_prov, pct_cobertura = selecionar_provedores(df)
 
             df_scored = calcular_score(
                 df, dt_fato, periodo_fato, contagem_prov,
                 janela_horas_max=float(janela_horas))
             if df_scored.attrs.get('score_falhas'):
-                st.warning(f"⚠️ {df_scored.attrs['score_falhas']} registro(s) não puderam ser "
-                           "pontuados e receberam Score 0. Detalhes no log da aplicação.")
+                st.warning(t('inv.score_failures', count=df_scored.attrs['score_falhas']))
 
             resultado_unicidade = detectar_usuario_unico(df_scored, dt_fato)
 
@@ -763,6 +764,11 @@ def render_analise_investigativa(df):
             resumo_narrativo = gerar_resumo_narrativo(
                 df_scored, df_selecionados, provedores_sel, contagem_prov, dt_fato, alvo)
 
+            # Calculados uma vez, no clique: no corpo das abas eles varriam o
+            # frame inteiro a cada rerun enquanto o resultado estivesse na tela.
+            v6_groups = agrupar_ipv6_por_prefixo(df_scored)
+            cgnat = detectar_cgnat(df_scored)
+
         st.session_state['inv_result'] = {
             'df_scored': df_scored,
             'provedores_sel': provedores_sel,
@@ -773,11 +779,13 @@ def render_analise_investigativa(df):
             'resumo_narrativo': resumo_narrativo,
             'dt_fato': dt_fato,
             'pct_cobertura': pct_cobertura,
+            'v6_groups': v6_groups,
+            'cgnat': cgnat,
         }
 
     # ---- EXIBIR RESULTADOS ----
     if 'inv_result' not in st.session_state:
-        st.info("📌 Configure os parâmetros acima e clique em **Executar Análise Investigativa**.")
+        st.info(t('inv.configure_hint'))
         return
 
     res = st.session_state['inv_result']
@@ -793,43 +801,39 @@ def render_analise_investigativa(df):
 
     # Aviso de cobertura (80% threshold)
     if pct_cobertura < 80 and provedores_sel:
-        st.warning(
-            f"⚠️ Os 3 provedores selecionados representam **{pct_cobertura}%** dos registros. "
-            "A lista pode conter acessos distribuídos entre muitos provedores, "
-            "o que pode indicar múltiplos usuários ou uso de infraestrutura intermediária."
-        )
+        st.warning(t('inv.low_coverage', pct=pct_cobertura))
     elif provedores_sel:
-        st.success(f"✅ Os {len(provedores_sel)} provedores selecionados cobrem **{pct_cobertura}%** dos registros.")
+        st.success(t('inv.good_coverage', count=len(provedores_sel), pct=pct_cobertura))
 
     # ---- MÉTRICAS RÁPIDAS ----
     mc1, mc2, mc3, mc4, mc5 = st.columns(5)
     with mc1:
-        st.metric("📋 Registros", len(df_scored))
+        st.metric(t('inv.m_records'), len(df_scored))
     with mc2:
-        st.metric("🏢 Provedores", len(provedores_sel))
+        st.metric(t('inv.m_providers'), len(provedores_sel))
     with mc3:
-        st.metric("📨 Selecionados", len(df_selecionados))
+        st.metric(t('inv.m_selected'), len(df_selecionados))
     with mc4:
         avg_score = df_selecionados['Score'].mean() if not df_selecionados.empty else 0
-        st.metric("⭐ Score Médio", f"{avg_score:.1f}")
+        st.metric(t('inv.m_avg_score'), f"{avg_score:.1f}")
     with mc5:
         n_v6 = df_scored['Tipo_IP'].eq('IPv6').sum() if 'Tipo_IP' in df_scored.columns else 0
         st.metric("🌐 IPv6", n_v6)
 
     # ---- ABAS DE RESULTADO ----
     tab_prov, tab_score, tab_unico, tab_selecionados, tab_atencao, tab_v6, tab_resumo = st.tabs([
-        "📋 Provedores",
-        "🏆 Score",
-        "👤 Usuário Único",
-        "📨 IPs Selecionados",
-        "⚠️ Atenção",
+        t('inv.tab_providers'),
+        t('inv.tab_score'),
+        t('inv.tab_unique'),
+        t('inv.tab_selected'),
+        t('inv.tab_attention'),
         "🌐 IPv6/CGNAT",
-        "📝 Resumo"
+        t('inv.tab_summary'),
     ])
 
     # ---- ABA 1: Provedores ----
     with tab_prov:
-        st.subheader("📋 Provedores Selecionados (Top 3)")
+        st.subheader(t('inv.providers_title'))
         if provedores_sel:
             total_validos = sum(contagem_prov.values()) or 1
             prov_data = []
@@ -838,21 +842,21 @@ def render_analise_investigativa(df):
                 prov_df = df_scored[df_scored['Ip_Dono'] == p] if 'Ip_Dono' in df_scored.columns else pd.DataFrame()
                 n_v6_p = prov_df['Tipo_IP'].eq('IPv6').sum() if 'Tipo_IP' in prov_df.columns else 0
                 prov_data.append({
-                    'Provedor': p,
-                    'Registros': qtd,
+                    t('inv.col_provider'): p,
+                    t('inv.col_records'): qtd,
                     'IPv6': n_v6_p,
                     'IPv4': qtd - n_v6_p,
-                    '% Total': f"{qtd / total_validos * 100:.1f}%",
+                    t('inv.col_pct_total'): f"{qtd / total_validos * 100:.1f}%",
                 })
-            df_prov = pd.DataFrame(prov_data).sort_values('Registros', ascending=False)
+            df_prov = pd.DataFrame(prov_data).sort_values(t('inv.col_records'), ascending=False)
             st.dataframe(df_prov, use_container_width=True, hide_index=True)
-            st.caption(f"Cobertura: **{pct_cobertura}%** de {total_validos} registros válidos")
+            st.caption(t('inv.coverage', pct=pct_cobertura, total=total_validos))
         else:
-            st.warning("Nenhum provedor selecionado")
+            st.warning(t('inv.no_provider'))
 
     # ---- ABA 2: Score Investigativo ----
     with tab_score:
-        st.subheader("🏆 Score Investigativo")
+        st.subheader(t('inv.score_title'))
         score_cols = ['Ip', 'Tipo_IP', 'Data', 'Ip_Dono', 'Ip_Regiao', 'Ip_Cidade',
                       'Ip_Proxy', 'Ip_Hospedagem', 'Periodo', 'Score']
         available_cols = [c for c in score_cols if c in df_scored.columns]
@@ -871,29 +875,29 @@ def render_analise_investigativa(df):
         )
         show_truncation(len(preview), len(df_show))
 
-        if prepare_button("⚙️ Preparar Score CSV", df_show, 'inv_score_csv'):
+        if prepare_button(t('inv.prepare_score_csv'), df_show, 'inv_score_csv'):
             # `to_csv` sem caminho ignora `encoding`: o BOM só existe
             # codificando aqui. E o valor vai sanitizado contra fórmulas.
             csv_score = sanitize_dataframe_for_csv(df_show).to_csv(
                 index=False, sep=';').encode('utf-8-sig')
-            st.download_button("📥 Baixar Score CSV", csv_score,
+            st.download_button(t('inv.download_score_csv'), csv_score,
                                "score_investigativo.csv", "text/csv", key="inv_dl_score")
 
     # ---- ABA 3: Usuário Único ----
     with tab_unico:
-        st.subheader("👤 Detecção de Usuário Único")
+        st.subheader(t('inv.unique_title'))
         score_unico = resultado_unicidade['score']
         indicadores = resultado_unicidade['indicadores']
 
         if score_unico >= 70:
             emoji, cor = "🟢", COLORS['success']
-            interpretacao = "Alta probabilidade de ser um único usuário"
+            interpretacao = t('inv.unique_high')
         elif score_unico >= 40:
             emoji, cor = "🟡", COLORS['warning']
-            interpretacao = "Probabilidade moderada - pode haver mais de um usuário"
+            interpretacao = t('inv.unique_medium')
         else:
             emoji, cor = "🔴", COLORS['danger']
-            interpretacao = "Baixa probabilidade - possível compartilhamento ou múltiplos dispositivos"
+            interpretacao = t('inv.unique_low')
 
         st.markdown(f"""
         <div style="background:linear-gradient(135deg,{COLORS['surface']},{COLORS['surface_elevated']});border:1px solid {COLORS['border']};
@@ -908,10 +912,10 @@ def render_analise_investigativa(df):
 
     # ---- ABA 4: IPs Selecionados ----
     with tab_selecionados:
-        st.subheader("📨 IPs Selecionados para Investigação")
+        st.subheader(t('inv.selected_title'))
 
         if df_selecionados.empty:
-            st.warning("Nenhum IP sugerido.")
+            st.warning(t('inv.no_suggested'))
         else:
             sel_cols = ['Provedor_Selecionado', 'Ip', 'Tipo_IP', 'Data', 'Ip_Dono',
                            'Ip_Regiao', 'Ip_Cidade', 'Periodo', 'Score']
@@ -919,7 +923,7 @@ def render_analise_investigativa(df):
             df_of_show = df_selecionados[available_of].copy().reset_index(drop=True)
             df_of_show['Score'] = df_of_show['Score'].fillna(0)
 
-            st.markdown(f"**{len(df_of_show)} IPs sugeridos** (IPv6 prioritário) - Selecione até **10** para exportação:")
+            st.markdown(t('inv.suggested_count', count=len(df_of_show)))
 
             options = []
             for i, row in df_of_show.iterrows():
@@ -928,7 +932,7 @@ def render_analise_investigativa(df):
                 options.append(label)
 
             selected = st.multiselect(
-                "Selecione os IPs para exportação",
+                t('inv.select_for_export'),
                 options=options,
                 default=options[:min(10, len(options))],
                 max_selections=10,
@@ -936,7 +940,7 @@ def render_analise_investigativa(df):
             )
 
             n_sel = len(selected)
-            st.caption(f"{'✅' if n_sel > 0 else '⚠️'} **{n_sel} de 10** selecionados")
+            st.caption(t('inv.selected_of', icon='✅' if n_sel > 0 else '⚠️', count=n_sel))
 
             st.dataframe(
                 df_of_show.style.background_gradient(subset=['Score'], cmap='RdYlGn', vmin=0, vmax=100),
@@ -951,27 +955,28 @@ def render_analise_investigativa(df):
                 csv_selecionados = sanitize_dataframe_for_csv(df_selected).to_csv(
                     index=False, sep=';').encode('utf-8-sig')
                 st.download_button(
-                    f"📥 Baixar {len(df_selected)} IPs Selecionados (CSV)",
+                    t('inv.download_selected', count=len(df_selected)),
                     csv_selecionados,
                     "ips_selecionados.csv", "text/csv", key="inv_dl_selecionados"
                 )
 
             st.divider()
-            st.markdown("**Resumo por Provedor:**")
+            st.markdown(t('inv.summary_by_provider'))
             if 'Provedor_Selecionado' in df_selecionados.columns:
                 resumo = df_selecionados.groupby('Provedor_Selecionado').agg(
                     Qtd=('Ip', 'count'),
                     IPv6=('Tipo_IP', lambda x: (x == 'IPv6').sum()) if 'Tipo_IP' in df_selecionados.columns else ('Ip', 'count'),
                     Score_Medio=('Score', 'mean')
                 ).sort_values('Score_Medio', ascending=False).reset_index()
-                resumo.columns = ['Provedor', 'Qtd IPs', 'IPv6', 'Score Médio']
-                resumo['Score Médio'] = resumo['Score Médio'].round(1)
+                col_score = t('inv.col_avg_score')
+                resumo.columns = [t('inv.col_provider'), t('inv.col_qty_ips'), 'IPv6', col_score]
+                resumo[col_score] = resumo[col_score].round(1)
                 st.dataframe(resumo, use_container_width=True, hide_index=True)
 
         # ---- ASSISTENTE AI ----
             st.divider()
-            st.markdown("### 🤖 Assistente AI")
-            st.caption("Consulte a AI para uma segunda opinião sobre a seleção de IPs")
+            st.markdown(t('inv.ai_title'))
+            st.caption(t('inv.ai_caption'))
 
             from ai_assistant import (
                 AI_MODELS,
@@ -997,16 +1002,15 @@ def render_analise_investigativa(df):
                                     f'<span class="badge badge-blue">{model_info["label"]}</span>',
                                     unsafe_allow_html=True)
                     else:
-                        st.warning(f"Modelo `{model_info['model']}` não encontrado. "
-                                   f"Execute: `ollama pull {model_info['model']}`")
+                        st.warning(t('inv.model_missing', model=model_info['model']))
                 else:
-                    st.error("🔴 Ollama offline. Inicie com `ollama serve`")
+                    st.error(t('inv.ollama_offline'))
 
             with col_ai2:
                 ai_btn_disabled = not status.get('online', False)
-                if st.button("🤖 Consultar AI", type="secondary", key="inv_ai_btn",
+                if st.button(t('inv.ask_ai'), type="secondary", key="inv_ai_btn",
                               disabled=ai_btn_disabled):
-                    with st.spinner("🤖 AI analisando dados..."):
+                    with st.spinner(t('inv.ai_running')):
                         resultado_ai = run_ai_analysis(
                             df_scored=df_scored,
                             provedores_sel=provedores_sel,
@@ -1025,86 +1029,89 @@ def render_analise_investigativa(df):
                 ai_res = st.session_state['inv_ai_result']
                 if ai_res['success']:
                     data = ai_res['data']
-                    st.markdown(f"**Modelo:** `{ai_res['model_used']}` | "
-                                f"**Tempo:** {ai_res['elapsed_seconds']:.1f}s | "
-                                f"**Confiança:** {data.get('confianca', 'N/A')}")
+                    st.markdown(t('inv.ai_meta', model=ai_res['model_used'],
+                                  seconds=f"{ai_res['elapsed_seconds']:.1f}",
+                                  confidence=data.get('confianca', 'N/A')))
                     if ai_res.get('fallback_used'):
-                        st.info(
-                            f"Fallback automático ativado: solicitado `{ai_res.get('requested_model')}`, "
-                            f"usado `{ai_res.get('model_used')}`."
-                        )
+                        st.info(t('operacional.fallback', requested=ai_res.get('requested_model'),
+                                  used=ai_res.get('model_used')))
                     for note in ai_res.get('notes', []):
                         st.info(note)
                     for alerta in data.get('alertas', []):
                         st.warning(alerta)
                     for prov in data.get('provedores', []):
-                        with st.expander(f"🏢 {prov['nome']} - {len(prov.get('ips_selecionados', []))} IPs "
-                                         f"({prov.get('percentual_cobertura', 0):.1f}%)", expanded=True):
+                        with st.expander(t('inv.ai_provider', name=prov['nome'],
+                                           count=len(prov.get('ips_selecionados', [])),
+                                           pct=f"{prov.get('percentual_cobertura', 0):.1f}"),
+                                         expanded=True):
                             st.caption(prov.get('justificativa', ''))
                             df_ai_ips = pd.DataFrame(prov.get('ips_selecionados', []))
                             if not df_ai_ips.empty:
                                 st.dataframe(df_ai_ips, hide_index=True, use_container_width=True)
-                    with st.expander("📝 Resumo Narrativo (AI)", expanded=False):
+                    with st.expander(t('inv.ai_narrative'), expanded=False):
                         st.code(data.get('resumo_narrativo', ''), language=None)
-                        st.download_button("📥 Baixar Resumo AI (TXT)",
+                        st.download_button(t('inv.ai_download'),
                             data.get('resumo_narrativo', '').encode('utf-8'),
                             "resumo_ai.txt", "text/plain", key="inv_dl_ai_resumo")
                 else:
                     for note in ai_res.get('notes', []):
                         st.warning(note)
-                    st.error(f"Erro na análise AI: {ai_res.get('error', 'Desconhecido')}")
+                    st.error(t('inv.ai_error', error=ai_res.get('error') or t('inv.unknown')))
 
     # ---- ABA 5: IPs de Atenção ----
     with tab_atencao:
-        st.subheader("⚠️ IPs de Atenção")
-        st.caption("IPs que merecem análise individual - fora dos top 3 provedores mas potencialmente relevantes")
+        st.subheader(t('inv.attention_title'))
+        st.caption(t('inv.attention_caption'))
 
         if df_atencao.empty:
-            st.success("✅ Nenhum IP de atenção detectado fora dos provedores selecionados.")
+            st.success(t('inv.no_attention'))
         else:
             st.dataframe(df_atencao, use_container_width=True, hide_index=True)
-            st.caption(f"{len(df_atencao)} IP(s) de atenção encontrados")
+            st.caption(t('inv.attention_count', count=len(df_atencao)))
 
     # ---- ABA 6: IPv6 /64 e CGNAT ----
     with tab_v6:
-        st.subheader("🌐 Análise IPv6 /64 e Detecção CGNAT")
+        st.subheader(t('inv.v6_title'))
 
         # IPv6 /64 Grouping
-        st.markdown("**Agrupamento por Prefixo IPv6 /64**")
-        st.caption("IPs do mesmo prefixo /64 provavelmente vêm do mesmo roteador/rede doméstica")
-        df_v6_groups = agrupar_ipv6_por_prefixo(df_scored)
+        st.markdown(t('inv.v6_grouping'))
+        st.caption(t('inv.v6_caption'))
+        df_v6_groups = res.get('v6_groups')
+        if df_v6_groups is None:  # resultado de antes desta versão
+            df_v6_groups = agrupar_ipv6_por_prefixo(df_scored)
         if not df_v6_groups.empty:
             st.dataframe(df_v6_groups, use_container_width=True, hide_index=True)
             n_prefixes = len(df_v6_groups)
             n_single = (df_v6_groups['Qtd_IPs'] == 1).sum()
-            st.markdown(f"**{n_prefixes}** prefixos /64 encontrados. "
-                        f"**{n_prefixes - n_single}** prefixos com múltiplos IPs (forte indício de mesmo roteador).")
+            st.markdown(t('inv.v6_summary', prefixes=n_prefixes, multi=n_prefixes - n_single))
         else:
-            st.info("Nenhum endereço IPv6 encontrado nos dados.")
+            st.info(t('inv.no_ipv6'))
 
         st.divider()
 
         # CGNAT Detection
-        st.markdown("**Detecção de CGNAT (Carrier-Grade NAT)**")
-        st.caption("IPs na faixa 100.64.0.0/10 são compartilhados por múltiplos usuários e NÃO identificam um indivíduo")
-        cgnat_result = detectar_cgnat(df_scored)
+        st.markdown(t('inv.cgnat_title'))
+        st.caption(t('inv.cgnat_caption'))
+        cgnat_result = res.get('cgnat') or detectar_cgnat(df_scored)
         if cgnat_result['count'] > 0:
-            st.error(cgnat_result['warning'])
-            st.markdown(f"IPs CGNAT: `{'`, `'.join(cgnat_result['ips'][:10])}`")
+            st.error(t('inv.cgnat_warning', count=cgnat_result['count']))
+            cgnat_shown = cgnat_result['ips'][:10]
+            st.markdown(t('inv.cgnat_ips', ips='`, `'.join(cgnat_shown)))
+            show_truncation(len(cgnat_shown), len(cgnat_result['ips']), 'IPs')
         else:
-            st.success("✅ Nenhum IP em range CGNAT detectado.")
+            st.success(t('inv.no_cgnat'))
 
     # ---- ABA 7: Resumo Narrativo ----
     with tab_resumo:
-        st.subheader("📝 Resumo Narrativo")
-        st.caption("Texto descritivo gerado automaticamente - copie e adapte conforme necessário")
+        st.subheader(t('inv.summary_title'))
+        st.caption(t('inv.summary_caption'))
 
         if resumo_narrativo:
             st.code(resumo_narrativo, language=None)
             st.download_button(
-                "📥 Baixar Resumo (TXT)",
+                t('inv.download_summary'),
                 resumo_narrativo.encode('utf-8'),
                 "resumo_investigativo.txt", "text/plain", key="inv_dl_resumo"
             )
         else:
-            st.info("Resumo não disponível.")
+            st.info(t('inv.no_summary'))

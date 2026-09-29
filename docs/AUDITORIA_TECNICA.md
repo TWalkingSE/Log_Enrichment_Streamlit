@@ -136,10 +136,24 @@ do laudo. Regressões em `tests/test_evidencia.py`.
 | S8 | Bloqueio de login por sessão (nova sessão zerava) | **Corrigido** (teto global) |
 | S9 | Air-gapped não bloqueava VirusTotal/AbuseIPDB/Shodan/Tor/rDNS | **Corrigido** |
 
-Pendências registradas como roadmap: dividir `data_processor.py` e
-`advanced_analysis.py`; i18n das páginas (259 chaves sem uso); testes dos parsers
-Discord e Preservation Google; smoke tests das páginas; job Windows no CI;
-sessão persistida `current` global ao processo (exige identidade por usuário).
+Pendências do Lote 9, todas resolvidas no Lote 10:
+
+| Pendência | Resolução |
+|-----------|-----------|
+| Sessão `current` restaurada para qualquer usuário | Restauração só com clique, descrevendo alvo/registros/data |
+| Texto livre sem data / data no IP errado | Extração por linha (`data_processing/parsers/texto.py`) |
+| Parsers Discord e Preservation Google sem teste | `tests/test_parsers_plataformas.py` |
+| `data_processor.py` e `advanced_analysis.py` monolíticos | Fachadas sobre `data_processing/`, `analysis/heuristics.py` e `intel/` |
+| Haversine duplicado; `iterrows` em saltos/relay | `analysis/_geo_math.py`; vetorizados com saída idêntica |
+| i18n incompleto (259 chaves sem uso) | Interface pt/en/es; chaves órfãs removidas; `tests/test_i18n.py` |
+| Sem smoke test das páginas | `tests/test_paginas.py` (15 páginas × 3 idiomas) |
+| CI só em Linux | Job `windows-latest` |
+
+Achados do Lote 10: Visão Geral contava alto risco com Score ≥ 50; Correlação
+exibia 20 cadeias de relay como total; Operacional oferecia períodos que nunca
+casavam no score; Entrada gravava `unknown` como alvo em inglês (o parser do
+Discord só reconhece `desconhecido`); comparação lado a lado somava `Ip_Proxy`
+textual; listas de IPs cortadas sem total (A/B, CGNAT, sparklines).
 
 ## 4. Roadmap 30 / 60 / 90 dias
 
@@ -181,7 +195,7 @@ python -m pytest tests -q
 
 Critérios de aceite do plano: exports sanitizados, HTML escapado, paths em `output/`, audit com cadeia, testes de regressão nos helpers.
 
-**Última verificação:** 350 testes (341 rápidos + 9 `slow`), Lote 9.
+**Última verificação:** 418 testes (409 rápidos + 9 `slow`), Lote 10.
 
 ## 7. Mapa de módulos novos (referência)
 

@@ -858,7 +858,7 @@ Teste de carga sobre dataset de tamanho real — 202.128 linhas, alguns minutos:
 python -m pytest tests/test_load.py -m slow
 ```
 
-**350 testes automatizados** (341 rápidos + 9 marcados `slow`) organizados em `tests/` por domínio, cobrindo: validação de IP, IPs privados, rDNS, fuso horário, parsers (WhatsApp, Meta, Google, genérico e HTML), risk score, padrões temporais, geofencing, correlação cruzada, números descartáveis, cliente API, definição de colunas, **validators** (schema, domain, CSV injection), **VPN heuristics**, **IP confidence**, **life patterns**, **impossible jumps**, **base locations**, **movement area**, **infrastructure classification**, **audit logger**, **report generator** (rápido/profissional), **cache compression**, **relay chains**, **device fingerprinting**, **shared Wi-Fi**, **digital silence**, **timezone validation**, **data health**, **helpers de período**, **score unificado**, **VPN timing**, **correlação temporal**, **perfil de uso**, **precisão geográfica**, **KML animado**, **AI assistant** (prompts, validação, offline), **detecção tipo IP**, **ZIP security** (bomb detection, path traversal), **input sanitization**, **geofence coordinate validation**, updater Tor oficial com fallback de cache e smoke tests cobrindo entrada simples, relatório, exportação XLSX e enriquecimento de interceptação. A suíte `slow` ([`tests/test_load.py`](tests/test_load.py)) roda análises, relatório e exportação sobre 202.128 linhas, medindo pico de memória e tempo — é ela que pega regressões de complexidade que fixtures de poucas linhas não revelam.
+**418 testes automatizados** (409 rápidos + 9 marcados `slow`) organizados em `tests/` por domínio, cobrindo: validação de IP, IPs privados, rDNS, fuso horário, parsers (WhatsApp, Meta, Google, genérico e HTML), risk score, padrões temporais, geofencing, correlação cruzada, números descartáveis, cliente API, definição de colunas, **validators** (schema, domain, CSV injection), **VPN heuristics**, **IP confidence**, **life patterns**, **impossible jumps**, **base locations**, **movement area**, **infrastructure classification**, **audit logger**, **report generator** (rápido/profissional), **cache compression**, **relay chains**, **device fingerprinting**, **shared Wi-Fi**, **digital silence**, **timezone validation**, **data health**, **helpers de período**, **score unificado**, **VPN timing**, **correlação temporal**, **perfil de uso**, **precisão geográfica**, **KML animado**, **AI assistant** (prompts, validação, offline), **detecção tipo IP**, **ZIP security** (bomb detection, path traversal), **input sanitization**, **geofence coordinate validation**, updater Tor oficial com fallback de cache smoke tests cobrindo entrada simples, relatório, exportação XLSX e enriquecimento de interceptação, e smoke tests de **todas as páginas nos três idiomas** ([`tests/test_paginas.py`](tests/test_paginas.py)) mais a paridade dos locales ([`tests/test_i18n.py`](tests/test_i18n.py)). A suíte `slow` ([`tests/test_load.py`](tests/test_load.py)) roda análises, relatório e exportação sobre 202.128 linhas, medindo pico de memória e tempo — é ela que pega regressões de complexidade que fixtures de poucas linhas não revelam.
 
 ## 🔐 Governança
 
@@ -923,6 +923,18 @@ Regressões em [`tests/test_evidencia.py`](tests/test_evidencia.py).
 **Limpeza**
 - Removidos `docs/Portuguese/` (cópia antiga dos `.md` da raiz), `analysis/io_scan.py`
   e funções sem uso; `WATCH_FOLDER` (nunca lido) saiu do `.env.example`
+
+**Sessão, texto livre e interface**
+- A sessão gravada não é mais restaurada ao abrir o app (ela é uma só para todos os
+  usuários da instalação): a Entrada descreve alvo/registros/data e restaura com um clique
+- Texto livre: cada IP recebe a data da própria linha (antes a n-ésima data ia para o
+  n-ésimo IP, e uma linha sem data deslocava todas as seguintes)
+- Interface inteira em pt/en/es; o relatório (laudo), os prompts da IA e as mensagens do
+  pipeline seguem em português
+- `data_processor` e `advanced_analysis` viraram fachadas sobre `data_processing/`
+  (um parser por plataforma), `analysis/heuristics.py` e `intel/`; saltos impossíveis e
+  relay chains vetorizados, com saída idêntica à anterior
+- CI também em Windows
 
 ### v5.3 (2026)
 

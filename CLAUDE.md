@@ -108,6 +108,16 @@ erro quando for `False`.
 inteira (`infer_dayfirst`). Nunca `pd.to_datetime(x)` sem formato, nem escolher
 o formato pela primeira linha.
 
+**Toda string de interface passa por `t()`** ([i18n.py](i18n.py)), com a
+chave nos três `locales/*.json`. Opções de `selectbox`/`multiselect` são
+**códigos internos** com `format_func=lambda k: t(...)` — a lógica compara o
+código, nunca o texto traduzido (o filtro "Todos" quebrou em inglês por isso).
+Valor que vai para o **dado** ou para o **laudo** (Alvo `desconhecido`,
+classificação, relatório HTML, prompts da IA) fica em português fixo: o parser
+do Discord reconhece `desconhecido`, não `unknown`. `tests/test_i18n.py` exige
+paridade de chaves/placeholders e que toda chave usada exista;
+`tests/test_paginas.py` renderiza as 15 páginas nos três idiomas.
+
 **Nunca `except Exception: pass`.** Isso engole `MemoryError` e apresenta "sem
 dados" como se estivesse tudo bem. Use `logger.exception` e mostre o erro.
 
@@ -185,6 +195,9 @@ funde os resultados no DataFrame.
   `st.set_page_config`. Não o faça importar `file_handler` nem o pipeline —
   constantes do export moram em [file_handler.py](file_handler.py) e as páginas
   as buscam de lá diretamente.
+- Script de `AppTest.from_function` **sem acentos**: no Windows ele é gravado
+  em cp1252 e lido como UTF-8, e a página sai vazia sem exceção. Por isso
+  `tests/test_paginas.py` também exige que a página renderize algo.
 - O hash de integridade do relatório aparece em laudos já entregues. Qualquer
   mudança no seu cálculo precisa ser provada byte-a-byte idêntica
   (`tests/test_integrations.py::TestIntegrityHash`).

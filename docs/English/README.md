@@ -92,7 +92,7 @@ tests/
 python -m pytest tests -q
 ```
 
-350 automated tests (341 fast + 9 `slow` load tests over 202,128 rows).
+418 automated tests (409 fast + 9 `slow` load tests over 202,128 rows), including every page rendered in pt/en/es.
 
 ## Docs
 
