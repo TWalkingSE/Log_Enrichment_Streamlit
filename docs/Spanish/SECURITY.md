@@ -26,12 +26,12 @@ Use un canal privado del mantenedor o, si el repositorio tiene GitHub Security A
 
 Autenticación **opcional** vía `.env`:
 
-- **`AUTH_PASSWORD_HASH` (recomendado):** hash **Argon2** o **bcrypt** generado localmente (passlib).
-- **Legado:** digest **SHA-256** hexadecimal (64 caracteres), UTF-8.
+- **`AUTH_PASSWORD_HASH` (recomendado):** hash **Argon2** o **bcrypt** generado localmente. Los hashes de versiones anteriores (con `passlib`) siguen siendo válidos.
+- **SHA-256 legado (64 caracteres hex): ya no se acepta** desde la v5.4 — sin sal, es rápido de atacar por fuerza bruta. La pantalla de login lo explica y bloquea el acceso hasta regenerar el hash.
 - **`AUTH_PASSWORD`:** texto plano — solo desarrollo.
 
 ```bash
-python -c "from passlib.hash import argon2; print(argon2.hash(input('Contraseña: ')))"
+python -c "from auth_password import hash_password; print(hash_password(input('Contraseña: ')))"
 ```
 
 O el script del repositorio:

@@ -324,7 +324,7 @@ Módulo especializado para investigação policial:
 | 📋 **Audit Trail** | Últimos 50 eventos, verificação de integridade do log forense |
 
 **Segurança:**
-- Autenticação com Argon2/bcrypt (recomendado) ou hash SHA-256 legado, rate limit contra brute force
+- Autenticação com Argon2/bcrypt (o hash SHA-256 legado não é mais aceito), rate limit contra brute force
 - API Keys via `.env`: IP-API, VirusTotal, AbuseIPDB, Shodan
 - Log forense append-only com hash SHA-256
 - Toggle para verificação automática de Tor exit nodes e atualização manual sob demanda

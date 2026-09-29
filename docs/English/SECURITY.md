@@ -26,14 +26,14 @@ Use a private channel to the maintainer or, if the repository has GitHub Securit
 
 Optional UI authentication via `.env`:
 
-- **`AUTH_PASSWORD_HASH` (recommended):** set an **Argon2** or **bcrypt** hash produced locally (passlib). Never store a plaintext password here.
-- **Legacy:** a **SHA-256** hexadecimal digest (64 chars) of the UTF-8 password is still accepted; comparison uses `secrets.compare_digest`.
+- **`AUTH_PASSWORD_HASH` (recommended):** set an **Argon2** or **bcrypt** hash produced locally. Never store a plaintext password here. Hashes produced by earlier versions (with `passlib`) remain valid.
+- **Legacy SHA-256 (64 hex chars): no longer accepted** since v5.4 — unsalted, it is fast to brute-force. The login screen explains this and blocks access until the hash is regenerated.
 - **`AUTH_PASSWORD`:** plaintext in `.env` — development only; verification uses SHA-256 digests with a timing-safe comparison. **Do not use in production.**
 
 Generate an Argon2 hash for `.env`:
 
 ```bash
-python -c "from passlib.hash import argon2; print(argon2.hash(input('Password: ')))"
+python -c "from auth_password import hash_password; print(hash_password(input('Password: ')))"
 ```
 
 Or use the repo script:

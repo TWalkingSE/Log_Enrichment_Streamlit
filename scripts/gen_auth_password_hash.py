@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Generate AUTH_PASSWORD_HASH (Argon2) for .env — run from repo root."""
+"""Generate AUTH_PASSWORD_HASH (Argon2id) for .env — run from repo root."""
 
 import getpass
+import os
 import sys
 
-from passlib.hash import argon2
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from auth_password import hash_password  # noqa: E402
 
 
 def main() -> None:
@@ -21,7 +24,7 @@ def main() -> None:
         print('Passwords do not match.', file=sys.stderr)
         sys.exit(1)
     print('Add to .env as AUTH_PASSWORD_HASH=<value below>')
-    print(argon2.hash(pw))
+    print(hash_password(pw))
 
 
 if __name__ == '__main__':

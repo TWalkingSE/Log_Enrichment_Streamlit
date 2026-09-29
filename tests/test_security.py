@@ -99,29 +99,50 @@ class TestZIPSecurity(unittest.TestCase):
 
 
 class TestAuthPassword(unittest.TestCase):
-    def test_argon2_verify_ok(self):
-        from passlib.hash import argon2
-        from auth_password import verify_stored_password_hash
+    # Gerados pelo passlib, usado até a v5.4: quem já tem AUTH_PASSWORD_HASH
+    # configurado não pode ficar trancado para fora com a troca de biblioteca.
+    PASSLIB_ARGON2 = ('$argon2id$v=19$m=65536,t=3,p=4$JaQUAoDwfo9RihGC0No7xw$'
+                      'up1H6C83guTkI3mbtJ9pzNTStTcQzIMW9n8N8nCB418')
+    PASSLIB_BCRYPT = '$2b$12$KAIqmFbNCOJJlxVAoJq0gO35pnuMvxhuU0Z/T2dX6DasE13tAxUOq'
+    PASSLIB_BCRYPT_2Y = '$2y$12$otsYsO5WOINffnaTmQDuz.LDdYkjkhCN7ysRvowH5w59LXxT1Sp8O'
 
-        h = argon2.hash('secret123')
+    def test_argon2_verify_ok(self):
+        from auth_password import hash_password, verify_stored_password_hash
+
+        h = hash_password('secret123')
+        self.assertTrue(h.startswith('$argon2id$'))
         self.assertTrue(verify_stored_password_hash('secret123', h))
         self.assertFalse(verify_stored_password_hash('wrong', h))
 
-    def test_legacy_sha256_hex(self):
-        import hashlib
+    def test_hashes_antigos_do_passlib_continuam_validos(self):
         from auth_password import verify_stored_password_hash
+
+        for h in (self.PASSLIB_ARGON2, self.PASSLIB_BCRYPT, self.PASSLIB_BCRYPT_2Y):
+            self.assertTrue(verify_stored_password_hash('senha-antiga', h), h[:7])
+            self.assertFalse(verify_stored_password_hash('outra', h), h[:7])
+
+    def test_sha256_legado_nao_e_mais_aceito(self):
+        import hashlib
+        from auth_password import is_legacy_sha256_hash, verify_stored_password_hash
 
         h = hashlib.sha256(b'legacy-pass').hexdigest()
-        self.assertTrue(verify_stored_password_hash('legacy-pass', h))
-        self.assertFalse(verify_stored_password_hash('other', h))
+        self.assertFalse(verify_stored_password_hash('legacy-pass', h))
+        self.assertTrue(is_legacy_sha256_hash(h))
+        self.assertFalse(is_legacy_sha256_hash(self.PASSLIB_ARGON2))
 
     def test_bcrypt_hash_verify(self):
-        from passlib.hash import bcrypt
+        import bcrypt
         from auth_password import verify_stored_password_hash
 
-        h = bcrypt.hash('bcrypt-secret')
+        h = bcrypt.hashpw(b'bcrypt-secret', bcrypt.gensalt()).decode()
         self.assertTrue(verify_stored_password_hash('bcrypt-secret', h))
         self.assertFalse(verify_stored_password_hash('no', h))
+
+    def test_hash_malformado_nao_quebra(self):
+        from auth_password import verify_stored_password_hash
+
+        self.assertFalse(verify_stored_password_hash('x', '$argon2id$lixo'))
+        self.assertFalse(verify_stored_password_hash('x', '$2b$lixo'))
 
     def test_plain_env_compares_digest(self):
         from auth_password import verify_plain_env_password

@@ -66,7 +66,8 @@
     "protected_access": "Acceso protegido por contraseña",
     "too_many_attempts": "Demasiados intentos. Intente de nuevo en {remaining}s.",
     "locked": "Demasiados intentos. Bloqueado por 5 minutos.",
-    "wrong_password": "Contraseña incorrecta. {remaining} intentos restantes."
+    "wrong_password": "Contraseña incorrecta. {remaining} intentos restantes.",
+    "legacy_hash": "El AUTH_PASSWORD_HASH configurado usa el formato antiguo (SHA-256 sin sal), que ya no se acepta. Genere un nuevo hash con `python scripts/gen_auth_password_hash.py` y reemplace el valor en `.env`."
   },
   "nav": {
     "data": "📥 Datos",

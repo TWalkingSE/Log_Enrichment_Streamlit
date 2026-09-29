@@ -14,7 +14,9 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 load_dotenv()
 
-from auth_password import verify_stored_password_hash, verify_plain_env_password
+from auth_password import (
+    is_legacy_sha256_hash, verify_plain_env_password, verify_stored_password_hash,
+)
 from i18n import t, get_lang, set_lang, SUPPORTED_LANGUAGES
 
 # ============================================================
@@ -135,6 +137,12 @@ init_session_state()
 # ============================================================
 if (AUTH_PASSWORD or AUTH_PASSWORD_HASH) and not st.session_state.authenticated:
     auth_header()
+
+    # Formato descontinuado: dizer o que fazer, em vez de "senha incorreta".
+    if AUTH_PASSWORD_HASH and is_legacy_sha256_hash(AUTH_PASSWORD_HASH):
+        logger.error("AUTH_PASSWORD_HASH no formato SHA-256 legado; login bloqueado.")
+        st.error(t('auth.legacy_hash'))
+        st.stop()
 
     if 'login_attempts' not in st.session_state:
         st.session_state.login_attempts = 0

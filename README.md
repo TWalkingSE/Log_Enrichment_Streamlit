@@ -270,7 +270,7 @@ Módulo especializado para uso investigativo policial:
 - **GeoJSON** — formato padrão GIS
 
 ### 🔒 Segurança
-- **Autenticação com Argon2/bcrypt (recomendado)** em `AUTH_PASSWORD_HASH`; hash SHA-256 hex (64 caracteres) ainda aceito como legado
+- **Autenticação com Argon2/bcrypt** em `AUTH_PASSWORD_HASH`; o hash SHA-256 hex legado (sem salt) não é mais aceito — a tela de login orienta a regerar
 - **Rate limit de login**: 5 tentativas, bloqueio de 5 minutos após exceder
 - **`AUTH_PASSWORD`**: apenas para dev; em produção use `AUTH_PASSWORD_HASH` gerado com `python scripts/gen_auth_password_hash.py` (ver [SECURITY.md](SECURITY.md))
 - **Fórmula injetada (CSV e Excel)**: `sanitize_dataframe_for_csv` aplicado dentro
@@ -641,7 +641,7 @@ Runtime — todas fixadas em [`requirements.txt`](requirements.txt):
 | pdfplumber | Parsing de PDFs de entrada (Discord, TikTok) |
 | jinja2 | Template do relatório ([`templates/report_template.html`](templates/report_template.html)) |
 | pydantic | Structured output do Assistente AI |
-| passlib / bcrypt | Hash de senha (Argon2 recomendado) |
+| argon2-cffi / bcrypt | Hash de senha (Argon2 recomendado) |
 | python-dotenv | Carregamento de variáveis de ambiente |
 | pydeck | Requisito do próprio Streamlit (`st.pydeck_chart`); o projeto não usa mais diretamente |
 
@@ -667,7 +667,7 @@ Sem dependência de pacote:
 | `ABUSEIPDB_API_KEY` | API Key do AbuseIPDB (free: 1000 checks/dia) | (vazio) |
 | `SHODAN_API_KEY` | API Key do Shodan (serviços e portas expostas) | (vazio) |
 | `AUTH_PASSWORD` | Senha em texto plano (só desenvolvimento) | (vazio) |
-| `AUTH_PASSWORD_HASH` | Hash Argon2/bcrypt (recomendado) ou SHA-256 hex legado | (vazio) |
+| `AUTH_PASSWORD_HASH` | Hash Argon2 (recomendado) ou bcrypt | (vazio) |
 | `TZ_OFFSET_HOURS` | Offset UTC do fuso horário | `-3` |
 | `TZ_LABEL` | Label customizado do fuso | Auto |
 
@@ -755,7 +755,7 @@ Log Enrichment/
 ├── interception_parser.py         # Parser de interceptação telemática (HTML WhatsApp)
 ├── html_report_generator.py       # Relatório HTML/PDF + hash de integridade
 ├── export_ioc.py                  # Exportação IOC (txt/csv) e bundle STIX 2.1
-├── auth_password.py               # Verificação de senha (Argon2/bcrypt/SHA-256 legado)
+├── auth_password.py               # Verificação de senha (Argon2/bcrypt)
 ├── templates/report_template.html # Template Jinja2 do relatório
 ├── scripts/                       # Utilitários de linha de comando
 │   ├── enrich_worker.py           # Worker headless (filas / multi-usuário)

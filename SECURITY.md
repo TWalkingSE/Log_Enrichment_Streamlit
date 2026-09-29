@@ -28,14 +28,14 @@ Use um canal privado do mantenedor ou, se o repositório estiver com GitHub Secu
 
 A UI usa autenticação **opcional** via `.env`:
 
-- **`AUTH_PASSWORD_HASH` (recomendado):** coloque um hash **Argon2** ou **bcrypt** gerado localmente (passlib). O valor nunca deve ser uma senha em claro.
-- **Legado:** um hash **SHA-256** em hexadecimal (64 caracteres), da senha em UTF-8, ainda é aceito para compatibilidade; a comparação usa `secrets.compare_digest`.
+- **`AUTH_PASSWORD_HASH` (recomendado):** coloque um hash **Argon2** ou **bcrypt** gerado localmente. O valor nunca deve ser uma senha em claro. Hashes gerados por versões anteriores (com `passlib`) continuam válidos.
+- **SHA-256 legado (64 caracteres hex): não é mais aceito** desde a v5.4 — sem salt, é rápido de atacar por força bruta. A tela de login avisa e bloqueia o acesso até o hash ser regerado.
 - **`AUTH_PASSWORD`:** senha em texto plano no `.env` — só para desenvolvimento; comparação via digest SHA-256 com comparação em tempo constante. **Não use em produção.**
 
 Gerar hash Argon2 para colar no `.env` (substitua `sua_senha` ou use prompt interativo):
 
 ```bash
-python -c "from passlib.hash import argon2; print(argon2.hash(input('Senha: ')))"
+python -c "from auth_password import hash_password; print(hash_password(input('Senha: ')))"
 ```
 
 Ou, com o script do repositório:
