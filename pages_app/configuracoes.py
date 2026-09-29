@@ -54,14 +54,14 @@ def page_configuracoes():
         with c1:
             st.subheader(t('configuracoes.api_title'))
             air_gapped = st.toggle(
-                "🔒 Air-gapped (somente cache local)",
+                t('configuracoes.air_gapped'),
                 value=bool(st.session_state.get('air_gapped', False)),
                 key="cfg_air_gapped",
-                help="Desativa chamadas externas à IP-API. Use com ip_cache.json pré-populado.",
+                help=t('configuracoes.air_gapped_help'),
             )
             st.session_state.air_gapped = air_gapped
             if air_gapped:
-                st.warning("Modo air-gapped ativo: IPs sem cache local não serão enriquecidos.")
+                st.warning(t('configuracoes.air_gapped_active'))
             api_key = st.text_input(
                 t('configuracoes.api_key_label'),
                 value=st.session_state.api_key, type="password",
@@ -69,7 +69,7 @@ def page_configuracoes():
                 disabled=air_gapped)
             st.session_state.api_key = api_key
             if air_gapped:
-                st.info("API Key ignorada em modo air-gapped.")
+                st.info(t('configuracoes.api_key_ignored'))
             elif api_key:
                 st.success(t('configuracoes.api_key_configured'))
             else:
@@ -113,7 +113,7 @@ def page_configuracoes():
                             st.rerun()
                 except (OSError, ValueError) as e:
                     logger.exception("Erro ao ler cache")
-                    st.warning(f"⚠️ Cache de IPs ilegível: {e}")
+                    st.warning(t('configuracoes.cache_unreadable', error=e))
 
             signed_up = st.file_uploader(
                 t('configuracoes.import_signed_cache'),
@@ -223,16 +223,24 @@ def page_configuracoes():
 
         with c2:
             st.subheader(t('configuracoes.formats_title'))
-            with st.expander("Formato 1: Genérico (Lista de IPs)"):
-                st.code("198.51.100.20\n2001:db8:18bf:9681:1:0:70f2:df19\n198.51.100.18", language=None)
-            with st.expander("Formato 2: Meta Platforms (Instagram/Facebook)"):
-                st.code("IP Address\n198.51.100.10:22859\nTime\n2025-09-29 11:15:01 UTC", language=None)
-            with st.expander("Formato 3: WhatsApp"):
-                st.code("Time\n2025-12-10 18:58:48 UTC\nIP Address\n2001:db8:8e90:866e:d4ba:a89a:bcd8:8dc7", language=None)
-            with st.expander("Formato 4: Google"):
-                st.code("IP ACTIVITY\n\nTimestamp   IP Address  Activity Type\n2023-02-25 04:34:32 Z   198.51.100.18    Login", language=None)
-            with st.expander("Formato 5: TikTok (Events IP Data)"):
-                st.code("Date: 27/07/2026 03:04:43PM (UTC +00)\nIP: 203.0.113.45\nEvent: video_play\nCountry: Brazil", language=None)
+            # Os mesmos exemplos de "Carregar exemplo" na Entrada — antes esta
+            # lista era uma cópia à parte e não tinha Discord nem Preservation.
+            from data_processor import (
+                FORMATO_1, FORMATO_2, FORMATO_3, FORMATO_4, FORMATO_DISCORD,
+                FORMATO_PRESERVATION_GOOGLE, FORMATO_TIKTOK,
+            )
+            exemplos = [
+                (t('configuracoes.format_generic'), FORMATO_1),
+                ("Meta Platforms (Instagram/Facebook)", FORMATO_2),
+                ("WhatsApp", FORMATO_3),
+                ("Google", FORMATO_4),
+                ("Preservation Google", FORMATO_PRESERVATION_GOOGLE),
+                ("Discord", FORMATO_DISCORD),
+                ("TikTok (Events IP Data)", FORMATO_TIKTOK),
+            ]
+            for n, (nome, exemplo) in enumerate(exemplos, start=1):
+                with st.expander(t('configuracoes.format_n', n=n, name=nome)):
+                    st.code(exemplo.strip(), language=None)
             st.subheader(t('configuracoes.output_formats_title'))
             st.markdown(t('configuracoes.output_formats'))
 
@@ -354,17 +362,12 @@ def page_configuracoes():
 
         st.divider()
         st.markdown(t('configuracoes.ai_quick_guide'))
-        st.code("""# 1. Instalar Ollama (Windows: baixe em https://ollama.com)
-# 2. Baixar o modelo desejado
-ollama pull qwen3.5:4b           # Lite (8GB VRAM)
-ollama pull qwen3.5:9b-q8_0     # Standard (16GB VRAM)
-ollama pull qwen3.5:27b-q4_K_M  # Premium (24GB VRAM)
-
-# 3. Verificar se está rodando
-ollama list
-
-# 4. No app, use primeiro: Testar Conexão
-# 5. Depois rode: Teste de Inferência""", language="bash")
+        st.code(
+            t('configuracoes.ai_quick_guide_code') + "\n"
+            "ollama pull qwen3.5:4b           # Lite (8GB VRAM)\n"
+            "ollama pull qwen3.5:9b-q8_0     # Standard (16GB VRAM)\n"
+            "ollama pull qwen3.5:27b-q4_K_M  # Premium (24GB VRAM)\n\n"
+            + t('configuracoes.ai_quick_guide_code_end'), language="bash")
 
     with tab_brand:
         import base64
@@ -443,9 +446,11 @@ ollama list
             st.markdown(
                 f"<div style='padding:14px;border-radius:8px;background:#0f172a;color:#f1f5f9;"
                 f"border-left:4px solid {primary};font-family:Segoe UI,sans-serif;'>"
-                f"<div style='color:{primary};font-weight:700;font-size:1rem;'>Exemplo de Título</div>"
-                f"<div style='font-size:0.85rem;margin-top:6px;'>Texto de exemplo com "
-                f"<span style='color:{accent};font-weight:600;'>acento</span> aplicado.</div>"
+                f"<div style='color:{primary};font-weight:700;font-size:1rem;'>"
+                f"{t('configuracoes.brand_example_title')}</div>"
+                f"<div style='font-size:0.85rem;margin-top:6px;'>{t('configuracoes.brand_example_text')} "
+                f"<span style='color:{accent};font-weight:600;'>{t('configuracoes.brand_example_accent')}</span> "
+                f"{t('configuracoes.brand_example_applied')}</div>"
                 f"</div>", unsafe_allow_html=True)
 
     with tab_audit:
@@ -458,7 +463,7 @@ ollama list
                 # Total real do arquivo, não o tamanho da fatia exibida.
                 total_eventos = count_audit_events()
                 st.markdown(t('configuracoes.audit_events', count=total_eventos))
-                show_truncation(len(trail), total_eventos, 'eventos')
+                show_truncation(len(trail), total_eventos, t('configuracoes.unit_events'))
                 trail_df = pd.DataFrame(trail)
                 if 'timestamp' in trail_df.columns:
                     trail_df = trail_df.sort_values('timestamp', ascending=False)
@@ -471,14 +476,13 @@ ollama list
                         st.success(t('configuracoes.audit_intact'))
                     else:
                         st.error(t('configuracoes.audit_broken'))
-                    st.caption(
-                        f"{integrity.get('total', 0)} eventos verificados · "
-                        f"{integrity.get('invalid', 0)} inválidos · "
-                        f"{integrity.get('chain_breaks', 0)} quebras de cadeia · "
-                        f"{integrity.get('hmac_failures', 0)} falhas de HMAC · "
-                        f"{integrity.get('checkpoints', 0)} checkpoints de retenção")
+                    st.caption(t('configuracoes.audit_summary', total=integrity.get('total', 0),
+                                 invalid=integrity.get('invalid', 0),
+                                 breaks=integrity.get('chain_breaks', 0),
+                                 hmac=integrity.get('hmac_failures', 0),
+                                 checkpoints=integrity.get('checkpoints', 0)))
                     if integrity.get('details'):
-                        with st.expander("Eventos com problema"):
+                        with st.expander(t('configuracoes.audit_problem_events')):
                             st.dataframe(pd.DataFrame(integrity['details']),
                                          use_container_width=True, hide_index=True)
             else:

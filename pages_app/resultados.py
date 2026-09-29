@@ -417,7 +417,7 @@ def page_resultados():
                 ),
             )
             try:
-                alvo_z = st.session_state.alvo or t('common.unknown')
+                alvo_z = st.session_state.alvo or 'desconhecido'  # vai para o laudo (pt)
                 html_data = generate_html_report(df, alvo_z, config={}, analyses={}, audit_hash='')
                 if html_data:
                     zf.writestr("relatorio.html", html_data)

@@ -173,7 +173,8 @@ def page_entrada():
                     platform = detect_html_platform(html_content)
                     platform_names = {'whatsapp': 'WhatsApp', 'meta': 'Meta Platforms (Facebook/Instagram)',
                                       'google': 'Google', 'unknown': t('entrada.html_platform_unknown')}
-                    st.info(f"📄 **{uploaded_file.name}** — HTML: **{platform_names.get(platform, platform)}**")
+                    st.info(t('entrada.html_detected', name=uploaded_file.name,
+                              platform=platform_names.get(platform, platform)))
 
                     if platform != 'unknown':
                         preview_df, _ = parse_html_file(html_content, alvo=st.session_state.alvo or 'preview')
@@ -223,9 +224,10 @@ def page_entrada():
                                         logger.warning("Página %d do PDF não extraída: %s", page_num, e)
                                 content = '\n'.join(text_parts)
                     except ImportError:
-                        st.warning("Instale 'pdfplumber' para processar PDFs: pip install pdfplumber")
+                        st.warning(t('entrada.pdf_install_warning'))
                     except Exception as e:
-                        logger.warning(f"Erro ao extrair texto do PDF: {e}")
+                        logger.exception("Erro ao extrair texto do PDF")
+                        st.warning(t('entrada.pdf_text_error', error=e))
 
                     # Detectar formato e exibir mensagem imediatamente (como HTML faz)
                     detected_format = detectar_formato_log(content) if content.strip() else 'generico'
@@ -236,7 +238,8 @@ def page_entrada():
                         'tiktok': 'TikTok',
                         'generico': t('entrada.format_generic')
                     }
-                    st.info(f"📄 **{uploaded_file.name}** — PDF: **{format_names.get(detected_format, detected_format.upper())}**")
+                    st.info(t('entrada.pdf_detected', name=uploaded_file.name,
+                              format=format_names.get(detected_format, detected_format.upper())))
 
                     # Pré-visualização dos IPs
                     if content.strip():
@@ -260,12 +263,13 @@ def page_entrada():
                                 else:
                                     st.warning(t('entrada.no_ip_pdf'))
                         except Exception as e:
-                            logger.warning(f"Erro na pré-visualização do PDF: {e}")
+                            logger.exception("Erro na pré-visualização do PDF")
+                            st.caption(t('entrada.preview_error', error=e))
 
                 else:
                     content = uploaded_file.getvalue().decode('utf-8', errors='replace')
                     detected_format = detectar_formato_log(content)
-                    st.info(f"📄 **{uploaded_file.name}** — Formato: **{detected_format.upper()}**")
+                    st.info(t('entrada.file_detected', name=uploaded_file.name, format=detected_format.upper()))
 
                     with st.expander(t('entrada.preview_title'), expanded=False):
                         preview_df = extrair_ips_de_texto(content, False, alvo=st.session_state.alvo or 'preview')
@@ -286,18 +290,30 @@ def page_entrada():
                         else:
                             st.warning(t('entrada.no_ip_file'))
             except Exception as e:
-                logger.warning(f"Erro na pré-visualização: {e}")
-                st.info(f"📄 **{uploaded_file.name}** carregado")
+                logger.exception("Erro na pré-visualização")
+                st.info(t('entrada.file_loaded', name=uploaded_file.name))
+                st.caption(t('entrada.preview_error', error=e))
 
     with tab_text:
+        # Códigos internos como opções; o rótulo exibido vem do idioma.
         example_map = {
-            "Genérico (Lista de IPs)": FORMATO_1,
-            "Meta Platforms (Instagram/Facebook)": FORMATO_2,
-            "WhatsApp": FORMATO_3,
-            "Google": FORMATO_4,
-            "Preservation Google": FORMATO_PRESERVATION_GOOGLE,
-            "Discord": FORMATO_DISCORD,
-            "TikTok": FORMATO_TIKTOK
+            'generic': FORMATO_1,
+            'meta': FORMATO_2,
+            'whatsapp': FORMATO_3,
+            'google': FORMATO_4,
+            'preservation_google': FORMATO_PRESERVATION_GOOGLE,
+            'discord': FORMATO_DISCORD,
+            'tiktok': FORMATO_TIKTOK,
+        }
+        example_labels = {
+            '': t('entrada.select_placeholder'),
+            'generic': t('entrada.example_generic'),
+            'meta': "Meta Platforms (Instagram/Facebook)",
+            'whatsapp': "WhatsApp",
+            'google': "Google",
+            'preservation_google': "Preservation Google",
+            'discord': "Discord",
+            'tiktok': "TikTok",
         }
 
         def _on_example_change():
@@ -306,9 +322,8 @@ def page_entrada():
 
         st.selectbox(
             t('entrada.load_example'),
-            [t('entrada.select_placeholder'), "Genérico (Lista de IPs)",
-             "Meta Platforms (Instagram/Facebook)", "WhatsApp", "Google",
-             "Preservation Google", "Discord", "TikTok"],
+            list(example_labels),
+            format_func=lambda k: example_labels[k],
             key="example_select",
             on_change=_on_example_change
         )
@@ -368,8 +383,11 @@ def page_entrada():
             else:
                 from helpers.job_control import JobCancelled, clear_cancel, request_cancel
                 clear_cancel()
-                alvo_val = _sanitize_alvo(st.session_state.alvo.strip()) or t('common.unknown')
-                if alvo_val == t('common.unknown'):
+                # Valor interno fixo, não traduzido: vai para a coluna Alvo do
+                # laudo, e o parser do Discord só usa o email como alvo quando
+                # recebe exatamente 'desconhecido' (em inglês chegava 'unknown').
+                alvo_val = _sanitize_alvo(st.session_state.alvo.strip()) or 'desconhecido'
+                if alvo_val == 'desconhecido':
                     st.warning(t('entrada.no_target_warning'))
                 output = st.session_state.output_file
                 from api_client import IP_CACHE_PATH
@@ -385,10 +403,7 @@ def page_entrada():
                         st.caption(t('entrada.cancel_hint'))
                         if (not st.session_state.api_key
                                 and not st.session_state.get('air_gapped')):
-                            st.warning(
-                                "🔓 Tier gratuito do IP-API usa **HTTP em claro** — "
-                                "os IPs da investigação trafegam sem criptografia. "
-                                "Configure `IPAPI_KEY` para o endpoint HTTPS.")
+                            st.warning(t('entrada.http_warning'))
                         progress_bar = st.progress(0, text=t('entrada.starting_label'))
 
                         def update_progress(current, total, total_records=0):
@@ -416,25 +431,22 @@ def page_entrada():
                                     salvo = save_dataframe(result, name=alvo_val,
                                                            alvo=alvo_val) and salvo
                                 if not salvo:
-                                    st.warning("⚠️ O resultado não foi persistido em disco: "
-                                               "ele não será restaurado se a aplicação reiniciar.")
+                                    st.warning(t('entrada.not_persisted'))
                             except MemoryError:
                                 raise
                             except Exception as persist_err:
                                 logger.exception("Falha ao persistir o resultado")
-                                st.warning(f"⚠️ O resultado não foi persistido em disco "
-                                           f"({persist_err}).")
+                                st.warning(t('entrada.not_persisted_error', error=persist_err))
                             add_log(t('entrada.completed', count=len(result)))
-                            save_history(alvo_val, len(result), output, detected_format or t('common.unknown'))
+                            save_history(alvo_val, len(result), output, detected_format or 'desconhecido')
                             status.update(label=t('entrada.records_processed', count=len(result)), state="complete")
 
                             evento = log_audit_event('processing_complete', {
                                 'alvo': alvo_val, 'records': len(result),
-                                'format': detected_format or t('common.unknown'),
+                                'format': detected_format or 'desconhecido',
                             })
                             if not evento.get('_persisted', True):
-                                st.error("❌ O processamento NÃO foi registrado no audit trail "
-                                         "(veja o log da aplicação).")
+                                st.error(t('entrada.processing_audit_not_saved'))
 
                             try:
                                 validation = validate_dataframe(result)
@@ -448,7 +460,7 @@ def page_entrada():
                                         msg = err.get('message', str(err)) if isinstance(err, dict) else str(err)
                                         st.warning(t('entrada.validation_warning', msg=msg))
                                     if len(all_errs) > 5:
-                                        show_truncation(5, len(all_errs), 'erros de validação')
+                                        show_truncation(5, len(all_errs), t('entrada.unit_validation_errors'))
                                 n_warn = validation.get('total_warnings', 0)
                                 if n_warn > 0:
                                     st.caption(t('entrada.validation_notices', count=n_warn))
@@ -458,8 +470,7 @@ def page_entrada():
                                 # Validação que não rodou não pode parecer
                                 # validação aprovada.
                                 logger.exception("Validação do resultado falhou")
-                                st.warning(f"⚠️ A validação do resultado não pôde ser "
-                                           f"executada: {val_err}")
+                                st.warning(t('entrada.validation_failed', error=val_err))
 
                             st.warning(t('entrada.api_precision_warning'))
 
@@ -469,7 +480,7 @@ def page_entrada():
                     except JobCancelled as e:
                         st.warning(str(e))
                         add_log(str(e))
-                        status.update(label="Cancelado", state="error")
+                        status.update(label=t('entrada.cancelled'), state="error")
                         log_audit_event('processing_cancelled', {'alvo': alvo_val})
                     except Exception as e:
                         logger.exception("Falha no processamento")
@@ -513,7 +524,7 @@ def page_entrada():
         with st.expander(t('entrada.log_title'), expanded=False):
             st.code("\n".join(st.session_state.log_messages[-30:]), language=None)
             show_truncation(min(30, len(st.session_state.log_messages)),
-                            len(st.session_state.log_messages), 'mensagens (as mais recentes)')
+                            len(st.session_state.log_messages), t('entrada.unit_messages'))
 
     # History
     if st.session_state.history:
@@ -535,4 +546,4 @@ def page_entrada():
                     bump_data_version()
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Erro: {e}")
+                    st.error(t('entrada.error', error=e))
