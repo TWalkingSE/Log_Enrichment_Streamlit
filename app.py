@@ -52,7 +52,6 @@ from styles.components import (
     sidebar_brand, sidebar_data_summary, sidebar_api_status, sidebar_footer,
     auth_header,
 )
-from helpers.large_data import bump_data_version
 register_plotly_theme()
 
 # ============================================================
@@ -192,30 +191,10 @@ if 'cache_backed_up' not in st.session_state:
 from helpers.shared import load_history
 load_history()
 
-# Restore last enriched DataFrame from disk if session is empty
-if st.session_state.get('df_resultado') is None:
-    try:
-        from helpers.persistence import load_dataframe
-        restored = load_dataframe('current')
-        if restored is not None and not restored.empty:
-            st.session_state.df_resultado = restored
-            bump_data_version()
-            avisos = restored.attrs.get('persistence_warnings') or []
-            if avisos:
-                # Integridade da sessão restaurada: vai para a tela, não só
-                # para o log.
-                st.session_state['_restore_error'] = " ".join(avisos)
-    except MemoryError:
-        # Um `except Exception: pass` aqui engolia inclusive MemoryError e
-        # apresentava "sem dados" como se estivesse tudo bem.
-        logger.exception("Memória insuficiente para restaurar a sessão anterior")
-        st.session_state['_restore_error'] = (
-            "Memória insuficiente para restaurar a sessão anterior. "
-            "Processe um arquivo menor ou reinicie a aplicação.")
-    except Exception as exc:
-        logger.exception("Falha ao restaurar DataFrame persistido")
-        st.session_state['_restore_error'] = (
-            f"Não foi possível restaurar a sessão anterior: {exc}")
+# A sessão gravada em disco NÃO é restaurada automaticamente: ela é uma só
+# para o processo, e restaurá-la ao abrir o app entregava a qualquer sessão
+# nova o último alvo processado por outra pessoa. A página de Entrada descreve
+# a sessão gravada e restaura com um clique (`pages_app.entrada`).
 
 # Air-gapped flag + optional retention on startup
 from helpers.runtime_flags import is_air_gapped, retention_enabled

@@ -59,10 +59,16 @@ def _sha256_file(path: Path) -> Optional[str]:
         return None
 
 
-def _write_meta(meta_path: Path, df: pd.DataFrame, data_path: str) -> None:
-    """Grava o manifesto da sessão ao lado do parquet."""
+def _write_meta(meta_path: Path, df: pd.DataFrame, data_path: str,
+                alvo: Optional[str] = None) -> None:
+    """Grava o manifesto da sessão ao lado do parquet.
+
+    `alvo` vai no manifesto para a interface descrever a sessão gravada
+    ANTES de carregá-la — o analista decide se é a dele.
+    """
     payload = {
         "schema_version": SCHEMA_VERSION,
+        "alvo": alvo,
         "rows": int(len(df)),
         "columns": [str(c) for c in df.columns],
         "saved_at": datetime.now().isoformat(timespec="seconds"),
@@ -139,7 +145,8 @@ def _check_schema(meta_path: Path, name: str) -> List[str]:
     return avisos
 
 
-def save_dataframe(df: Optional[pd.DataFrame], name: str = "current") -> Optional[str]:
+def save_dataframe(df: Optional[pd.DataFrame], name: str = "current",
+                   alvo: Optional[str] = None) -> Optional[str]:
     """Persist DataFrame; returns path written or None."""
     if df is None or getattr(df, "empty", True):
         return None
@@ -158,7 +165,7 @@ def save_dataframe(df: Optional[pd.DataFrame], name: str = "current") -> Optiona
             paths["pickle"].unlink(missing_ok=True)
         except OSError:
             pass
-        _write_meta(paths["meta"], df, str(paths["parquet"]))
+        _write_meta(paths["meta"], df, str(paths["parquet"]), alvo)
         logger.info("DataFrame salvo em %s (%s linhas, schema v%d)",
                     paths["parquet"], len(df), SCHEMA_VERSION)
         return str(paths["parquet"])
@@ -170,7 +177,7 @@ def save_dataframe(df: Optional[pd.DataFrame], name: str = "current") -> Optiona
             tmp = paths["pickle"].with_suffix(".pkl.part")
             df.to_pickle(tmp)
             os.replace(tmp, paths["pickle"])
-            _write_meta(paths["meta"], df, str(paths["pickle"]))
+            _write_meta(paths["meta"], df, str(paths["pickle"]), alvo)
             logger.info("DataFrame salvo em %s (%s linhas)", paths["pickle"], len(df))
             return str(paths["pickle"])
         except Exception:

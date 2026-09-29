@@ -153,7 +153,14 @@
     "cancel_hint": "Para cancelar: abra outra aba desta app e clique em **Solicitar cancelamento** (cooperativo entre lotes).",
     "request_cancel": "⏹ Solicitar cancelamento",
     "cancel_requested": "Cancelamento solicitado — o job para entre lotes.",
-    "cancelled": "Cancelado"
+    "cancelled": "Cancelado",
+    "previous_session": "**Sessão anterior gravada:** alvo `{alvo}`, {rows} registros, gravada em {saved_at}.",
+    "previous_session_hint": "Ela não é carregada automaticamente: a sessão gravada é uma só para todos os usuários desta instalação. Confirme que é a sua antes de restaurar.",
+    "restore_session": "♻️ Restaurar sessão anterior",
+    "restore_memory_error": "Memória insuficiente para restaurar a sessão anterior. Processe um arquivo menor ou reinicie a aplicação.",
+    "restore_error": "Não foi possível restaurar a sessão anterior: {error}",
+    "restore_empty": "A sessão gravada está vazia ou não foi encontrada.",
+    "audit_not_saved": "❌ A restauração NÃO foi registrada no audit trail (veja o log da aplicação)."
   },
   "resultados": {
     "title": "📊 Resultados",

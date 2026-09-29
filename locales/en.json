@@ -153,7 +153,14 @@
     "cancel_hint": "To cancel: open another tab of this app and click **Request cancel** (cooperative between batches).",
     "request_cancel": "⏹ Request cancel",
     "cancel_requested": "Cancel requested — the job stops between batches.",
-    "cancelled": "Cancelled"
+    "cancelled": "Cancelled",
+    "previous_session": "**Previous saved session:** target `{alvo}`, {rows} records, saved on {saved_at}.",
+    "previous_session_hint": "It is not loaded automatically: there is a single saved session for every user of this installation. Make sure it is yours before restoring.",
+    "restore_session": "♻️ Restore previous session",
+    "restore_memory_error": "Not enough memory to restore the previous session. Process a smaller file or restart the application.",
+    "restore_error": "Could not restore the previous session: {error}",
+    "restore_empty": "The saved session is empty or was not found.",
+    "audit_not_saved": "❌ The restore was NOT recorded in the audit trail (see the application log)."
   },
   "resultados": {
     "title": "📊 Results",

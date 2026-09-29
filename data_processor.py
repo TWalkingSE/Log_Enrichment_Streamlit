@@ -207,6 +207,87 @@ def detectar_separador_csv(arquivo):
     except (OSError, UnicodeError):
         return ','
 
+# Data/hora numa linha de texto livre: ISO (`2024-03-05 10:00[:00]`, com `T`
+# opcional) ou numérica (`05/03/2024 10:00[:00]`). A ordem dia/mês desta
+# última é decidida depois, pela coluna inteira (`parse_data`).
+_DATA_LINHA_RE = re.compile(
+    r'\d{4}-\d{2}-\d{2}[T ]\d{1,2}:\d{2}(?::\d{2})?'
+    r'|\d{1,2}/\d{1,2}/\d{4},?\s+\d{1,2}:\d{2}(?::\d{2})?')
+# Marcador de UTC logo depois da data: `Z`, `UTC`, `GMT` ou `+00:00`.
+_UTC_APOS_DATA_RE = re.compile(r'\s*(?:Z\b|UTC\b|GMT\b|\+00:?00\b)')
+
+
+def _registros_por_linha(content, alvo, data_padrao=None):
+    """Extrai IPs de texto livre associando cada um à data DA MESMA LINHA.
+
+    Antes, o texto livre ou perdia as datas (formato simples) ou emparelhava
+    a n-ésima data do texto com o n-ésimo IP (método alternativo): uma linha
+    sem data deslocava a data de todos os registros seguintes — datas
+    atribuídas ao IP errado. Aqui:
+
+    - uma data na linha: vale para os IPs daquela linha;
+    - nenhuma data: `data_padrao` (data do nome do arquivo, quando houver)
+      ou vazio — nada é inventado;
+    - mais de uma data na linha: ambíguo, fica vazio e é contado no log.
+
+    Data com marcador de UTC (`Z`, `UTC`, `GMT`, `+00:00`) é convertida para o
+    fuso local configurado. Data ISO também é convertida quando "UTC" aparece
+    em qualquer ponto do texto (cabeçalhos como "horários em UTC") — o
+    critério que o método anterior já aplicava. Data numérica sem marcador é
+    mantida como escrita.
+    """
+    ips, brutas, utc = [], [], []
+    ambiguas = 0
+    utc_no_texto = 'UTC' in content
+    for linha in content.splitlines():
+        datas = list(_DATA_LINHA_RE.finditer(linha))
+        # A data sai da linha antes de buscar IPs: `10:00:00` casa com o
+        # padrão de IPv6 (e só é descartado pela validação).
+        sem_datas = _DATA_LINHA_RE.sub(' ', linha)
+        ips_linha = [ip for ip in re.findall(IP_REGEX_PATTERN, sem_datas) if is_valid_ip(ip)]
+        if not ips_linha:
+            continue
+        bruta, eh_utc = None, False
+        if len(datas) == 1:
+            m = datas[0]
+            bruta = re.sub(r'[T,]', ' ', m.group(0))
+            bruta = re.sub(r'\s+', ' ', bruta).strip()
+            eh_utc = (bool(_UTC_APOS_DATA_RE.match(linha, m.end()))
+                      or (utc_no_texto and bruta[:4].isdigit()))
+        elif len(datas) > 1:
+            ambiguas += 1
+        if bruta is None and data_padrao:
+            bruta = data_padrao
+        for ip in ips_linha:
+            ips.append(ip)
+            brutas.append(bruta)
+            utc.append(eh_utc)
+
+    if ambiguas:
+        logger.warning("%d linha(s) com mais de uma data: registros sem data atribuída", ambiguas)
+
+    brutas_s = pd.Series(brutas, dtype='object')
+    dt = parse_data(brutas_s) if len(brutas_s) else pd.Series([], dtype='datetime64[ns]')
+    dt = pd.to_datetime(dt, errors='coerce')
+    utc_s = pd.Series(utc, dtype=bool)
+    if utc_s.any():
+        dt = dt.where(~utc_s, dt + pd.Timedelta(hours=TZ_OFFSET_HOURS))
+    falhas = int((dt.isna() & brutas_s.notna()).sum())
+    if falhas:
+        logger.warning("%d data(s) de texto livre não interpretáveis; registros sem data", falhas)
+
+    ok = dt.notna()
+    df = pd.DataFrame({'Alvo': alvo, 'Ip': ips}, columns=['Alvo', 'Ip'])
+    df['Data'] = dt.dt.strftime('%Y-%m-%d %H:%M:%S').where(ok, None)
+    df['Data_Fuso'] = pd.Series(TZ_LABEL, index=df.index).where(ok, None)
+    df['Periodo'] = dt.dt.hour.map(lambda h: get_periodo(int(h)) if pd.notna(h) else None)
+    df['ISO_Date'] = dt.map(lambda d: format_iso_date(d.to_pydatetime()) if pd.notna(d) else None)
+    for col in COLUNAS_MODELO:
+        if col not in df.columns:
+            df[col] = False if col in ('Ip_Movel', 'Ip_Proxy', 'Ip_Hospedagem', 'Ip_Tor') else None
+    return df[COLUNAS_MODELO]
+
+
 def extrair_ips_do_formato_simples(content, update_callback=None, alvo='desconhecido'):
     """
     Extrai IPs de um texto no formato simples (Modelo Endereços IP)
@@ -222,40 +303,14 @@ def extrair_ips_do_formato_simples(content, update_callback=None, alvo='desconhe
     if update_callback:
         update_callback("Extraindo IPs do formato simples")
 
-    # Encontrar todos os IPs no conteúdo
-    ips = re.findall(IP_REGEX_PATTERN, content)
-    ips = [ip for ip in ips if is_valid_ip(ip)]
-
-    # Criar resultados (sem data — manter todos os registros, incluindo repetidos)
-    resultados = []
-
-    for ip in ips:
-        resultados.append({
-            'Alvo': alvo,
-            'Ip': ip,
-            'Data': None,
-            'Data_Fuso': None,
-            'Ip_Dono': None,
-            'Ip_AS': None,
-            'Ip_Regiao': None,
-            'Ip_Cidade': None,
-            'Ip_Pais': None,
-            'Ip_Pais_Codigo': None,
-            'Ip_Movel': False,
-            'Ip_Proxy': False,
-            'Ip_Hospedagem': False,
-            'Ip_Tor': False,
-            'Ip_Lat': None,
-            'Ip_Lon': None,
-            'Periodo': None,
-            'ISO_Date': None
-        })
-
-    # Criar DataFrame
-    df = pd.DataFrame(resultados)
+    # Mantém todos os registros, inclusive repetidos; a data, quando existe,
+    # é a da própria linha.
+    df = _registros_por_linha(content, alvo)
 
     if update_callback:
-        update_callback(f"Extraídos {len(df)} registros ({df['Ip'].nunique()} IPs únicos) do formato simples")
+        com_data = int(df['Data'].notna().sum())
+        update_callback(f"Extraídos {len(df)} registros ({df['Ip'].nunique()} IPs únicos) do "
+                        f"formato simples — {com_data} com data")
 
     return df
 
@@ -1089,119 +1144,19 @@ def extrair_ips_texto_simples(file_path_or_content, update_callback=None, is_fil
         else:
             content = file_path_or_content
 
-        # Padrões para extração
-        ip_pattern = IP_REGEX_PATTERN
+        # Data do nome do arquivo (ex.: 20250310123909): usada só nas linhas
+        # que não trazem data própria.
+        file_date = None
+        if is_file:
+            filename = os.path.basename(file_path_or_content)
+            timestamp_match = re.search(r'(\d{14})', filename)
+            if timestamp_match:
+                ts = timestamp_match.group(1)
+                file_date = f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]} {ts[8:10]}:{ts[10:12]}:{ts[12:14]}"
 
-        # Padrões de data/hora
-        data_patterns = [
-            # YYYY-MM-DD HH:MM:SS
-            r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})',
-            # DD/MM/YYYY HH:MM:SS
-            r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})',
-        ]
-
-        # Encontrar todos os IPs
-        ips = re.findall(ip_pattern, content)
-        ips = [ip for ip in ips if is_valid_ip(ip)]
-
-        # Encontrar todas as datas
-        dates = []
-        for pattern in data_patterns:
-            matches = re.findall(pattern, content)
-            dates.extend(matches)
-
-        # Se temos mais datas que IPs, reduzir para o mesmo número
-        if len(dates) > len(ips):
-            dates = dates[:len(ips)]
-        # Se temos mais IPs que datas, usar datas do nome do arquivo ou data atual
-        elif len(dates) < len(ips):
-            # Tentar extrair data do nome do arquivo
-            file_date = None
-
-            if is_file:
-                filename = os.path.basename(file_path_or_content)
-                # Verificar formato específico 20250310123909
-                timestamp_match = re.search(r'(\d{14})', filename)
-                if timestamp_match:
-                    timestamp_str = timestamp_match.group(1)
-                    try:
-                        file_date = f"{timestamp_str[0:4]}-{timestamp_str[4:6]}-{timestamp_str[6:8]} {timestamp_str[8:10]}:{timestamp_str[10:12]}:{timestamp_str[12:14]}"
-                    except (TypeError, ValueError) as e:
-                        logger.warning(f"Erro ao extrair data do nome do arquivo: {e}")
-
-            # Usar data do arquivo para preencher (ou None se não disponível)
-            current_date = file_date
-            while len(dates) < len(ips):
-                dates.append(current_date)
-
-        # Criar resultados
-        resultados = []
-        for i, ip in enumerate(ips):
-            if i < len(dates) and dates[i] is not None:
-                data = dates[i]
-                # Converter para formato YYYY-MM-DD se necessário
-                if re.match(r'^\d{2}/\d{2}/\d{4}', data):
-                    try:
-                        dt = datetime.strptime(data, '%d/%m/%Y %H:%M:%S')
-                        data = dt.strftime('%Y-%m-%d %H:%M:%S')
-                    except (TypeError, ValueError) as e:
-                        logger.warning(f"Erro ao converter data '{data}': {e}")
-                elif re.match(r'^\d{4}-\d{2}-\d{2}', data):
-                    try:
-                        dt = datetime.strptime(data, '%Y-%m-%d %H:%M:%S')
-                        # Ajustar para fuso local se a data estiver em UTC
-                        if "UTC" in content:
-                            dt = convert_utc_to_local(dt)
-                        data = dt.strftime('%Y-%m-%d %H:%M:%S')
-                    except (TypeError, ValueError) as e:
-                        logger.warning(f"Erro ao converter data '{data}': {e}")
-
-                # Calcular período e ISO_Date
-                try:
-                    dt = datetime.strptime(data, '%Y-%m-%d %H:%M:%S')
-                    periodo = get_periodo(dt.hour)
-                    iso_date = format_iso_date(dt)
-                except (TypeError, ValueError) as e:
-                    logger.warning(f"Erro ao calcular periodo para '{data}': {e}")
-                    periodo = None
-                    iso_date = None
-            else:
-                data = None
-                periodo = None
-                iso_date = None
-
-            resultados.append({
-                'Alvo': alvo,
-                'Ip': ip,
-                'Data': data,
-                'Data_Fuso': TZ_LABEL if data else None,
-                'Periodo': periodo,
-                'ISO_Date': iso_date,
-                'Ip_Movel': False,
-                'Ip_Proxy': False,
-                'Ip_Hospedagem': False,
-                'Ip_Tor': False,
-                'Ip_Lat': None,
-                'Ip_Lon': None
-            })
-
-        # Criar DataFrame
-        df = pd.DataFrame(resultados)
-
-        # Garantir todas as colunas do modelo
-        for col in COLUNAS_MODELO:
-            if col not in df.columns:
-                if col in ['Ip_Movel', 'Ip_Proxy', 'Ip_Hospedagem', 'Ip_Tor']:
-                    df[col] = False
-                elif col == 'Alvo':
-                    df[col] = alvo
-                elif col == 'Data_Fuso':
-                    df[col] = TZ_LABEL
-                else:
-                    df[col] = None
-
-        # Garantir a ordem exata das colunas
-        df = df[COLUNAS_MODELO]
+        # Emparelhar a n-ésima data do texto com o n-ésimo IP (como antes)
+        # atribuía datas ao IP errado assim que uma linha vinha sem data.
+        df = _registros_por_linha(content, alvo, data_padrao=file_date)
 
         if update_callback:
             update_callback(f"Método alternativo extraiu {len(df)} registros ({df['Ip'].nunique()} IPs únicos)")

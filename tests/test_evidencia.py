@@ -397,5 +397,52 @@ class TestFiltroTodosEmIngles(unittest.TestCase):
         self.assertEqual(at.selectbox[0].value, 'All')
         self.assertIn('2 of 2 records', [c.value for c in at.caption])
 
+
+def _pagina_entrada_com_sessao_gravada():
+    # Sem acentos neste corpo: no Windows o AppTest grava o script em cp1252 e
+    # o Streamlit o le como UTF-8 - o script falha sem erro visivel.
+    """Script do AppTest: sessao gravada num diretorio temporario (via env)."""
+    import os
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, os.getcwd())
+    import streamlit as st
+    import helpers.persistence as persistence
+    import audit_logger
+    persistence.DATA_DIR = Path(os.environ['LE_TEST_SESSIONS'])
+    audit_logger.AUDIT_LOG_DIR = os.environ['LE_TEST_SESSIONS']
+    audit_logger.AUDIT_LOG_FILE = os.path.join(os.environ['LE_TEST_SESSIONS'], 'audit.jsonl')
+    from pages_app.entrada import page_entrada
+    defaults = {'df_resultado': None, 'alvo': '', 'output_file': 'resultado_logs.csv',
+                'processing': False, 'log_messages': [], 'history': [], 'batch_size': 500,
+                'period': 0, 'use_cache': True, 'incremental': True, 'api_key': ''}
+    for k, v in defaults.items():
+        st.session_state.setdefault(k, v)
+    page_entrada()
+
+
+class TestRestauracaoSoComClique(unittest.TestCase):
+    """Abrir o app restaurava o último alvo processado por qualquer pessoa."""
+
+    def test_nada_e_carregado_sem_clique(self):
+        from streamlit.testing.v1 import AppTest
+        import helpers.persistence as persistence
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(persistence, 'DATA_DIR', Path(tmp)):
+                persistence.save_dataframe(
+                    pd.DataFrame({'Ip': ['8.8.8.8'], 'Data': ['2024-01-01 10:00:00']}),
+                    name='current', alvo='alvo-de-outra-pessoa')
+            with patch.dict(os.environ, {'LE_TEST_SESSIONS': tmp}):
+                at = AppTest.from_function(_pagina_entrada_com_sessao_gravada,
+                                           default_timeout=60).run()
+                self.assertFalse(at.exception, [e.value for e in at.exception])
+                self.assertIsNone(at.session_state['df_resultado'])
+                self.assertTrue(any('alvo-de-outra-pessoa' in m.value for m in at.markdown))
+                botao = [b for b in at.button if b.key == 'btn_restore_session']
+                self.assertEqual(len(botao), 1)
+                at = botao[0].click().run()
+                self.assertFalse(at.exception, [e.value for e in at.exception])
+                self.assertEqual(len(at.session_state['df_resultado']), 1)
+
 if __name__ == '__main__':
     unittest.main()

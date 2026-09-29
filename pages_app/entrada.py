@@ -10,6 +10,7 @@ import io
 import re
 import tempfile
 import logging
+from datetime import datetime
 
 from data_processor import (
     extrair_ips_de_texto, detectar_formato_log,
@@ -20,7 +21,7 @@ from audit_logger import log_audit_event
 from validators import validate_dataframe, safe_output_path
 from helpers.shared import add_log, run_processing, save_history, extract_alvo_from_filename
 from i18n import t
-from helpers.large_data import bump_data_version, show_truncation
+from helpers.large_data import bump_data_version, fmt, show_truncation
 
 logger = logging.getLogger(__name__)
 
@@ -33,15 +34,69 @@ def _sanitize_alvo(alvo):
     return re.sub(r'[^\w\s.\-]', '', alvo).strip()
 
 
+def _restaurar_sessao_anterior():
+    """Carrega a sessão gravada em disco, a pedido do analista.
+
+    Falhas e avisos de integridade vão para a tela: um `except: pass` aqui
+    apresentava "sem dados" como se estivesse tudo bem.
+    """
+    from helpers.persistence import load_dataframe
+    try:
+        restored = load_dataframe('current')
+    except MemoryError:
+        logger.exception("Memória insuficiente para restaurar a sessão anterior")
+        st.error(t('entrada.restore_memory_error'))
+        return
+    except Exception as exc:
+        logger.exception("Falha ao restaurar DataFrame persistido")
+        st.error(t('entrada.restore_error', error=exc))
+        return
+    if restored is None or restored.empty:
+        st.warning(t('entrada.restore_empty'))
+        return
+    st.session_state.df_resultado = restored
+    bump_data_version()
+    evento = log_audit_event('session_restored', {'records': len(restored)})
+    if not evento.get('_persisted', True):
+        st.session_state['_restore_error'] = t('entrada.audit_not_saved')
+    avisos = restored.attrs.get('persistence_warnings') or []
+    if avisos:
+        # Integridade da sessão restaurada: vai para a tela, não só para o log.
+        st.session_state['_restore_error'] = " ".join(avisos)
+    st.rerun()
+
+
+def _oferecer_sessao_anterior():
+    """Descreve a sessão gravada e oferece restaurá-la — nunca automaticamente."""
+    from helpers.persistence import read_meta
+    meta = read_meta('current')
+    if not meta:
+        return
+    try:
+        gravada = datetime.fromisoformat(meta.get('saved_at', '')).strftime('%d/%m/%Y %H:%M')
+    except (TypeError, ValueError):
+        gravada = meta.get('saved_at') or '?'
+    with st.container(border=True):
+        st.markdown(t('entrada.previous_session',
+                      alvo=meta.get('alvo') or t('common.unknown'),
+                      rows=fmt(meta.get('rows', 0)), saved_at=gravada))
+        st.caption(t('entrada.previous_session_hint'))
+        if st.button(t('entrada.restore_session'), key='btn_restore_session'):
+            _restaurar_sessao_anterior()
+
+
 def page_entrada():
     from styles.components import section_header
     section_header(t('entrada.title'), t('entrada.subtitle'), divider="green")
 
-    # Falha ao restaurar a sessão anterior (app.py) precisa ser visível: sem
-    # isso o analista veria "sem dados" sem saber que houve erro.
+    # Falha ao restaurar a sessão anterior precisa ser visível: sem isso o
+    # analista veria "sem dados" sem saber que houve erro.
     restore_error = st.session_state.pop('_restore_error', None)
     if restore_error:
         st.warning(f"⚠️ {restore_error}")
+
+    if st.session_state.df_resultado is None:
+        _oferecer_sessao_anterior()
 
     # Alvo + Output
     col_alvo, col_output = st.columns(2)
@@ -356,9 +411,10 @@ def page_entrada():
                             bump_data_version()
                             try:
                                 from helpers.persistence import save_dataframe
-                                salvo = save_dataframe(result, name='current')
+                                salvo = save_dataframe(result, name='current', alvo=alvo_val)
                                 if alvo_val:
-                                    salvo = save_dataframe(result, name=alvo_val) and salvo
+                                    salvo = save_dataframe(result, name=alvo_val,
+                                                           alvo=alvo_val) and salvo
                                 if not salvo:
                                     st.warning("⚠️ O resultado não foi persistido em disco: "
                                                "ele não será restaurado se a aplicação reiniciar.")
