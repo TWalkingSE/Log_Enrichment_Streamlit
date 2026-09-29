@@ -474,7 +474,9 @@ def page_mapa():
 
     ip_col = 'Sender IP' if 'Sender IP' in df.columns else 'Ip'
 
-    filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns([1.45, 1.4, 1.05, 1.25, 1])
+    # "Tipo" leva quatro chips; com a largura das outras colunas eles saíam
+    # truncados ("R...", "M...") e não dava para ler o que estava filtrado.
+    filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns([1.2, 1.2, 2.2, 1.15, 1])
     with filter_col1:
         providers = [_ALL] + (sorted(df_m['Ip_Dono'].dropna().unique().tolist())
                               if 'Ip_Dono' in df_m.columns else [])
