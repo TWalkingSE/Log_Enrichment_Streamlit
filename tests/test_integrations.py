@@ -38,8 +38,15 @@ class TestAPIClient(unittest.TestCase):
 
 class TestAuditLogger(unittest.TestCase):
     def setUp(self):
+        import audit_logger
         self.tmp_dir = tempfile.mkdtemp()
         self.audit_file = os.path.join(self.tmp_dir, 'test_audit.jsonl')
+        # O arquivo temporário existia, mas nada o ligava ao audit_logger: os
+        # eventos destes testes iam para o logs/audit_trail.jsonl real.
+        for alvo, valor in (('AUDIT_LOG_FILE', self.audit_file), ('AUDIT_LOG_DIR', self.tmp_dir)):
+            patcher = patch.object(audit_logger, alvo, valor)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def tearDown(self):
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
@@ -50,6 +57,7 @@ class TestAuditLogger(unittest.TestCase):
         self.assertEqual(event['user'], 'test_user')
         self.assertIn('timestamp', event)
         self.assertIn('event_hash', event)
+        self.assertTrue(os.path.exists(self.audit_file))
 
     def test_integrity_receipt(self):
         receipt = generate_integrity_receipt(input_file=__file__, output_file=__file__, alvo='test_target', record_count=1)
