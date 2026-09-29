@@ -481,7 +481,9 @@ def page_entrada():
                         st.warning(str(e))
                         add_log(str(e))
                         status.update(label=t('entrada.cancelled'), state="error")
-                        log_audit_event('processing_cancelled', {'alvo': alvo_val})
+                        evento = log_audit_event('processing_cancelled', {'alvo': alvo_val})
+                        if not evento.get('_persisted', True):
+                            st.error(t('entrada.cancel_audit_not_saved'))
                     except Exception as e:
                         logger.exception("Falha no processamento")
                         st.error(t('entrada.error_label', error=str(e)))

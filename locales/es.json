@@ -184,7 +184,8 @@
     "unit_validation_errors": "errores de validación",
     "validation_failed": "⚠️ La validación del resultado no pudo ejecutarse: {error}",
     "unit_messages": "mensajes (los más recientes)",
-    "error": "Error: {error}"
+    "error": "Error: {error}",
+    "cancel_audit_not_saved": "❌ La cancelación NO se registró en el audit trail (vea el log de la aplicación)."
   },
   "resultados": {
     "title": "📊 Resultados",
