@@ -7,6 +7,24 @@ logger = logging.getLogger(__name__)
 from analysis._config import _vpn_config
 from validators import as_bool, bool_series, parse_data
 
+# Faixas de risco sobre o Score de `calculate_risk_scores`. Única fonte: a
+# página de Risco usava 50/20 e o relatório 70/40 — o mesmo IP saía "alto" na
+# tela e "médio" no laudo. Valem as do relatório, que já constam de laudos
+# entregues.
+RISK_HIGH = 70
+RISK_MEDIUM = 40
+
+
+def risk_level_counts(scores):
+    """(alto, médio, baixo) segundo RISK_HIGH / RISK_MEDIUM."""
+    if scores is None or getattr(scores, 'empty', True) or 'Score' not in scores.columns:
+        return 0, 0, 0
+    s = scores['Score']
+    alto = int((s >= RISK_HIGH).sum())
+    medio = int(((s >= RISK_MEDIUM) & (s < RISK_HIGH)).sum())
+    return alto, medio, int((s < RISK_MEDIUM).sum())
+
+
 def calculate_risk_scores(df, ip_col='Ip'):
     """
     Calculate risk score (0-100) for each unique IP based on:
@@ -119,7 +137,7 @@ def detect_vpn_heuristics(df, date_col='Data'):
         return result
 
     df_work = df.copy()
-    df_work['_dt'] = pd.to_datetime(df_work.get(date_col, pd.Series(dtype='object')), errors='coerce')
+    df_work['_dt'] = parse_data(df_work.get(date_col, pd.Series(dtype='object')))
     df_work = df_work.dropna(subset=['_dt']).sort_values('_dt')
 
     if len(df_work) < 2:
@@ -128,7 +146,6 @@ def detect_vpn_heuristics(df, date_col='Data'):
     score = 0
 
     # 1. IP Rotation Detection — IPs that change at regular intervals
-    rotation_interval_min = _vpn_config.get('rotation_interval_minutes', 30)
     min_rotation_count = _vpn_config.get('min_rotation_count', 3)
     # Mesma semântica do loop anterior (prev_ip truthy && cur != prev): a
     # primeira linha nunca conta; NaN != qualquer coisa conta como mudança.

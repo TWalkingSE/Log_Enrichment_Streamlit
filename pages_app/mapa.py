@@ -31,7 +31,9 @@ from analysis import (
 from components.visualizations import render_map_replay
 from helpers.geo import build_cluster_popup, build_rich_popup
 from validators import as_bool, bool_series, parse_data
-from helpers.large_data import bump_data_version, gate, show_truncation, PREVIEW_ROWS
+from helpers.large_data import (
+    bump_data_version, fmt, gate, show_truncation, truncation_notice, PREVIEW_ROWS,
+)
 
 # Tetos de exportação/renderização desta página. Toda truncagem é declarada.
 MAX_GEOJSON_FEATURES = 20000
@@ -113,12 +115,25 @@ def _prepare_popup_row(row, ip_col):
     return popup_row
 
 
+def _declarar_corte(exibidos, total, unidade):
+    """Declara no mapa o que ficou de fora — só quando algo ficou.
+
+    Os tetos de renderização existem (o Leaflet não aguenta dezenas de
+    milhares de marcadores), mas o analista precisa saber que o mapa não
+    mostra tudo.
+    """
+    if exibidos < total:
+        st.caption(f"⚠️ Mapa: {truncation_notice(exibidos, total, unidade)} "
+                   "Use os filtros para ver o restante.")
+
+
 def _prepare_point_dataframe(df_map, ip_col, limit):
     point_df = df_map.copy()
     point_df['_marker_count'] = point_df[ip_col].map(point_df[ip_col].value_counts()).fillna(1).astype(int)
     dedupe_cols = [column for column in [ip_col, 'Ip_Lat', 'Ip_Lon', 'Ip_Cidade', 'Ip_Dono'] if column in point_df.columns]
     point_df = point_df.sort_values('_marker_count', ascending=False).drop_duplicates(subset=dedupe_cols)
     if len(point_df) > limit:
+        _declarar_corte(limit, len(point_df), 'pontos distintos (os mais frequentes)')
         point_df = point_df.head(limit)
     return point_df.sort_values('_marker_count')
 
@@ -169,6 +184,7 @@ def _render_clusters_map(df_map, ip_col, tile_style):
     ip_counts = df_map[ip_col].value_counts().to_dict()
 
     groups = cluster_df.groupby(['_lat_key', '_lon_key'], sort=False)
+    _declarar_corte(min(groups.ngroups, 600), groups.ngroups, 'agrupamentos de localização')
     total_groups = 0
     for _, group in groups:
         total_groups += 1
@@ -221,6 +237,7 @@ def _render_heatmap_map(df_map, ip_col, tile_style):
         },
     ).add_to(fmap)
 
+    _declarar_corte(min(len(point_df), 150), len(point_df), 'pontos com marcador clicável')
     for _, row in point_df.head(150).iterrows():
         popup_row = _prepare_popup_row(row.to_dict(), ip_col)
         infra = classify_infrastructure(popup_row)
@@ -244,7 +261,9 @@ def _prepare_route_dataframe(df_map, max_points=450):
     route_df = route_df.dropna(subset=['_dt']).sort_values('_dt')
     if len(route_df) > max_points:
         step = max(1, len(route_df) // max_points)
+        total = len(route_df)
         route_df = route_df.iloc[::step].copy()
+        _declarar_corte(len(route_df), total, f'pontos da rota (amostrados 1 a cada {step})')
     return route_df
 
 
@@ -396,11 +415,15 @@ def page_mapa():
     df_m = df_m[(df_m['Ip_Lat'] != 0) | (df_m['Ip_Lon'] != 0)]
 
     if df_m.empty:
-        cache_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ip_cache.json')
-        if os.path.exists(cache_path):
+        from api_client import IP_CACHE_PATH, filter_fresh_cache, read_ip_cache
+        if os.path.exists(IP_CACHE_PATH):
             try:
-                with open(cache_path, 'r', encoding='utf-8') as file_handler:
-                    ip_cache = json.load(file_handler)
+                # Leitor único + TTL: coordenadas expiradas não são servidas
+                # como atuais, e o envelope assinado é desembrulhado.
+                ip_cache, expiradas = filter_fresh_cache(read_ip_cache())
+                if expiradas:
+                    st.caption(f"⏱️ {expiradas} entrada(s) do cache ignorada(s) por estarem "
+                               "expiradas ou sem data.")
                 df_m = df.copy()
                 df_m['Ip_Lat'] = df_m['Ip'].map(lambda ip: ip_cache.get(ip, {}).get('Ip_Lat'))
                 df_m['Ip_Lon'] = df_m['Ip'].map(lambda ip: ip_cache.get(ip, {}).get('Ip_Lon'))
@@ -419,15 +442,21 @@ def page_mapa():
                     # versão precisam ser invalidados como numa atribuição.
                     bump_data_version()
                     st.toast(f'📍 Coordenadas recuperadas do cache para {len(df_m)} registros')
+            except MemoryError:
+                raise
             except Exception as exc:
-                logger.warning('Erro ao recuperar coordenadas do cache: %s', exc)
+                logger.exception('Erro ao recuperar coordenadas do cache')
+                st.warning(f'⚠️ Não foi possível recuperar coordenadas do cache: {exc}')
 
     if df_m.empty:
         st.warning('⚠️ Nenhum IP com coordenadas validas.')
         return
+    sem_coord = len(df) - len(df_m)
+    if sem_coord > 0:
+        st.caption(f"⚠️ {fmt(sem_coord)} de {fmt(len(df))} registros sem coordenadas "
+                   "válidas não aparecem no mapa.")
 
     ip_col = 'Sender IP' if 'Sender IP' in df.columns else 'Ip'
-    ip_counts = df[ip_col].value_counts().to_dict()
 
     filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns([1.45, 1.4, 1.05, 1.25, 1])
     with filter_col1:
@@ -510,7 +539,7 @@ def page_mapa():
 
     metric_col1, metric_col2, metric_col3, metric_col4, metric_col5 = st.columns(5)
     with metric_col1:
-        st.metric('IPs no Mapa', len(classified_df))
+        st.metric('Registros no Mapa', len(classified_df))
     with metric_col2:
         st.metric('IPs Unicos', classified_df[ip_col].nunique() if ip_col in classified_df.columns else 0)
     with metric_col3:
@@ -724,7 +753,7 @@ def page_mapa():
                 st.divider()
                 st.subheader('📈 Timeline de Atividade')
                 profile_df = df.copy()
-                profile_df['_dt'] = pd.to_datetime(profile_df['Data'], errors='coerce')
+                profile_df['_dt'] = parse_data(profile_df['Data'])
                 profile_df = profile_df.dropna(subset=['_dt'])
                 if not profile_df.empty:
                     profile_df['_date'] = profile_df['_dt'].dt.date
@@ -761,8 +790,11 @@ def page_mapa():
 
     with tool_tabs[4]:
         st.subheader('📅 Comparacao Temporal')
-        if 'Data' in df.columns:
-            date_series = pd.to_datetime(df['Data'], errors='coerce').dropna()
+        # st.tabs executa este corpo a cada rerun, mesmo com a aba fechada.
+        if 'Data' not in df.columns:
+            st.info('Sem dados de data para comparacao.')
+        elif gate('📅 Comparar períodos', df, 'map_compare'):
+            date_series = parse_data(df['Data']).dropna()
             if not date_series.empty:
                 min_date = date_series.min().date()
                 max_date = date_series.max().date()
@@ -786,16 +818,16 @@ def page_mapa():
                         st.divider()
                         for change in comparison['mudancas']:
                             st.warning(f'📌 {change}')
-        else:
-            st.info('Sem dados de data para comparacao.')
 
     with tool_tabs[5]:
         st.subheader('📊 Estatisticas Geograficas')
         geo_col1, geo_col2 = st.columns(2)
         with geo_col1:
             if 'Ip_Pais' in classified_df.columns:
-                country_counts = classified_df['Ip_Pais'].value_counts().head(15).reset_index()
+                todos_paises = classified_df['Ip_Pais'].value_counts()
+                country_counts = todos_paises.head(15).reset_index()
                 country_counts.columns = ['Pais', 'Qtd']
+                show_truncation(len(country_counts), len(todos_paises), 'países')
                 fig = px.bar(country_counts, x='Qtd', y='Pais', orientation='h', color='Qtd', color_continuous_scale='Viridis')
                 fig.update_layout(
                     height=400,
@@ -808,8 +840,10 @@ def page_mapa():
                 st.plotly_chart(fig, key='map_geo_country')
         with geo_col2:
             if 'Ip_Cidade' in classified_df.columns:
-                city_counts = classified_df['Ip_Cidade'].value_counts().head(15).reset_index()
+                todas_cidades = classified_df['Ip_Cidade'].value_counts()
+                city_counts = todas_cidades.head(15).reset_index()
                 city_counts.columns = ['Cidade', 'Qtd']
+                show_truncation(len(city_counts), len(todas_cidades), 'cidades')
                 fig = px.bar(city_counts, x='Qtd', y='Cidade', orientation='h', color='Qtd', color_continuous_scale='Magma')
                 fig.update_layout(
                     height=400,
@@ -823,71 +857,79 @@ def page_mapa():
 
     with tool_tabs[6]:
         st.subheader('📐 Area de Movimentacao')
-        try:
-            area_data = calculate_movement_area(classified_df)
-            area_col1, area_col2, area_col3 = st.columns(3)
-            with area_col1:
-                st.metric('📐 Area Total', f"{area_data['area_km2']:,.1f} km²")
-            with area_col2:
-                st.metric('📏 Raio Maximo', f"{area_data['max_distance_km']:,.1f} km")
-            with area_col3:
-                st.metric('📍 Localizacoes', area_data['num_points'])
+        if gate('📐 Calcular área de movimentação', classified_df, 'map_area'):
+            try:
+                area_data = calculate_movement_area(classified_df)
+                area_col1, area_col2, area_col3 = st.columns(3)
+                with area_col1:
+                    st.metric('📐 Area Total', f"{area_data['area_km2']:,.1f} km²")
+                with area_col2:
+                    st.metric('📏 Raio Maximo', f"{area_data['max_distance_km']:,.1f} km")
+                with area_col3:
+                    st.metric('📍 Localizacoes', area_data['num_points'])
 
-            if area_data['area_km2'] > 0:
-                hull_map = folium.Map(location=area_data['center'], zoom_start=5, tiles=None)
-                add_base_layer(hull_map, tile_style)
-                folium.Polygon(
-                    locations=area_data['hull_coords'],
-                    color='#818cf8',
-                    weight=2,
-                    fill=True,
-                    fill_color='#818cf8',
-                    fill_opacity=0.15,
-                ).add_to(hull_map)
-                # `_infra_color` já foi calculado por classify_dataframe;
-                # reclassificar por marcador era trabalho repetido.
-                marcadores = classified_df.drop_duplicates(subset=[ip_col])
-                total_marcadores = len(marcadores)
-                if total_marcadores > MAX_HULL_MARKERS:
-                    marcadores = marcadores.head(MAX_HULL_MARKERS)
-                for _, row in marcadores.iterrows():
-                    cor = row.get('_infra_color') or classify_infrastructure(row)['circle_color']
-                    folium.CircleMarker(
-                        location=[row['Ip_Lat'], row['Ip_Lon']],
-                        radius=4,
-                        color=cor,
+                if area_data['area_km2'] > 0:
+                    hull_map = folium.Map(location=area_data['center'], zoom_start=5, tiles=None)
+                    add_base_layer(hull_map, tile_style)
+                    folium.Polygon(
+                        locations=area_data['hull_coords'],
+                        color='#818cf8',
+                        weight=2,
                         fill=True,
-                        fill_color=cor,
-                        fill_opacity=0.85,
-                        tooltip=f"{row.get(ip_col, '')} - {row.get('Ip_Cidade', '')}",
+                        fill_color='#818cf8',
+                        fill_opacity=0.15,
                     ).add_to(hull_map)
-                show_truncation(len(marcadores), total_marcadores, 'IPs no mapa de área')
-                st_folium(hull_map, use_container_width=True, height=400, returned_objects=[], key='map_hull_map')
-        except Exception as exc:
-            st.warning(f'Nao foi possivel calcular a area: {exc}')
+                    # `_infra_color` já foi calculado por classify_dataframe;
+                    # reclassificar por marcador era trabalho repetido.
+                    marcadores = classified_df.drop_duplicates(subset=[ip_col])
+                    total_marcadores = len(marcadores)
+                    if total_marcadores > MAX_HULL_MARKERS:
+                        marcadores = marcadores.head(MAX_HULL_MARKERS)
+                    for _, row in marcadores.iterrows():
+                        cor = row.get('_infra_color') or classify_infrastructure(row)['circle_color']
+                        folium.CircleMarker(
+                            location=[row['Ip_Lat'], row['Ip_Lon']],
+                            radius=4,
+                            color=cor,
+                            fill=True,
+                            fill_color=cor,
+                            fill_opacity=0.85,
+                            tooltip=f"{row.get(ip_col, '')} - {row.get('Ip_Cidade', '')}",
+                        ).add_to(hull_map)
+                    show_truncation(len(marcadores), total_marcadores, 'IPs no mapa de área')
+                    st_folium(hull_map, use_container_width=True, height=400, returned_objects=[], key='map_hull_map')
+            except MemoryError:
+                raise
+            except Exception as exc:
+                logger.exception('Falha ao calcular a área de movimentação')
+                st.warning(f'Nao foi possivel calcular a area: {exc}')
 
     with tool_tabs[7]:
         st.subheader('✈️ Padrao de Viagem')
-        segments = detect_travel_pattern(df)
-        if segments:
-            travel_df = pd.DataFrame(segments)
-            st.metric('Deslocamentos detectados', len(travel_df))
-            st.dataframe(travel_df, use_container_width=True, hide_index=True)
+        # `detect_travel_pattern` varre o frame linha a linha: atrás de portão.
+        if gate('✈️ Detectar viagens', df, 'map_travel'):
+            segments = detect_travel_pattern(df)
+            if segments:
+                travel_df = pd.DataFrame(segments)
+                st.metric('Deslocamentos detectados', len(travel_df))
+                st.dataframe(travel_df, use_container_width=True, hide_index=True)
 
-            route = [segments[0]['De']]
-            for segment in segments:
-                if segment['Para'] != route[-1]:
-                    route.append(segment['Para'])
-            st.markdown(f"**Rota:** {' → '.join(route)}")
-            total_km = sum(segment['Distancia_km'] for segment in segments)
-            st.caption(f'Distancia total percorrida: **{total_km:,.0f} km**')
+                route = [segments[0]['De']]
+                for segment in segments:
+                    if segment['Para'] != route[-1]:
+                        route.append(segment['Para'])
+                st.markdown(f"**Rota:** {' → '.join(route)}")
+                total_km = sum(segment['Distancia_km'] for segment in segments)
+                st.caption(f'Distancia total percorrida: **{total_km:,.0f} km**')
 
-            travel_map = _render_travel_preview_map(classified_df, tile_style)
-            if travel_map is not None:
-                st_folium(travel_map, use_container_width=True, height=350, returned_objects=[], key='map_travel_preview')
-        else:
-            st.info('Nenhum deslocamento entre cidades detectado.')
+                travel_map = _render_travel_preview_map(classified_df, tile_style)
+                if travel_map is not None:
+                    st_folium(travel_map, use_container_width=True, height=350, returned_objects=[], key='map_travel_preview')
+            else:
+                st.info('Nenhum deslocamento entre cidades detectado.')
 
     st.divider()
     st.subheader('▶️ Replay Temporal no Mapa')
-    render_map_replay(df)
+    # O replay copia, converte e ordena o frame inteiro a cada rerun.
+    if gate('▶️ Montar replay temporal', df, 'map_replay'):
+        render_map_replay(df)

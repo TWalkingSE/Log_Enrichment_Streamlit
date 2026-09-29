@@ -20,7 +20,6 @@ import hmac
 import json
 import os
 import time
-from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 
@@ -73,30 +72,6 @@ def verify_signed_package(
     if not hmac.compare_digest(expected, sig):
         return False, "bad_signature", {}
     return True, "ok", payload
-
-
-def save_signed_cache(cache: Dict[str, Any], path: str | Path, secret: Optional[str] = None) -> Path:
-    path = Path(path)
-    package = build_signed_package(cache, secret=secret)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(package, ensure_ascii=False, indent=2), encoding="utf-8")
-    return path
-
-
-def load_signed_cache(path: str | Path, secret: Optional[str] = None) -> Tuple[bool, str, Dict[str, Any]]:
-    path = Path(path)
-    if not path.exists():
-        return False, "not_found", {}
-    try:
-        package = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as e:
-        return False, f"read_error:{e}", {}
-    # Plain cache (unsigned) — accept only if no secret configured
-    if isinstance(package, dict) and "payload" not in package and "signature" not in package:
-        if secret or get_cache_hmac_secret():
-            return False, "unsigned_rejected", {}
-        return True, "unsigned_ok", package
-    return verify_signed_package(package, secret=secret)
 
 
 def is_signed_envelope(data: Any) -> bool:

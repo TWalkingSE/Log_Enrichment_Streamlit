@@ -18,7 +18,7 @@ from file_handler import export_xlsx_colored, export_xlsx_to_disk
 from i18n import t
 from validators import bool_series
 from helpers.large_data import (
-    bump_data_version, cache_key, estimate_xlsx_seconds, fmt_duracao,
+    bump_data_version, cache_key, data_token, estimate_xlsx_seconds, fmt_duracao,
     prepare_button, show_truncation,
     PREVIEW_ROWS, XLSX_DISK_THRESHOLD, fmt,
 )
@@ -172,7 +172,8 @@ def page_resultados():
 
     # Frescor do enriquecimento: geolocalização de cache pode estar velha —
     # o analista vê a idade em vez de presumir dado atual.
-    cache_path = 'ip_cache.json'
+    from api_client import IP_CACHE_PATH
+    cache_path = IP_CACHE_PATH
     try:
         stats = _cache_freshness(cache_path, os.path.getmtime(cache_path)) \
             if os.path.exists(cache_path) else None
@@ -208,14 +209,23 @@ def page_resultados():
     with c_search:
         search = st.text_input("🔍 " + t('common.search'), placeholder=t('resultados.search_placeholder'))
     with c_prov:
-        providers = ['Todos'] + sorted(df['Ip_Dono'].dropna().unique().tolist()) if 'Ip_Dono' in df.columns else ['Todos']
+        # A opção "todos" precisa ser a mesma string comparada abaixo: com
+        # 'Todos' fixo, em inglês a comparação com t('common.all') ("All")
+        # falhava e o filtro padrão buscava Ip_Dono == 'Todos' — tabela vazia.
+        opt_all = t('common.all')
+        providers = [opt_all] + (sorted(df['Ip_Dono'].dropna().unique().tolist())
+                                 if 'Ip_Dono' in df.columns else [])
         sel_provider = st.selectbox(t('resultados.provider'), providers)
     with c_region:
-        regions = ['Todos'] + sorted(df['Ip_Regiao'].dropna().unique().tolist()) if 'Ip_Regiao' in df.columns else ['Todos']
+        regions = [opt_all] + (sorted(df['Ip_Regiao'].dropna().unique().tolist())
+                               if 'Ip_Regiao' in df.columns else [])
         sel_region = st.selectbox(t('resultados.region'), regions)
     with c_type:
         types = [t('common.all'), t('common.residential'), t('common.mobile'), t('common.proxy_vpn'), t('common.hosting')]
         sel_type = st.selectbox(t('resultados.type'), types)
+
+    # Tudo o que muda as linhas de `df_f` entra nas chaves de cache abaixo.
+    filtros = (search, sel_provider, sel_region, sel_type)
 
     df_f = df
     if search:
@@ -264,7 +274,7 @@ def page_resultados():
         key_cols = ['Ip_Proxy', 'Ip_Hospedagem', 'Ip_Movel', 'Ip_AS', 'Ip_Dono']
         existing_keys = [c for c in key_cols if c in df_f.columns]
         df_f['Reputação'] = _build_reputacao(
-            df_f[existing_keys], cache_key('rep', len(df_f), tuple(existing_keys)))
+            df_f[existing_keys], cache_key('rep', len(df_f), tuple(existing_keys), filtros))
 
     if is_discord:
         display_cols = [c for c in COLUNAS_EXPORT_DISCORD if c in df_f.columns]
@@ -323,7 +333,12 @@ def page_resultados():
     st.divider()
     st.subheader(t('resultados.export_title'))
     df_export = df_f[display_cols]
-    export_key = cache_key('exp', len(df_export), tuple(display_cols))
+    export_key = cache_key('exp', len(df_export), tuple(display_cols), filtros)
+    # Nome por sessão/dataset: com um nome fixo, duas sessões gerando o Excel
+    # grande ao mesmo tempo gravavam no mesmo arquivo e uma servia o da outra.
+    # Filtros diferentes reaproveitam o mesmo arquivo (`_xlsx_grande` regera
+    # quando a chave muda), para não acumular um .xlsx por filtro em disco.
+    nome_xlsx_disco = f"resultado_colorido_{data_token()[:8]}"
 
     c_exp1, c_exp2, c_exp3, c_exp4 = st.columns(4)
     with c_exp1:
@@ -350,7 +365,7 @@ def page_resultados():
                 # Dezenas de MB não passam por st.cache_data nem pelo websocket
                 # sem derrubar a sessão — o arquivo grande é servido do disco.
                 caminho, resumo = _xlsx_grande(df_export, export_key,
-                                               "resultado_colorido")
+                                               nome_xlsx_disco)
                 with open(caminho, 'rb') as fh:
                     st.download_button(t('resultados.excel_colored'), fh,
                                        os.path.basename(caminho),
@@ -399,9 +414,11 @@ def page_resultados():
         from validators import sanitize_dataframe_for_csv
         zip_buf = io.BytesIO()
         with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            # `to_csv` sem caminho devolve str e ignora `encoding`: o BOM que
+            # faz o Excel abrir o CSV em UTF-8 só existe codificando aqui.
             zf.writestr("resultado.csv",
                 sanitize_dataframe_for_csv(df_f[display_cols]).to_csv(
-                    index=False, sep=';', encoding='utf-8-sig'))
+                    index=False, sep=';').encode('utf-8-sig'))
             zf.writestr("resultado.json",
                 df_f[display_cols].to_json(orient='records', force_ascii=False, indent=2))
             # Excel colorido no ZIP. Em dataset grande vem do arquivo em disco,
@@ -410,7 +427,7 @@ def page_resultados():
                 zf.writestr("resultado.xlsx", _generate_xlsx_export(df_export, export_key))
             else:
                 caminho_zip, resumo_zip = _xlsx_grande(df_export, export_key,
-                                                       "resultado_colorido")
+                                                       nome_xlsx_disco)
                 zf.write(caminho_zip, "resultado.xlsx")
                 _declarar_abas(resumo_zip)
             zf.writestr("iocs.txt", export_ioc_list(df_f, only_suspicious=only_susp))

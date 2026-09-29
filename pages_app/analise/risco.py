@@ -16,8 +16,15 @@ from analysis import (
     batch_check_shodan, compute_shodan_risk_indicators,
     get_tor_exit_nodes, check_tor_exit_nodes,
 )
+from advanced_analysis import get_tor_exit_cache_status
+from analysis.risk import RISK_HIGH, RISK_MEDIUM, risk_level_counts
+from helpers.runtime_flags import AirGappedError
 from helpers.shared import run_async
-from helpers.large_data import cache_key, gate
+from helpers.large_data import cache_key, gate, show_truncation
+
+# Consultas externas por IP (VirusTotal, AbuseIPDB, Shodan) são limitadas pela
+# cota gratuita desses serviços.
+MAX_EXTERNAL_IPS = 50
 
 from i18n import t
 
@@ -41,7 +48,8 @@ def page_risco():
         return
 
     ip_col = 'Sender IP' if 'Sender IP' in df.columns else 'Ip'
-    unique_ips = df[ip_col].dropna().unique().tolist()[:50]
+    all_unique_ips = df[ip_col].dropna().unique().tolist()
+    unique_ips = all_unique_ips[:MAX_EXTERNAL_IPS]
 
     # ── Risk Score ──
     with st.container(border=True):
@@ -50,40 +58,52 @@ def page_risco():
                   if gate('🛡️ Calcular risk scores', df, 'risk_scores')
                   else pd.DataFrame())
         if not scores.empty:
+            alto, medio, baixo = risk_level_counts(scores)
             c1, c2, c3 = st.columns(3)
-            c1.metric(t('risco.high_risk'), len(scores[scores['Score'] >= 50]))
-            c2.metric(t('risco.medium_risk'), len(scores[(scores['Score'] >= 20) & (scores['Score'] < 50)]))
-            c3.metric(t('risco.low_risk'), len(scores[scores['Score'] < 20]))
-            fig = px.bar(scores.head(20), x='Score', y='IP', orientation='h',
+            c1.metric(t('risco.high_risk'), alto, help=f"Score ≥ {RISK_HIGH}")
+            c2.metric(t('risco.medium_risk'), medio, help=f"{RISK_MEDIUM} ≤ Score < {RISK_HIGH}")
+            c3.metric(t('risco.low_risk'), baixo, help=f"Score < {RISK_MEDIUM}")
+            top = scores.head(20)
+            fig = px.bar(top, x='Score', y='IP', orientation='h',
                          color='Score', color_continuous_scale='RdYlGn_r',
                          hover_data=['Provedor', 'Cidade', 'Fatores'])
             fig.update_layout(height=500, yaxis={'categoryorder': 'total ascending'},
                               showlegend=False, coloraxis_showscale=False)
             st.plotly_chart(fig, key='risk_chart')
+            show_truncation(len(top), len(scores), 'IPs no gráfico')
             st.dataframe(scores, use_container_width=True, height=400, hide_index=True)
 
     # ── VirusTotal + AbuseIPDB ──
     with st.container(border=True):
         st.subheader(t('risco.vt_abuseipdb_title'))
         c1, c2 = st.columns(2)
+        # As chaves do .env NÃO pré-preenchem os campos: o valor de um
+        # text_input vai para o navegador, mesmo com type="password".
+        env_vt = os.getenv('VIRUSTOTAL_API_KEY', '')
+        env_abuse = os.getenv('ABUSEIPDB_API_KEY', '')
         with c1:
             vt_key = st.text_input(t('risco.vt_key_label'), type="password", key="vt_api_key",
-                                   value=os.getenv('VIRUSTOTAL_API_KEY', ''))
+                                   placeholder="(usando chave do .env)" if env_vt else "") or env_vt
         with c2:
             abuse_key = st.text_input(t('risco.abuseipdb_key_label'), type="password", key="abuse_key_vt",
-                                      value=os.getenv('ABUSEIPDB_API_KEY', ''))
-        st.caption(f"{len(unique_ips)} IPs (máx 50)")
+                                      placeholder="(usando chave do .env)" if env_abuse else "") or env_abuse
+        show_truncation(len(unique_ips), len(all_unique_ips), 'IPs consultados')
         if st.button(t('risco.run_analysis', count=len(unique_ips)), key="vt_analyze", type="primary"):
             if not vt_key and not abuse_key:
                 st.error(t('common.error'))
             else:
                 with st.status(t('risco.analyzing')) as status:
-                    vt_results = run_async(batch_check_virustotal(unique_ips, vt_key)) if vt_key else []
-                    abuse_results = run_async(batch_check_abuseipdb(unique_ips, abuse_key)) if abuse_key else []
-                    vt_scores = compute_multi_source_threat_score(abuse_results, vt_results)
-                    if vt_scores:
-                        st.session_state['vt_scores'] = pd.DataFrame(vt_scores)
-                        status.update(label=f"✅ {len(vt_scores)} IPs!", state="complete")
+                    try:
+                        vt_results = run_async(batch_check_virustotal(unique_ips, vt_key)) if vt_key else []
+                        abuse_results = run_async(batch_check_abuseipdb(unique_ips, abuse_key)) if abuse_key else []
+                    except AirGappedError as e:
+                        st.error(str(e))
+                        status.update(label="Bloqueado (air-gapped)", state="error")
+                    else:
+                        vt_scores = compute_multi_source_threat_score(abuse_results, vt_results)
+                        if vt_scores:
+                            st.session_state['vt_scores'] = pd.DataFrame(vt_scores)
+                            status.update(label=f"✅ {len(vt_scores)} IPs!", state="complete")
         if 'vt_scores' in st.session_state:
             st.dataframe(st.session_state['vt_scores'], use_container_width=True, height=400, hide_index=True)
 
@@ -95,7 +115,7 @@ def page_risco():
             st.success("🔑 Shodan API Key configurada via `.env`.")
         else:
             st.info("Configure `SHODAN_API_KEY` no arquivo `.env`.")
-        st.caption(f"{len(unique_ips)} IPs únicos (máx 50)")
+        show_truncation(len(unique_ips), len(all_unique_ips), 'IPs consultados')
         if st.button("🔎 Consultar Shodan", key="shodan_btn", type="primary"):
             if not shodan_key:
                 st.error("Informe a API Key do Shodan.")
@@ -107,7 +127,11 @@ def page_risco():
                         st.session_state['shodan_results'] = results
                         st.session_state['shodan_risk'] = risk
                         status.update(label=f"✅ {len(results)} IPs consultados!", state="complete")
+                    except AirGappedError as e:
+                        st.error(str(e))
+                        status.update(label="Bloqueado (air-gapped)", state="error")
                     except Exception as e:
+                        logger.exception("Consulta ao Shodan falhou")
                         st.error(f"Erro: {e}")
         if 'shodan_risk' in st.session_state:
             risk = st.session_state['shodan_risk']
@@ -137,15 +161,39 @@ def page_risco():
                 with st.status("Carregando lista de Tor exit nodes...") as status:
                     try:
                         tor_nodes = get_tor_exit_nodes()
-                        st.caption(f"Lista Tor: {len(tor_nodes)} nós carregados")
-                        result = check_tor_exit_nodes(df, tor_nodes, ip_col=ip_col)
-                        st.session_state['tor_result'] = result
-                        status.update(label=f"✅ Verificado! {result['total_tor']} IP(s) Tor.", state="complete")
+                        tor_meta = get_tor_exit_cache_status()
+                        if not tor_nodes:
+                            # Lista vazia NÃO é "nenhum IP Tor": é verificação
+                            # impossível. Antes a página dizia "✅ Nenhum IP
+                            # corresponde a Tor exit node".
+                            st.session_state.pop('tor_result', None)
+                            st.error("Lista de Tor exit nodes indisponível (sem cache local e sem "
+                                     "acesso às fontes). A verificação NÃO foi feita.")
+                            status.update(label="Lista Tor indisponível", state="error")
+                        else:
+                            result = check_tor_exit_nodes(df, tor_nodes, ip_col=ip_col)
+                            result['lista_idade_h'] = tor_meta.get('age_hours')
+                            result['lista_obsoleta'] = tor_meta.get('is_stale', True)
+                            result['lista_nos'] = len(tor_nodes)
+                            st.session_state['tor_result'] = result
+                            status.update(label=f"✅ Verificado! {result['total_tor']} IP(s) Tor.",
+                                          state="complete")
                     except Exception as e:
+                        logger.exception("Verificação Tor falhou")
                         st.error(f"Erro: {e}")
             if 'tor_result' in st.session_state:
                 result = st.session_state['tor_result']
                 tor_ips = result.get('tor_ips', [])
+                idade = result.get('lista_idade_h')
+                idade_txt = f"{idade:.1f} h" if isinstance(idade, (int, float)) else "desconhecida"
+                if result.get('lista_obsoleta'):
+                    # A lista muda a cada hora; servida velha, um nó que saiu
+                    # da rede Tor ainda conta e um novo não aparece.
+                    st.warning(f"⏱️ Lista Tor desatualizada ({result.get('lista_nos', 0)} nós, "
+                               f"idade {idade_txt}). Atualize-a em Configurações antes de "
+                               "usar este resultado em laudo.")
+                else:
+                    st.caption(f"Lista Tor: {result.get('lista_nos', 0)} nós, idade {idade_txt}.")
                 c1, c2 = st.columns(2)
                 c1.metric("IPs Tor", result['total_tor'])
                 c2.metric("Percentual Tor", f"{result['pct_tor']}%")

@@ -7,6 +7,7 @@ import streamlit as st
 import os
 import io
 import logging
+import uuid
 import plotly.express as px
 
 from interception_parser import (
@@ -14,9 +15,11 @@ from interception_parser import (
     processar_interceptacao_async, COLUNAS_EXPORT_INTERCEPTACAO,
     processar_resultados_interceptacao, _add_reputacao_interceptacao
 )
+from api_client import IP_CACHE_PATH
 from file_handler import export_xlsx_colored, export_xlsx_to_disk
+from helpers.atomic_io import atomic_write_bytes
 from helpers.shared import run_async
-from validators import safe_output_path
+from validators import safe_output_path, sanitize_dataframe_for_csv
 from helpers.large_data import (
     estimate_xlsx_seconds, fmt_duracao, prepare_button, show_truncation,
     PREVIEW_ROWS, XLSX_DISK_THRESHOLD, fmt,
@@ -27,13 +30,51 @@ from i18n import t
 logger = logging.getLogger(__name__)
 
 
+def _set_df_interceptacao(df):
+    """Única porta de escrita de `df_interceptacao`.
+
+    Cada novo resultado ganha uma identidade própria (`_int_token`), que entra
+    nas chaves dos exports. Sem ela, uma interceptação nova com o mesmo número
+    de linhas recebia o Excel/CSV já gerado da anterior.
+    """
+    st.session_state['df_interceptacao'] = df
+    st.session_state['_int_token'] = uuid.uuid4().hex
+
+
+def _int_token():
+    token = st.session_state.get('_int_token')
+    if not token:
+        token = uuid.uuid4().hex
+        st.session_state['_int_token'] = token
+    return token
+
+
+# Os exports levam o frame com `_` (não hasheado a cada rerun) e a identidade
+# em `key`. Antes eram regenerados a cada interação da página.
+@st.cache_data(ttl=1800, max_entries=3, show_spinner=False)
+def _csv_interceptacao(_df_exp, key):
+    return sanitize_dataframe_for_csv(_df_exp).to_csv(index=False, sep=';').encode('utf-8-sig')
+
+
+@st.cache_data(ttl=1800, max_entries=3, show_spinner=False)
+def _json_interceptacao(_df_exp, key):
+    return _df_exp.to_json(orient='records', force_ascii=False, indent=2)
+
+
+@st.cache_data(ttl=1800, max_entries=3, show_spinner=False)
+def _xlsx_interceptacao(_df_exp, key):
+    buf = io.BytesIO()
+    export_xlsx_colored(_df_exp, buf)
+    return buf.getvalue()
+
+
 def _xlsx_grande_interceptacao(df_exp, nome_base):
     """Excel colorido em disco, com progresso, revalidado contra o arquivo.
 
     Mesmo padrão da página de Resultados: o estado guarda um caminho, então
     precisa ser conferido no disco a cada rerun em vez de ficar em cache.
     """
-    chave = (nome_base, len(df_exp), tuple(df_exp.columns))
+    chave = (_int_token(), nome_base, len(df_exp), tuple(df_exp.columns))
     estado = st.session_state.get('_xlsx_disco_int')
     if estado and estado['key'] == chave and os.path.exists(estado['caminho']):
         return estado['caminho'], estado['resumo']
@@ -57,12 +98,11 @@ def _xlsx_grande_interceptacao(df_exp, nome_base):
 async def _enrich_df_async(df, output_file, batch_size, period, update_callback, api_key=None):
     """Enrich a pre-parsed DataFrame (from single HTML upload) via shared service."""
     from enrich_service import enrich_dataframe
-    from validators import sanitize_dataframe_for_csv
 
     df, _results = await enrich_dataframe(
         df,
         'Sender IP',
-        cache_file='ip_cache.json',
+        cache_file=IP_CACHE_PATH,
         api_key=api_key,
         batch_size=batch_size,
         period=period,
@@ -72,9 +112,10 @@ async def _enrich_df_async(df, output_file, batch_size, period, update_callback,
     df = _add_reputacao_interceptacao(df)
 
     export_cols = [c for c in COLUNAS_EXPORT_INTERCEPTACAO if c in df.columns]
-    sanitize_dataframe_for_csv(df[export_cols]).to_csv(
-        output_file, index=False, sep=';', encoding='utf-8-sig'
-    )
+    atomic_write_bytes(
+        output_file,
+        sanitize_dataframe_for_csv(df[export_cols]).to_csv(
+            index=False, sep=';').encode('utf-8-sig'))
     if update_callback:
         update_callback(f"Salvo em {output_file}")
     return df
@@ -172,7 +213,7 @@ def page_interceptacao():
                             processar_interceptacao_async(
                                 intercept_data, output_intercept,
                                 batch_size=batch_intercept, period=period_intercept,
-                                cache_file='ip_cache.json',
+                                cache_file=IP_CACHE_PATH,
                                 update_callback=lambda msg: st.write(f"  {msg}"),
                                 api_key=api_key_i
                             )
@@ -186,7 +227,7 @@ def page_interceptacao():
                         )
 
                     if result is not None and not result.empty:
-                        st.session_state['df_interceptacao'] = result
+                        _set_df_interceptacao(result)
                         status.update(label=f"✅ {len(result)} registros processados!", state="complete")
                     else:
                         status.update(label="Sem resultados", state="error")
@@ -200,6 +241,7 @@ def page_interceptacao():
         # Garantir coluna Reputação
         if all(c in df_i.columns for c in ['Ip_Proxy', 'Ip_Hospedagem', 'Ip_Movel']) and 'Reputação' not in df_i.columns:
             df_i = _add_reputacao_interceptacao(df_i)
+            # Mesmo dataset, só com a coluna derivada: mantém a identidade.
             st.session_state['df_interceptacao'] = df_i
 
         st.divider()
@@ -227,16 +269,15 @@ def page_interceptacao():
         # Estes três eram gerados a CADA rerun da página, sem cache: em 200k
         # linhas são centenas de MB serializados por interação.
         df_exp = df_i[export_cols]
+        exp_key = (_int_token(), tuple(export_cols))
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             if prepare_button("⚙️ Preparar CSV", df_exp, 'int_csv'):
-                st.download_button("📥 CSV",
-                                   df_exp.to_csv(index=False, sep=';').encode('utf-8-sig'),
-                                   output_intercept, "text/csv")
+                st.download_button("📥 CSV", _csv_interceptacao(df_exp, exp_key),
+                                   os.path.basename(output_intercept), "text/csv")
         with c2:
             if prepare_button("⚙️ Preparar JSON", df_exp, 'int_json'):
-                st.download_button("📥 JSON",
-                                   df_exp.to_json(orient='records', force_ascii=False, indent=2),
+                st.download_button("📥 JSON", _json_interceptacao(df_exp, exp_key),
                                    "interceptacao.json", "application/json")
         with c3:
             _est = fmt_duracao(estimate_xlsx_seconds(len(df_exp), len(export_cols)))
@@ -244,11 +285,8 @@ def page_interceptacao():
                               help=f"{fmt(len(df_exp))} linhas — {_est} de geração"):
                 nome_xlsx = os.path.splitext(os.path.basename(output_intercept))[0]
                 if len(df_exp) <= XLSX_DISK_THRESHOLD:
-                    xlsx_buf = io.BytesIO()
-                    export_xlsx_colored(df_exp, xlsx_buf)
-                    xlsx_buf.seek(0)
                     st.download_button(
-                        "📥 Excel (colorido)", xlsx_buf.getvalue(),
+                        "📥 Excel (colorido)", _xlsx_interceptacao(df_exp, exp_key),
                         nome_xlsx + '.xlsx',
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 else:
@@ -269,11 +307,14 @@ def page_interceptacao():
         with c4:
             if os.path.exists(output_intercept):
                 with open(output_intercept, 'rb') as f:
-                    st.download_button("📥 Arquivo Salvo", f, output_intercept, "text/csv")
+                    st.download_button("📥 Arquivo Salvo", f,
+                                       os.path.basename(output_intercept), "text/csv")
 
         if 'Ip_Dono' in df_i.columns and df_i['Ip_Dono'].notna().any():
             st.subheader("🏢 IPs por Provedor")
-            prov = df_i['Ip_Dono'].value_counts().head(15).reset_index()
+            contagem_prov = df_i['Ip_Dono'].value_counts()
+            prov = contagem_prov.head(15).reset_index()
+            show_truncation(len(prov), len(contagem_prov), 'provedores')
             prov.columns = ['Provedor', 'Qtd']
             fig = px.bar(prov, x='Qtd', y='Provedor', orientation='h',
                 color='Qtd', color_continuous_scale='Viridis')

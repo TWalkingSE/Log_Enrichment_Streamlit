@@ -5,8 +5,6 @@ Geo History, Sub-redes, Padrões de Vida.
 
 import streamlit as st
 import pandas as pd
-import os
-import json
 import logging
 
 from analysis import (
@@ -50,17 +48,20 @@ def page_geo():
     with st.container(border=True):
         st.subheader(t('geo.history_title'))
         st.caption(t('geo.history_subtitle'))
-        cache_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'ip_cache.json')
+        # Histórico: sem filtro de TTL (o ponto é justamente o passado), mas
+        # pelo leitor único — com `json.load` direto, um cache assinado
+        # chegava como envelope e a página dizia "sem mudanças".
+        from api_client import read_ip_cache
         cache = {}
-        if os.path.exists(cache_path):
-            try:
-                with open(cache_path, 'r') as f:
-                    cache = json.load(f)
-            except Exception as exc:
-                # Cache ilegível não pode ser apresentado como "sem
-                # histórico" — são estados diferentes numa perícia.
-                logger.warning("ip_cache.json ilegível: %s", exc)
-                st.warning(f"⚠️ Cache de IPs ilegível ({exc}) — histórico indisponível.")
+        try:
+            cache = read_ip_cache()
+        except MemoryError:
+            raise
+        except Exception as exc:
+            # Cache ilegível não pode ser apresentado como "sem
+            # histórico" — são estados diferentes numa perícia.
+            logger.exception("Cache de IPs ilegível")
+            st.warning(f"⚠️ Cache de IPs ilegível ({exc}) — histórico indisponível.")
         if cache:
             result = detect_geo_changes(df, cache)
             changes = result.get('changed_ips', [])

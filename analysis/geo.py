@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 from analysis._config import _analysis_config
 from analysis.movement import detect_base_locations
-from validators import as_bool
+from validators import as_bool, parse_data
 
 def check_geofence(df, center_lat, center_lon, radius_km, lat_col='Ip_Lat', lon_col='Ip_Lon'):
     """
@@ -110,7 +110,7 @@ def detect_life_patterns(df, date_col='Data', lat_col='Ip_Lat', lon_col='Ip_Lon'
     work = pd.DataFrame({
         'lat': pd.to_numeric(df[lat_col], errors='coerce').values,
         'lon': pd.to_numeric(df[lon_col], errors='coerce').values,
-        '_dt': pd.to_datetime(df[date_col], errors='coerce').values
+        '_dt': parse_data(df[date_col]).values
         if date_col in df.columns else pd.NaT,
     })
     for extra in ('Ip', 'Sender IP', 'Ip_Cidade', 'Ip_Dono', 'Ip_Regiao'):
@@ -267,7 +267,7 @@ def detect_travel_pattern(df, date_col='Data', lat_col='Ip_Lat', lon_col='Ip_Lon
     df_t = df.copy()
     df_t[lat_col] = pd.to_numeric(df_t[lat_col], errors='coerce')
     df_t[lon_col] = pd.to_numeric(df_t[lon_col], errors='coerce')
-    df_t['_dt'] = pd.to_datetime(df_t[date_col], errors='coerce')
+    df_t['_dt'] = parse_data(df_t[date_col])
     df_t = df_t.dropna(subset=[lat_col, lon_col, '_dt'])
     df_t = df_t[(df_t[lat_col] != 0) | (df_t[lon_col] != 0)]
     df_t = df_t.sort_values('_dt')

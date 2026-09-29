@@ -260,6 +260,7 @@ details.score-detail summary:hover { color: var(--accent); }
 .signature .line { border-top: 1px solid var(--text-muted); margin-bottom: 6px; height: 40px; }
 .signature .name { font-weight: 600; color: var(--text); font-size: 0.9rem; }
 .signature .role { color: var(--text-muted); font-size: 0.78rem; margin-top: 2px; }
+.trunc { font-size: 0.82rem; color: var(--warning); margin: 10px 0 0; }
 </style>
 {% if branding.primary_color or branding.accent_color %}
 <style>
@@ -271,6 +272,11 @@ details.score-detail summary:hover { color: var(--accent); }
 {% endif %}
 </head>
 <body>
+{#- Tabela truncada declara o total: o laudo não pode apresentar o tamanho
+    da fatia como se fosse a contagem real. -#}
+{% macro corte(exibidos, total, unidade) -%}
+{% if total and exibidos < total %}<p class="trunc">⚠️ Exibindo {{ exibidos }} de {{ total }} {{ unidade }} (os de maior contagem/pontuação). A lista completa está no CSV exportado.</p>{% endif %}
+{%- endmacro %}
 
 {% if branding.watermark %}
 <div id="watermark">{{ branding.watermark }}</div>
@@ -316,6 +322,16 @@ details.score-detail summary:hover { color: var(--accent); }
       {% if hosting_pct is not none %}<div class="metric"><div class="value">{{ "%.1f"|format(hosting_pct) }}%</div><div class="label">Hosting</div></div>{% endif %}
       {% if mobile_pct is not none %}<div class="metric"><div class="value">{{ "%.1f"|format(mobile_pct) }}%</div><div class="label">Móvel</div></div>{% endif %}
     </div>
+
+    {% if secoes_omitidas %}
+    <div style="margin-top:18px;">
+      <h3 style="font-size:0.95rem;color:var(--danger);margin-bottom:8px;">⛔ Seções omitidas por falha na análise</h3>
+      <ul style="padding-left:20px;color:var(--text-muted);font-size:0.9rem;">
+        {% for s in secoes_omitidas %}<li>{{ s }}</li>{% endfor %}
+      </ul>
+      <p style="font-size:0.82rem;color:var(--text-muted);">A ausência destas seções não significa ausência de achados: a análise não pôde ser executada.</p>
+    </div>
+    {% endif %}
 
     {% if findings %}
     <div style="margin-top:18px;">
@@ -501,6 +517,7 @@ details.score-detail summary:hover { color: var(--accent); }
     <div class="map-container">{{ map_html | safe }}</div>
     {% endif %}
     {% if country_table %}
+    {{ corte(country_table|length, totais.paises, 'países') }}
     <div class="tbl-wrap" style="margin-top:16px;">
       <input class="tbl-search" placeholder="Buscar país..." oninput="filterTable(this)">
       <table>
@@ -514,6 +531,7 @@ details.score-detail summary:hover { color: var(--accent); }
     </div>
     {% endif %}
     {% if region_table %}
+    {{ corte(region_table|length, totais.regioes, 'regiões') }}
     <div class="tbl-wrap" style="margin-top:12px;">
       <input class="tbl-search" placeholder="Buscar região..." oninput="filterTable(this)">
       <table>
@@ -540,6 +558,7 @@ details.score-detail summary:hover { color: var(--accent); }
   <div class="card-body">
     {% if provider_plot %}<div class="plot-container">{{ provider_plot | safe }}</div>{% endif %}
     {% if provider_table %}
+    {{ corte(provider_table|length, totais.provedores, 'provedores') }}
     <div class="tbl-wrap">
       <input class="tbl-search" placeholder="Buscar provedor..." oninput="filterTable(this)">
       <table>
@@ -655,6 +674,7 @@ details.score-detail summary:hover { color: var(--accent); }
       <div class="metric"><div class="value" style="color:var(--warning);">{{ risk_med }}</div><div class="label">Risco Médio</div></div>
       <div class="metric"><div class="value" style="color:var(--accent-2);">{{ risk_low }}</div><div class="label">Risco Baixo</div></div>
     </div>
+    {{ corte(risk_scores|length, totais.risco, 'IPs pontuados') }}
     <div class="tbl-wrap">
       <input class="tbl-search" placeholder="Buscar IP..." oninput="filterTable(this)">
       <table>
@@ -705,6 +725,7 @@ details.score-detail summary:hover { color: var(--accent); }
     <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
       Deslocamentos entre endereços IP que excedem velocidades fisicamente possíveis, sugerindo uso de VPN/proxy ou compartilhamento de conta.
     </p>
+    {{ corte(impossible_jumps|length, totais.saltos, 'saltos') }}
     <div class="tbl-wrap">
       <input class="tbl-search" placeholder="Buscar..." oninput="filterTable(this)">
       <table>
@@ -767,6 +788,7 @@ details.score-detail summary:hover { color: var(--accent); }
     <span class="toggle">▼</span>
   </div>
   <div class="card-body">
+    {{ corte(ip_confidence|length, totais.confianca, 'IPs') }}
     <div class="tbl-wrap">
       <input class="tbl-search" placeholder="Buscar IP..." oninput="filterTable(this)">
       <table>
@@ -1104,6 +1126,7 @@ details.score-detail summary:hover { color: var(--accent); }
     <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
       Alvos diferentes acessando exatamente o mesmo IP no mesmo instante — forte indício de localização física compartilhada (residência, trabalho ou local público).
     </p>
+    {{ corte(shared_wifi|length, totais.wifi, 'coincidências') }}
     <div class="tbl-wrap">
       <input class="tbl-search" placeholder="Buscar..." oninput="filterTable(this)">
       <table>
@@ -1136,6 +1159,7 @@ details.score-detail summary:hover { color: var(--accent); }
     <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
       IPs presentes em múltiplos alvos armazenados — possível indício de comunicação, infraestrutura comum ou compartilhamento de dispositivo.
     </p>
+    {{ corte(cross_correlation|length, totais.correlacao, 'IPs em comum') }}
     <div class="tbl-wrap">
       <input class="tbl-search" placeholder="Buscar IP ou alvo..." oninput="filterTable(this)">
       <table>
@@ -1166,6 +1190,7 @@ details.score-detail summary:hover { color: var(--accent); }
     <span class="toggle">▼</span>
   </div>
   <div class="card-body">
+    {{ corte(top_ips|length, totais.top_ips, 'IPs') }}
     <div class="tbl-wrap">
       <input class="tbl-search" placeholder="Buscar IP..." oninput="filterTable(this)">
       <table>
@@ -1189,6 +1214,7 @@ details.score-detail summary:hover { color: var(--accent); }
     <span class="toggle">▼</span>
   </div>
   <div class="card-body collapsed">
+    {{ corte(raw_data|length, totais.brutos, 'registros') }}
     <div class="tbl-wrap">
       <input class="tbl-search" placeholder="Buscar..." oninput="filterTable(this)">
       <table>

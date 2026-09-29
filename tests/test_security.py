@@ -523,7 +523,9 @@ class TestBooleanCoercion(unittest.TestCase):
         from validators import parse_data
         out = parse_data(pd.Series(['2025-01-01 10:00:00', '01/02/2025 08:30', 'lixo']))
         self.assertEqual(out.iloc[0], pd.Timestamp('2025-01-01 10:00:00'))
-        self.assertEqual(out.iloc[1], pd.Timestamp('2025-01-02 08:30:00'))
+        # Ambígua: lida como dia/mês (pt-BR). Antes esperava-se 2 de janeiro,
+        # a leitura mês/dia do dateutil que trocava datas brasileiras.
+        self.assertEqual(out.iloc[1], pd.Timestamp('2025-02-01 08:30:00'))
         self.assertTrue(pd.isna(out.iloc[2]))
 
 

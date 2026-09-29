@@ -2,6 +2,7 @@
 import pandas as pd
 import numpy as np
 import logging
+from validators import parse_data
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ def detect_impossible_jumps(df, max_speed_kmh=900, date_col='Data',
     df_j = df.copy()
     df_j[lat_col] = pd.to_numeric(df_j[lat_col], errors='coerce')
     df_j[lon_col] = pd.to_numeric(df_j[lon_col], errors='coerce')
-    df_j['_dt'] = pd.to_datetime(df_j[date_col], errors='coerce')
+    df_j['_dt'] = parse_data(df_j[date_col])
     df_j = df_j.dropna(subset=[lat_col, lon_col, '_dt'])
     df_j = df_j[(df_j[lat_col] != 0) | (df_j[lon_col] != 0)]
     df_j = df_j.sort_values('_dt')
@@ -70,7 +71,7 @@ def detect_base_locations(df, date_col='Data', lat_col='Ip_Lat', lon_col='Ip_Lon
     df_b = df.copy()
     df_b[lat_col] = pd.to_numeric(df_b[lat_col], errors='coerce')
     df_b[lon_col] = pd.to_numeric(df_b[lon_col], errors='coerce')
-    df_b['_dt'] = pd.to_datetime(df_b[date_col], errors='coerce')
+    df_b['_dt'] = parse_data(df_b[date_col])
     df_b = df_b.dropna(subset=[lat_col, lon_col, '_dt'])
     df_b = df_b[(df_b[lat_col] != 0) | (df_b[lon_col] != 0)]
     df_b['_hour'] = df_b['_dt'].dt.hour
@@ -135,7 +136,7 @@ def generate_behavioral_profile(df, alvo='', date_col='Data'):
 
     # Date range
     df_p = df.copy()
-    df_p['_dt'] = pd.to_datetime(df_p[date_col], errors='coerce')
+    df_p['_dt'] = parse_data(df_p[date_col])
     df_p = df_p.dropna(subset=['_dt'])
 
     if not df_p.empty:
@@ -167,7 +168,6 @@ def generate_behavioral_profile(df, alvo='', date_col='Data'):
         peak = hours.value_counts().head(3)
         profile['horario_pico'] = ', '.join([f"{h}h" for h in sorted(peak.index)])
         diurno = ((hours >= 6) & (hours < 18)).sum()
-        noturno = len(hours) - diurno
         pct_diurno = diurno / len(hours) * 100 if len(hours) > 0 else 0
         if pct_diurno > 70:
             profile['padrao_atividade'] = 'Predominantemente diurno'
@@ -212,7 +212,7 @@ def compare_split_periods(df, date_col='Data', split_date=None):
     Returns dict with comparison metrics.
     """
     df_c = df.copy()
-    df_c['_dt'] = pd.to_datetime(df_c[date_col], errors='coerce')
+    df_c['_dt'] = parse_data(df_c[date_col])
     df_c = df_c.dropna(subset=['_dt'])
 
     if df_c.empty:

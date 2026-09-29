@@ -14,13 +14,13 @@ exclude = [
 
 [tool.ruff.lint]
 # Pragmatic baseline for legacy Streamlit codebase; tighten over time.
-# F401 re-enabled for core modules; monólitos legados usam per-file-ignores.
+# F841 (variável local sem uso) reativado: foi assim que se achou um parâmetro
+# de configuração lido e ignorado (`rotation_interval_minutes`).
 ignore = [
     "E402",   # module import not at top of file
     "F403",   # star imports (tests.common pattern)
     "F405",   # names from star imports
     "F541",   # f-string without placeholders
-    "F841",   # unused local variable
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -32,7 +32,19 @@ python_version = "3.11"
 ignore_missing_imports = true
 warn_unused_ignores = true
 explicit_package_bases = true
-files = ["auth_password.py", "api_client.py", "validators.py", "enrich_service.py"]
+# Lista única: o CI chama `mypy` sem argumentos e usa esta.
+files = [
+    "auth_password.py",
+    "api_client.py",
+    "validators.py",
+    "enrich_service.py",
+    "export_ioc.py",
+    "helpers/atomic_io.py",
+    "helpers/large_data.py",
+    "helpers/persistence.py",
+    "helpers/retention.py",
+    "helpers/runtime_flags.py",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

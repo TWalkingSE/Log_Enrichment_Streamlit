@@ -1,6 +1,7 @@
 """analysis.comms — split from analysis monolith."""
 import pandas as pd
 import logging
+from validators import parse_data
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ def detect_disposable_numbers(df, from_col='FROM', date_col='Data', min_appearan
         last = ''
         duration = 0
         if date_col in subset.columns:
-            dates = pd.to_datetime(subset[date_col], errors='coerce').dropna()
+            dates = parse_data(subset[date_col]).dropna()
             if not dates.empty:
                 first = dates.min().strftime('%Y-%m-%d %H:%M')
                 last = dates.max().strftime('%Y-%m-%d %H:%M')

@@ -28,8 +28,13 @@ def _parse_bool(val):
 
 
 def _safe_datetime(dt_series):
-    """Converte série para datetime, removendo timezone se presente."""
-    dt = pd.to_datetime(dt_series, errors='coerce')
+    """Converte série para datetime, removendo timezone se presente.
+
+    Via `parse_data`: `pd.to_datetime` sem formato lia '05/03/2024' como
+    3 de maio.
+    """
+    from validators import parse_data
+    dt = parse_data(dt_series)
     if hasattr(dt, 'dt') and dt.dt.tz is not None:
         dt = dt.dt.tz_localize(None)
     return dt
@@ -199,9 +204,13 @@ def calcular_score(df, dt_fato, periodo_fato, contagem_provedores, janela_horas_
     # Continuidade temporal (item 4): para cada provedor basta saber se
     # existe data antes e depois do fato — duas varreduras vetorizadas em
     # vez de filtrar o frame inteiro por linha (O(n_linhas²)).
-    prov_dt = df_scored.loc[df_scored['_dt'].notna(), ['Ip_Dono', '_dt']]
-    prov_antes = set(prov_dt.loc[prov_dt['_dt'] < dt_fato, 'Ip_Dono'])
-    prov_depois = set(prov_dt.loc[prov_dt['_dt'] > dt_fato, 'Ip_Dono'])
+    if 'Ip_Dono' in df_scored.columns:
+        prov_dt = df_scored.loc[df_scored['_dt'].notna(), ['Ip_Dono', '_dt']]
+        prov_antes = set(prov_dt.loc[prov_dt['_dt'] < dt_fato, 'Ip_Dono'])
+        prov_depois = set(prov_dt.loc[prov_dt['_dt'] > dt_fato, 'Ip_Dono'])
+    else:
+        # Sem provedor não há continuidade a pontuar — antes era KeyError.
+        prov_antes = prov_depois = set()
 
     scores = []
     falhas = 0
@@ -247,13 +256,21 @@ def calcular_score(df, dt_fato, periodo_fato, contagem_provedores, janela_horas_
 
             scores.append(score)
 
+        except MemoryError:
+            raise
         except Exception:
+            # Um registro malformado não derruba a análise, mas a falha não
+            # some: o traceback do primeiro vai para o log e a contagem vai
+            # para `attrs['score_falhas']`, que a interface exibe.
+            if not falhas:
+                logger.exception("calcular_score: falha ao pontuar registro %r", rd.get('Ip'))
             falhas += 1
             scores.append(0.0)
 
     if falhas:
         logger.warning("calcular_scores: %d registros com falha receberam Score=0", falhas)
     df_scored['Score'] = scores
+    df_scored.attrs['score_falhas'] = falhas
 
     df_scored['Score'] = df_scored['Score'].clip(0, 100).fillna(0).round(1)
     df_scored = df_scored.drop(columns=['_dt'], errors='ignore')
@@ -730,6 +747,9 @@ def render_analise_investigativa(df):
             df_scored = calcular_score(
                 df, dt_fato, periodo_fato, contagem_prov,
                 janela_horas_max=float(janela_horas))
+            if df_scored.attrs.get('score_falhas'):
+                st.warning(f"⚠️ {df_scored.attrs['score_falhas']} registro(s) não puderam ser "
+                           "pontuados e receberam Score 0. Detalhes no log da aplicação.")
 
             resultado_unicidade = detectar_usuario_unico(df_scored, dt_fato)
 
@@ -839,14 +859,25 @@ def render_analise_investigativa(df):
         df_show = df_scored[available_cols].sort_values('Score', ascending=False).copy()
         df_show['Score'] = df_show['Score'].fillna(0)
 
+        # O Styler cria uma estrutura CSS por célula: sobre o frame inteiro de
+        # um caso real (200k linhas) ele estoura `styler.render.max_elements`.
+        # A prévia é limitada e a truncagem declarada; o CSV leva tudo.
+        from helpers.large_data import PREVIEW_ROWS, prepare_button, show_truncation
+        from validators import sanitize_dataframe_for_csv
+        preview = df_show.head(PREVIEW_ROWS)
         st.dataframe(
-            df_show.style.background_gradient(subset=['Score'], cmap='RdYlGn', vmin=0, vmax=100),
+            preview.style.background_gradient(subset=['Score'], cmap='RdYlGn', vmin=0, vmax=100),
             use_container_width=True, height=500, hide_index=True
         )
+        show_truncation(len(preview), len(df_show))
 
-        csv_score = df_show.to_csv(index=False, sep=';', encoding='utf-8-sig')
-        st.download_button("📥 Baixar Score CSV", csv_score.encode('utf-8'),
-                           "score_investigativo.csv", "text/csv", key="inv_dl_score")
+        if prepare_button("⚙️ Preparar Score CSV", df_show, 'inv_score_csv'):
+            # `to_csv` sem caminho ignora `encoding`: o BOM só existe
+            # codificando aqui. E o valor vai sanitizado contra fórmulas.
+            csv_score = sanitize_dataframe_for_csv(df_show).to_csv(
+                index=False, sep=';').encode('utf-8-sig')
+            st.download_button("📥 Baixar Score CSV", csv_score,
+                               "score_investigativo.csv", "text/csv", key="inv_dl_score")
 
     # ---- ABA 3: Usuário Único ----
     with tab_unico:
@@ -916,10 +947,12 @@ def render_analise_investigativa(df):
             if selected:
                 sel_indices = [options.index(s) for s in selected if s in options]
                 df_selected = df_of_show.iloc[sel_indices]
-                csv_selecionados = df_selected.to_csv(index=False, sep=';', encoding='utf-8-sig')
+                from validators import sanitize_dataframe_for_csv
+                csv_selecionados = sanitize_dataframe_for_csv(df_selected).to_csv(
+                    index=False, sep=';').encode('utf-8-sig')
                 st.download_button(
                     f"📥 Baixar {len(df_selected)} IPs Selecionados (CSV)",
-                    csv_selecionados.encode('utf-8'),
+                    csv_selecionados,
                     "ips_selecionados.csv", "text/csv", key="inv_dl_selecionados"
                 )
 

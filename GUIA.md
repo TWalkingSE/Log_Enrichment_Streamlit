@@ -1,4 +1,4 @@
-# 📘 Guia do Usuário — Log Enrichment v5.2 Pro
+# 📘 Guia do Usuário — Log Enrichment v5.4 Pro
 
 > 🇺🇸 [English](docs/English/GUIDE.md) · 🇪🇸 [Español](docs/Spanish/GUIA.md)
 
@@ -492,4 +492,4 @@ R: **Não.** A experiência principal do produto está em Leaflet/Folium 2D. Se 
 
 ---
 
-*Log Enrichment v5.2 Pro — Mapa 2D investigativo com Leaflet/Folium e assistente AI local via Ollama*.
+*Log Enrichment v5.4 Pro — Mapa 2D investigativo com Leaflet/Folium e assistente AI local via Ollama*.

@@ -6,25 +6,36 @@ Investigativa, Análise AI, Comparação Temporal, Saúde dos Dados.
 import streamlit as st
 import pandas as pd
 import json
+import logging
 import os
 from datetime import datetime, date
 
-from analysis import compute_data_health, calculate_risk_scores
+from analysis import compute_data_health
 from helpers.large_data import gate
-from ip_investigativo import render_analise_investigativa
+from ip_investigativo import calcular_score, render_analise_investigativa, selecionar_provedores
 from components.visualizations import render_health_gauges
 from ai_assistant import AI_MODELS, check_ollama_status, get_default_ai_tier, run_ai_analysis
 from i18n import t
+from helpers.atomic_io import atomic_write_json
+
+logger = logging.getLogger(__name__)
 
 _SNAPSHOTS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
                                 'output', 'analysis_snapshots.json')
 
 
 def _load_snapshots():
-    if os.path.exists(_SNAPSHOTS_FILE):
+    """Snapshots salvos. Arquivo ilegível é informado, não tratado como vazio."""
+    if not os.path.exists(_SNAPSHOTS_FILE):
+        return []
+    try:
         with open(_SNAPSHOTS_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
-    return []
+    except (OSError, ValueError) as exc:
+        logger.exception("Snapshots ilegíveis em %s", _SNAPSHOTS_FILE)
+        st.error(f"⚠️ Não foi possível ler os snapshots salvos ({exc}). "
+                 f"Arquivo: {_SNAPSHOTS_FILE}")
+        return []
 
 
 def _save_snapshot(snapshot):
@@ -33,9 +44,7 @@ def _save_snapshot(snapshot):
     # Manter no máximo 50 snapshots
     if len(snapshots) > 50:
         snapshots = snapshots[-50:]
-    os.makedirs(os.path.dirname(_SNAPSHOTS_FILE), exist_ok=True)
-    with open(_SNAPSHOTS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(snapshots, f, ensure_ascii=False, indent=2, default=str)
+    atomic_write_json(_SNAPSHOTS_FILE, snapshots, ensure_ascii=False, indent=2, default=str)
 
 
 def page_operacional():
@@ -81,16 +90,21 @@ def page_operacional():
 
             if st.button("🧠 Executar Análise AI", type="primary", key="ai_run_btn"):
                 with st.spinner("Analisando com IA... pode levar alguns minutos."):
-                    # Preparar dados
-                    df_scored = calculate_risk_scores(df)
-                    contagem = df['Ip_Dono'].value_counts().to_dict() if 'Ip_Dono' in df.columns else {}
-                    provedores = list(contagem.keys())[:10]
+                    # O prompt da IA descreve REGISTROS (Ip, Data, Ip_Dono,
+                    # Ip_Proxy...). `calculate_risk_scores` devolve uma linha
+                    # por IP com outras colunas — o prompt saía com "0 IPs" e
+                    # percentuais acima de 100%. Mesma preparação da análise
+                    # investigativa.
+                    dt_fato_dt = datetime.combine(dt_fato, datetime.min.time())
+                    provedores, contagem, _cobertura = selecionar_provedores(df)
+                    df_scored = calcular_score(df, dt_fato_dt, periodo_fato, contagem,
+                                               janela_horas_max=float(janela_h))
 
                     result = run_ai_analysis(
                         df_scored=df_scored,
                         provedores_sel=provedores,
                         contagem_prov=contagem,
-                        dt_fato=datetime.combine(dt_fato, datetime.min.time()),
+                        dt_fato=dt_fato_dt,
                         periodo_fato=periodo_fato,
                         janela_horas=janela_h,
                         ips_por_provedor=ips_por_prov,

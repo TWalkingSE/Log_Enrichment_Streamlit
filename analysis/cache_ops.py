@@ -7,8 +7,17 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-def backup_cache(cache_file='ip_cache.json', backup_dir='cache_backups', max_backups=10):
-    """Create a timestamped backup of the IP cache file."""
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def backup_cache(cache_file=None, backup_dir=None, max_backups=10):
+    """Create a timestamped backup of the IP cache file.
+
+    Caminhos padrão ancorados na raiz do projeto: relativos, o backup copiava
+    o cache do diretório de trabalho — não necessariamente o que o app usa.
+    """
+    cache_file = cache_file or os.path.join(_ROOT, 'ip_cache.json')
+    backup_dir = backup_dir or os.path.join(_ROOT, 'cache_backups')
     if not os.path.exists(cache_file):
         return None
 

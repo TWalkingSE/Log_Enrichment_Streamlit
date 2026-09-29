@@ -12,7 +12,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import pandas as pd
 
@@ -91,26 +91,34 @@ def read_meta(name: str = "current") -> Optional[dict]:
         return None
 
 
-def _check_schema(meta_path: Path, name: str) -> None:
-    """Avisa quando a sessão em disco foi gravada por outra versão do esquema.
+def _check_schema(meta_path: Path, name: str) -> List[str]:
+    """Confere o manifesto da sessão; devolve os avisos para a interface.
 
     Sessões antigas continuam sendo carregadas — recusá-las inutilizaria dados
-    de investigações em andamento —, mas a divergência precisa ficar no log:
-    interpretar dados de v1 com as regras de v2 pode mudar conclusões.
+    de investigações em andamento —, mas divergências de esquema, manifesto
+    ilegível e sha256 que não confere são devolvidos ao chamador. Antes iam só
+    para o log: "possível adulteração" nunca chegava ao analista.
     """
+    avisos: List[str] = []
     if not meta_path.exists():
-        return
+        return avisos
     try:
         with open(meta_path, encoding="utf-8") as fh:
             meta = json.load(fh)
-    except (OSError, ValueError):
-        return
+    except (OSError, ValueError) as exc:
+        logger.exception("Manifesto ilegível em %s", meta_path)
+        avisos.append(f"Manifesto da sessão ilegível ({exc}): a integridade do "
+                      "arquivo restaurado NÃO pôde ser conferida.")
+        return avisos
     versao = meta.get("schema_version")
     if versao is not None and versao != SCHEMA_VERSION:
         logger.warning(
             "Sessão '%s' foi gravada com schema v%s, mas esta versão usa v%d. "
             "Reprocesse o arquivo original se as classificações parecerem inconsistentes.",
             name, versao, SCHEMA_VERSION)
+        avisos.append(f"Sessão gravada com schema v{versao} (atual: v{SCHEMA_VERSION}). "
+                      "Reprocesse o arquivo original se as classificações parecerem "
+                      "inconsistentes.")
     # Proveniência: o arquivo de dados precisa ser byte-a-byte o que o
     # manifesto declara — divergência = arquivo trocado ou corrompido.
     sha_meta = meta.get("sha256")
@@ -124,6 +132,11 @@ def _check_schema(meta_path: Path, name: str) -> None:
                     "Sessão '%s': arquivo de dados diverge do manifesto "
                     "(sha256 esperado %s, atual %s) — possível adulteração "
                     "ou gravação interrompida.", name, sha_meta[:12], atual[:12])
+                avisos.append(
+                    f"O arquivo da sessão restaurada diverge do manifesto (sha256 "
+                    f"esperado {sha_meta[:12]}…, atual {atual[:12]}…): possível "
+                    "adulteração ou gravação interrompida. Reprocesse o arquivo original.")
+    return avisos
 
 
 def save_dataframe(df: Optional[pd.DataFrame], name: str = "current") -> Optional[str]:
@@ -150,7 +163,7 @@ def save_dataframe(df: Optional[pd.DataFrame], name: str = "current") -> Optiona
                     paths["parquet"], len(df), SCHEMA_VERSION)
         return str(paths["parquet"])
     except Exception as e:
-        logger.debug("Parquet indisponível (%s); usando pickle", e)
+        logger.warning("Parquet indisponível (%s); usando pickle", e)
         try:
             # Mesma garantia atômica do parquet: um pickle truncado por falha
             # no meio da gravação era servido depois como se fosse válido.
@@ -160,30 +173,37 @@ def save_dataframe(df: Optional[pd.DataFrame], name: str = "current") -> Optiona
             _write_meta(paths["meta"], df, str(paths["pickle"]))
             logger.info("DataFrame salvo em %s (%s linhas)", paths["pickle"], len(df))
             return str(paths["pickle"])
-        except Exception as e2:
-            logger.error("Falha ao persistir DataFrame: %s", e2)
+        except Exception:
+            logger.exception("Falha ao persistir DataFrame")
             return None
 
 
 def load_dataframe(name: str = "current") -> Optional[pd.DataFrame]:
-    """Load last persisted DataFrame if present."""
+    """Load last persisted DataFrame if present.
+
+    Avisos de integridade do manifesto vão em
+    `df.attrs['persistence_warnings']` para a interface exibi-los.
+    """
     paths = session_paths(name)
-    _check_schema(paths["meta"], name)
+    avisos = _check_schema(paths["meta"], name)
+    df: Optional[pd.DataFrame] = None
     if paths["parquet"].exists():
         try:
-            return pd.read_parquet(paths["parquet"])
+            df = pd.read_parquet(paths["parquet"])
         except Exception as e:
             # Não cair para o pickle aqui: ele pode ser de outro alvo ou de uma
             # execução anterior, e entregar dado obsoleto apresentado como atual
             # é pior do que não entregar dado nenhum numa análise pericial.
             logger.error("Falha ao ler parquet %s: %s", paths["parquet"], e)
             raise
-    if paths["pickle"].exists():
+    elif paths["pickle"].exists():
         try:
-            return pd.read_pickle(paths["pickle"])
-        except Exception as e:
-            logger.warning("Falha ao ler pickle %s: %s", paths["pickle"], e)
-    return None
+            df = pd.read_pickle(paths["pickle"])
+        except Exception:
+            logger.exception("Falha ao ler pickle %s", paths["pickle"])
+    if df is not None:
+        df.attrs['persistence_warnings'] = avisos
+    return df
 
 
 def clear_dataframe(name: str = "current") -> None:

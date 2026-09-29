@@ -30,7 +30,10 @@ def detect_vpn_timing(df, date_col='Data', max_gap_seconds=5):
             gap_sec = abs((row['_dt'] - prev['_dt']).total_seconds())
             if gap_sec <= max_gap_seconds:
                 prev_hosting = as_bool(prev.get('Ip_Hospedagem'), field='Ip_Hospedagem') or as_bool(prev.get('Ip_Proxy'), field='Ip_Proxy')
-                curr_residential = str(row.get('Ip_Hospedagem', False)).lower() != 'true' and str(row.get('Ip_Proxy', False)).lower() != 'true'
+                # `str(x).lower() != 'true'` tomava '1' e 'VERDADEIRO' por
+                # residencial: um proxy saía como o "IP real" do par.
+                curr_residential = not (as_bool(row.get('Ip_Hospedagem'), field='Ip_Hospedagem')
+                                        or as_bool(row.get('Ip_Proxy'), field='Ip_Proxy'))
 
                 if prev_hosting and curr_residential and prev.get(ip_col) != row.get(ip_col):
                     pairs.append({

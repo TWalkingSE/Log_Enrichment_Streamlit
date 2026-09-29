@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from validators import as_bool, bool_series
+from validators import as_bool, bool_series, sanitize_dataframe_for_csv
 
 
 def _utcnow() -> str:
@@ -87,7 +87,9 @@ def export_ioc_csv(df: pd.DataFrame, *, ip_col: Optional[str] = None) -> str:
             "mobile": as_bool(row.get("Ip_Movel"), field="Ip_Movel"),
         })
     out = pd.DataFrame(rows)
-    return out.to_csv(index=False)
+    # `org`/`city` vêm da API externa: um valor começando com `=` seria
+    # avaliado como fórmula ao abrir o CSV no Excel.
+    return sanitize_dataframe_for_csv(out).to_csv(index=False)
 
 
 def build_stix_bundle(

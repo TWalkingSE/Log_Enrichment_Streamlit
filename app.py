@@ -1,5 +1,5 @@
 """
-Log Enrichment - Streamlit Application v5.2 Pro
+Log Enrichment - Streamlit Application v5.4 Pro
 Multipage architecture with st.navigation: config, CSS, sidebar, auth, and routing.
 Page implementations in pages_app/ directory.
 """
@@ -7,6 +7,8 @@ Page implementations in pages_app/ directory.
 import streamlit as st
 import os
 import logging
+import threading
+import time
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
@@ -59,6 +61,33 @@ register_plotly_theme()
 AUTH_PASSWORD = os.getenv('AUTH_PASSWORD', '')
 AUTH_PASSWORD_HASH = os.getenv('AUTH_PASSWORD_HASH', '')
 MAX_LOGIN_ATTEMPTS = 5
+# Teto GLOBAL do processo. O limite de 5 tentativas vive em `session_state`,
+# e basta abrir uma nova sessão do navegador para zerá-lo; este não zera.
+GLOBAL_MAX_FAILURES = 20
+GLOBAL_WINDOW_SECONDS = 300
+
+
+@st.cache_resource
+def _login_throttle():
+    """Estado compartilhado entre sessões: timestamps de falhas recentes."""
+    return {'lock': threading.Lock(), 'falhas': []}
+
+
+def _global_lock_remaining():
+    """Segundos até liberar o login global, ou 0 se liberado."""
+    estado = _login_throttle()
+    agora = time.time()
+    with estado['lock']:
+        estado['falhas'] = [t for t in estado['falhas'] if agora - t < GLOBAL_WINDOW_SECONDS]
+        if len(estado['falhas']) < GLOBAL_MAX_FAILURES:
+            return 0
+        return int(GLOBAL_WINDOW_SECONDS - (agora - estado['falhas'][0])) + 1
+
+
+def _register_global_failure():
+    estado = _login_throttle()
+    with estado['lock']:
+        estado['falhas'].append(time.time())
 
 # ============================================================
 # PAGE CONFIG
@@ -105,11 +134,6 @@ init_session_state()
 # ============================================================
 # AUTHENTICATION
 # ============================================================
-def check_auth():
-    if not AUTH_PASSWORD and not AUTH_PASSWORD_HASH:
-        return True
-    return st.session_state.get('authenticated', False)
-
 if (AUTH_PASSWORD or AUTH_PASSWORD_HASH) and not st.session_state.authenticated:
     auth_header()
 
@@ -126,6 +150,13 @@ if (AUTH_PASSWORD or AUTH_PASSWORD_HASH) and not st.session_state.authenticated:
         st.session_state.login_locked_until = None
         st.session_state.login_attempts = 0
 
+    global_remaining = _global_lock_remaining()
+    if global_remaining:
+        logger.warning("Login bloqueado globalmente: %d falhas em %ds",
+                       GLOBAL_MAX_FAILURES, GLOBAL_WINDOW_SECONDS)
+        st.error(t('auth.too_many_attempts', remaining=global_remaining))
+        st.stop()
+
     pwd = st.text_input(t('auth.password'), type="password", key="auth_pwd")
     if st.button(t('auth.login'), type="primary"):
         is_valid = False
@@ -139,6 +170,7 @@ if (AUTH_PASSWORD or AUTH_PASSWORD_HASH) and not st.session_state.authenticated:
             st.session_state.login_attempts = 0
             st.rerun()
         else:
+            _register_global_failure()
             st.session_state.login_attempts += 1
             remaining = MAX_LOGIN_ATTEMPTS - st.session_state.login_attempts
             if st.session_state.login_attempts >= MAX_LOGIN_ATTEMPTS:
@@ -168,6 +200,11 @@ if st.session_state.get('df_resultado') is None:
         if restored is not None and not restored.empty:
             st.session_state.df_resultado = restored
             bump_data_version()
+            avisos = restored.attrs.get('persistence_warnings') or []
+            if avisos:
+                # Integridade da sessão restaurada: vai para a tela, não só
+                # para o log.
+                st.session_state['_restore_error'] = " ".join(avisos)
     except MemoryError:
         # Um `except Exception: pass` aqui engolia inclusive MemoryError e
         # apresentava "sem dados" como se estivesse tudo bem.
@@ -184,13 +221,25 @@ if st.session_state.get('df_resultado') is None:
 from helpers.runtime_flags import is_air_gapped, retention_enabled
 if 'air_gapped' not in st.session_state:
     st.session_state.air_gapped = is_air_gapped()
-if retention_enabled() and not st.session_state.get('_retention_ran'):
+
+
+@st.cache_resource
+def _run_retention_once():
+    """Retenção uma vez por PROCESSO.
+
+    Com a flag em `session_state` ela rodava a cada nova sessão do navegador,
+    regravando cache e audit trail enquanto outra sessão enriquecia dados.
+    """
+    from helpers.retention import run_retention
     try:
-        from helpers.retention import run_retention
-        run_retention()
-    except Exception as e:
-        logger.warning("retention on startup failed: %s", e)
-    st.session_state._retention_ran = True
+        return run_retention()
+    except Exception:
+        logger.exception("Retenção na inicialização falhou")
+        return None
+
+
+if retention_enabled():
+    _run_retention_once()
 
 # ============================================================
 # PAGE IMPORTS

@@ -20,7 +20,6 @@
         "proxy_hosting_penalty": -10
     },
     "vpn_detection": {
-        "rotation_interval_minutes": 30,
         "max_asn_diversity": 5,
         "residential_jump_hours": 1,
         "min_rotation_count": 3

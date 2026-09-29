@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import os
 import logging
+import threading
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,15 @@ logger = logging.getLogger(__name__)
 AUDIT_LOG_DIR = os.path.join(os.path.dirname(__file__), 'logs')
 AUDIT_LOG_FILE = os.path.join(AUDIT_LOG_DIR, 'audit_trail.jsonl')
 AUDIT_HMAC_SECRET = os.getenv('AUDIT_HMAC_SECRET', '').strip()
+
+# Ler o `prev_hash`, anexar o evento e podar o arquivo precisam ser uma coisa
+# só: duas sessões do Streamlit (threads do mesmo processo) liam o mesmo
+# último hash e gravavam dois eventos com o mesmo `prev_hash` — uma quebra de
+# cadeia fabricada pela concorrência. Reentrante porque o arquivamento grava o
+# seu próprio evento de checkpoint.
+_LOCK = threading.RLock()
+
+CHECKPOINT_ACTION = 'RETENTION_CHECKPOINT'
 
 
 def _compute_hash(data):
@@ -62,8 +72,10 @@ def _last_event_hash():
                     last = line
         if last:
             return json.loads(last).get('event_hash')
-    except Exception as e:
-        logger.warning(f"Não foi possível ler prev_hash do audit trail: {e}")
+    except (OSError, ValueError):
+        # O próximo evento sai sem `prev_hash` e a verificação acusa a quebra
+        # — o problema fica visível, não mascarado.
+        logger.exception("Não foi possível ler prev_hash do audit trail")
     return None
 
 
@@ -73,6 +85,12 @@ def log_audit_event(action, details=None, user=None, input_file=None,
     Registra evento de auditoria no log forense (append-only JSONL).
     Cada evento inclui prev_hash (hash do evento anterior) para cadeia de integridade.
     """
+    with _LOCK:
+        return _log_audit_event_locked(action, details, user, input_file,
+                                       output_file, record_count)
+
+
+def _log_audit_event_locked(action, details, user, input_file, output_file, record_count):
     os.makedirs(AUDIT_LOG_DIR, exist_ok=True)
 
     event = {
@@ -99,12 +117,19 @@ def log_audit_event(action, details=None, user=None, input_file=None,
     if event_hmac:
         event['event_hmac'] = event_hmac
 
+    line = json.dumps(event, ensure_ascii=False, default=str) + '\n'
+    # `_persisted` é anexado DEPOIS de serializar: não faz parte do evento
+    # gravado nem do hash. Diz ao chamador se o evento chegou ao disco —
+    # antes, uma falha de escrita ia só para o log e o evento voltava como se
+    # tivesse sido registrado.
     try:
         with open(AUDIT_LOG_FILE, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(event, ensure_ascii=False, default=str) + '\n')
+            f.write(line)
         logger.info(f"Audit: {action} | hash={event['event_hash'][:12]}")
-    except Exception as e:
-        logger.error(f"Erro ao registrar auditoria: {e}")
+        event['_persisted'] = True
+    except (OSError, TypeError, ValueError):
+        logger.exception("Erro ao registrar evento de auditoria %s", action)
+        event['_persisted'] = False
 
     return event
 
@@ -134,10 +159,51 @@ def generate_integrity_receipt(input_file, output_file, alvo, record_count,
     # Hash final do recibo
     receipt['receipt_hash'] = _compute_hash(receipt)
 
-    log_audit_event('INTEGRITY_RECEIPT', details=receipt, input_file=input_file,
-                    output_file=output_file, record_count=record_count)
+    event = log_audit_event('INTEGRITY_RECEIPT', details=receipt, input_file=input_file,
+                            output_file=output_file, record_count=record_count)
+    # Chave privada (fora do hash, não exibida): permite ao chamador avisar
+    # que o recibo não entrou no audit trail.
+    receipt['_audit_event'] = event
 
     return receipt
+
+
+def archive_old_events(max_age_days, max_lines):
+    """Retenção do audit trail SEM quebrar a cadeia de custódia.
+
+    Os eventos podados vão, inalterados, para `audit_trail.<data>.jsonl`; o
+    arquivo ativo mantém os demais byte a byte; e um evento
+    RETENTION_CHECKPOINT encadeado registra o arquivamento, o sha256 dele e o
+    hash do último evento arquivado (a âncora que `verify_audit_integrity`
+    aceita como predecessor do primeiro evento ativo).
+
+    Antes, a retenção reescrevia o arquivo e a verificação seguinte acusava
+    adulteração no primeiro evento que sobrou.
+    """
+    from pathlib import Path
+    from helpers.retention import prune_jsonl_by_age_and_lines
+
+    with _LOCK:
+        r = prune_jsonl_by_age_and_lines(Path(AUDIT_LOG_FILE), max_age_days=max_age_days,
+                                         max_lines=max_lines)
+        archive = r.get('archive')
+        if r.get('removed') and archive:
+            evento = log_audit_event(CHECKPOINT_ACTION, details={
+                'archive_file': os.path.basename(archive),
+                'archive_sha256': _compute_file_hash(archive),
+                'archived_count': r['removed'],
+                'anchor_hash': r.get('anchor_hash'),
+            })
+            r['checkpoint_persisted'] = evento.get('_persisted', False)
+        return r
+
+
+def count_audit_events():
+    """Total de linhas de evento no audit trail ativo (sem carregar o JSON)."""
+    if not os.path.exists(AUDIT_LOG_FILE):
+        return 0
+    with open(AUDIT_LOG_FILE, 'r', encoding='utf-8') as f:
+        return sum(1 for line in f if line.strip())
 
 
 def get_audit_trail(limit=100):
@@ -167,25 +233,72 @@ def get_audit_trail(limit=100):
     return events[-limit:]
 
 
+def _checkpoint_anchors(events):
+    """{anchor_hash: detalhes} declarados por eventos RETENTION_CHECKPOINT."""
+    anchors = {}
+    for _, event in events:
+        if event.get('action') == CHECKPOINT_ACTION:
+            det = event.get('details') or {}
+            if det.get('anchor_hash'):
+                anchors[det['anchor_hash']] = det
+    return anchors
+
+
 def verify_audit_integrity():
     """
     Verifica integridade do log de auditoria:
     - recalcula event_hash de cada evento
     - valida prev_hash contra o event_hash do evento anterior (quando presente)
     - valida event_hmac quando AUDIT_HMAC_SECRET está configurado
+
+    Lê o arquivo INTEIRO: com `limit=10000`, acima de 10 mil eventos o
+    primeiro da janela tinha `prev_hash` e acusava quebra de cadeia falsa.
+    Linha que não é JSON válido conta como inválida — antes era pulada.
+
+    Retenção: o primeiro evento do arquivo ativo aponta para o último
+    evento arquivado. Isso é aceito se, e somente se, um RETENTION_CHECKPOINT
+    do próprio arquivo declarar esse hash como âncora; se o arquivo de
+    arquivamento existir, o sha256 dele também é conferido.
     """
-    events = get_audit_trail(limit=10000)
+    events = []
+    corrupt = []
+    if os.path.exists(AUDIT_LOG_FILE):
+        with open(AUDIT_LOG_FILE, 'r', encoding='utf-8') as f:
+            for lineno, line in enumerate(f, start=1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    events.append((lineno, json.loads(line)))
+                except json.JSONDecodeError as exc:
+                    corrupt.append((lineno, str(exc)))
+
     result = {
-        'total': len(events),
+        'total': len(events) + len(corrupt),
         'valid': 0,
-        'invalid': 0,
+        'invalid': len(corrupt),
         'chain_breaks': 0,
         'hmac_failures': 0,
-        'details': [],
+        'checkpoints': 0,
+        'archive_failures': 0,
+        'archives_missing': 0,
+        'details': [{'line': ln, 'error': f'JSON inválido: {msg}'} for ln, msg in corrupt],
     }
 
+    anchors = _checkpoint_anchors(events)
+    for det in anchors.values():
+        result['checkpoints'] += 1
+        archive = os.path.join(AUDIT_LOG_DIR, os.path.basename(det.get('archive_file') or ''))
+        if not det.get('archive_file') or not os.path.exists(archive):
+            result['archives_missing'] += 1
+        elif _compute_file_hash(archive) != det.get('archive_sha256'):
+            result['archive_failures'] += 1
+            result['invalid'] += 1
+            result['details'].append({'archive_file': det.get('archive_file'),
+                                      'error': 'sha256 do arquivamento não confere'})
+
     prev_hash = None
-    for i, event in enumerate(events):
+    for i, (lineno, event) in enumerate(events):
         stored_hash = event.pop('event_hash', None)
         stored_hmac = event.pop('event_hmac', None)
         event_prev = event.get('prev_hash')
@@ -199,7 +312,7 @@ def verify_audit_integrity():
         # Only enforce chain when prev_hash field is present (new events)
         if 'prev_hash' in event:
             if i == 0:
-                chain_ok = event_prev in (None, '')
+                chain_ok = event_prev in (None, '') or event_prev in anchors
             else:
                 chain_ok = event_prev == prev_hash
             if not chain_ok:
@@ -221,6 +334,7 @@ def verify_audit_integrity():
             result['invalid'] += 1
             result['details'].append({
                 'index': i,
+                'line': lineno,
                 'timestamp': event.get('timestamp'),
                 'action': event.get('action'),
                 'stored_hash': stored_hash,

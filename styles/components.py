@@ -59,7 +59,7 @@ def kpi_row(items):
                 )
 
 
-def sidebar_brand(version="v5.2 Pro"):
+def sidebar_brand(version="v5.4 Pro"):
     """Render the sidebar brand/logo section."""
     st.markdown("### 🔍 Log Enrichment")
     st.markdown(f'<div class="le-sidebar-version">{version}</div>', unsafe_allow_html=True)

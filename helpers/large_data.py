@@ -14,6 +14,7 @@ que derruba o websocket com `WebSocketClosedError`.
 
 import hashlib
 import logging
+import uuid
 from typing import Optional
 
 import streamlit as st
@@ -30,9 +31,15 @@ PREVIEW_ROWS = 1_000
 # só mora a política de interface, para este módulo não arrastar o pipeline
 # inteiro para dentro do import de `app.py`.
 XLSX_DISK_THRESHOLD = 50_000
-# Tetos de renderização do grafo de rede.
-MAX_GRAPH_NODES = 500
-MAX_GRAPH_EDGES = 5_000
+
+# Resultados calculados sobre o alvo atual que vivem em `session_state` fora
+# dos portões. Sem apagá-los na troca de dataset, a página continua exibindo a
+# análise de IA, o VirusTotal ou o Tor do alvo ANTERIOR ao lado dos dados novos.
+_RESULT_KEYS = (
+    'inv_result', 'inv_ai_result', 'ai_result',
+    'vt_scores', 'shodan_results', 'shodan_risk', 'tor_result',
+    '_xlsx_disco',
+)
 
 
 def row_count(df) -> int:
@@ -72,29 +79,48 @@ def data_version() -> int:
     return st.session_state.get('_data_version', 0)
 
 
+def data_token() -> str:
+    """Identidade aleatória do dataset atual desta sessão.
+
+    `st.cache_data` é global ao processo, e `data_version` recomeça em 0 em
+    toda sessão: com ela sozinha, duas sessões com datasets do mesmo tamanho
+    compartilhavam entradas de cache — um analista recebia o export do outro.
+    """
+    token = st.session_state.get('_data_token')
+    if not token:
+        token = uuid.uuid4().hex
+        st.session_state['_data_token'] = token
+    return token
+
+
 def bump_data_version() -> None:
-    """Invalida os portões e preparos quando o dataset muda.
+    """Invalida portões, preparos e resultados quando o dataset muda.
 
     Sem isso, o analista carrega um novo alvo e continua vendo o resultado
-    já liberado do alvo anterior.
+    já liberado — ou já calculado — do alvo anterior.
     """
     st.session_state['_data_version'] = data_version() + 1
+    st.session_state['_data_token'] = uuid.uuid4().hex
     stale = [k for k in st.session_state
              if isinstance(k, str) and (k.startswith('_gate_') or k.startswith('_prep_'))]
+    stale += [k for k in _RESULT_KEYS if k in st.session_state]
     for key in stale:
         del st.session_state[key]
     if stale:
-        logger.info("large_data: %d portões invalidados por troca de dataset", len(stale))
+        logger.info("large_data: %d portões/resultados invalidados por troca de dataset",
+                    len(stale))
 
 
 def cache_key(*parts) -> str:
-    """Chave de cache curta e barata, derivada da versão dos dados.
+    """Chave de cache curta e barata, derivada da identidade dos dados.
 
     Serve para não passar o DataFrame como argumento hasheado ao
     `st.cache_data` — o Streamlit hasheia os bytes do frame a cada rerun,
-    mesmo quando há acerto de cache.
+    mesmo quando há acerto de cache. Por isso o chamador precisa passar em
+    `parts` tudo o que muda o conteúdo — filtros inclusive: o tamanho do
+    frame filtrado não identifica quais linhas ele tem.
     """
-    raw = '|'.join([str(data_version())] + [str(p) for p in parts])
+    raw = '|'.join([data_token(), str(data_version())] + [str(p) for p in parts])
     return hashlib.sha1(raw.encode('utf-8')).hexdigest()[:16]
 
 

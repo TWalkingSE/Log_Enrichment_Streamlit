@@ -20,8 +20,11 @@ venv/Scripts/python.exe -m pytest tests/test_load.py -m slow
 ```
 
 ```bash
-venv/Scripts/python.exe -m ruff check . && venv/Scripts/python.exe -m mypy auth_password.py api_client.py validators.py
+venv/Scripts/python.exe -m ruff check . && venv/Scripts/python.exe -m mypy
 ```
+
+(O `mypy` sem argumentos usa a lista de `[tool.mypy].files` do `pyproject.toml`
+— a mesma que o CI roda.)
 
 ```bash
 venv/Scripts/python.exe -m streamlit run app.py
@@ -75,10 +78,35 @@ senão `-2+3+cmd|' /C calc'!A0` passa como se fosse número negativo.
 `as_bool` / `bool_series` de [validators.py](validators.py), que registram um
 aviso por token desconhecido em vez de classificar errado em silêncio.
 
-**Escritas em disco são atômicas.** Cache de IP, sessões em parquet e o Excel
-colorido gerado em disco gravam em `.part` + `os.replace`. O padrão truncar-e-escrever já destruiu o cache inteiro
+**Escritas em disco são atômicas.** Use `helpers/atomic_io.py`
+(`atomic_write`, `atomic_write_json`...): cache de IP, sessões, CSV/Excel do
+pipeline, histórico, snapshots e cache Tor gravam em temporário + `os.replace`. O padrão truncar-e-escrever já destruiu o cache inteiro
 numa falha no meio da gravação — e o carregamento seguinte começava do zero sem
 avisar ninguém.
+
+**O cache de IPs tem um leitor só.** Fora do `IPAPIClient`, leia com
+`api_client.read_ip_cache()` (desembrulha e verifica o envelope assinado) e, se o
+dado for servido como atual, passe por `filter_fresh_cache` (TTL). Caminho:
+`api_client.IP_CACHE_PATH` — nunca `'ip_cache.json'` relativo ao diretório de
+trabalho. `json.load` direto recebia o envelope `{'payload', 'signature'}` e a
+página dizia "sem histórico".
+
+**Chaves de cache levam o filtro.** `cache_key(...)` identifica a sessão e a
+versão do dataset; o resto (filtros, colunas) é responsabilidade do chamador. O
+tamanho do frame filtrado não identifica quais linhas ele tem. Resultado
+calculado sobre o alvo que vive em `session_state` fora dos portões entra em
+`_RESULT_KEYS` ([helpers/large_data.py](helpers/large_data.py)), senão sobrevive
+à troca de alvo.
+
+**O audit trail nunca é reescrito.** A retenção passa por
+`audit_logger.archive_old_events`: arquiva os eventos antigos intactos e ancora a
+cadeia com `RETENTION_CHECKPOINT`. Qualquer escrita no trail acontece sob
+`audit_logger._LOCK`. `log_audit_event` devolve `_persisted`; quem chama mostra
+erro quando for `False`.
+
+**Datas `NN/NN/AAAA` são dia/mês.** `parse_data` decide a ordem olhando a coluna
+inteira (`infer_dayfirst`). Nunca `pd.to_datetime(x)` sem formato, nem escolher
+o formato pela primeira linha.
 
 **Nunca `except Exception: pass`.** Isso engole `MemoryError` e apresenta "sem
 dados" como se estivesse tudo bem. Use `logger.exception` e mostre o erro.
@@ -155,7 +183,8 @@ funde os resultados no DataFrame.
 
 ## Git
 
-O repositório tem muito arquivo **untracked** de um refactor em andamento,
-incluindo `analysis/` e vários `helpers/` dos quais `app.py` depende para subir.
-Um `git clean -fd` ou um clone novo produz uma aplicação que não inicializa.
-Confirme o estado antes de qualquer operação destrutiva do git.
+Todo o código está rastreado. O que é ignorado é **dado de caso**:
+`ip_cache.json`, `cache_backups/`, `logs/` (inclui o `audit_trail*.jsonl`),
+`output/`, `data/sessions/`. Um `git clean -fdx` apaga prova e a cadeia de
+custódia — nunca rode sem confirmar. Não faça grep recursivo nesses diretórios:
+eles contêm IPs e localizações de investigações reais.

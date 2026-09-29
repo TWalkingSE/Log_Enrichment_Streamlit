@@ -3,6 +3,7 @@
 import argparse
 
 from advanced_analysis import (
+    TOR_CACHE_FILE,
     TOR_CACHE_TTL_HOURS,
     get_tor_exit_cache_status,
     update_tor_exit_nodes_cache,
@@ -13,7 +14,7 @@ def main():
     parser = argparse.ArgumentParser(
         description='Atualiza localmente o cache de Tor exit nodes usando torbulkexitlist + Onionoo.'
     )
-    parser.add_argument('--cache-file', default='tor_exit_nodes.json', help='Arquivo JSON de cache.')
+    parser.add_argument('--cache-file', default=TOR_CACHE_FILE, help='Arquivo JSON de cache.')
     parser.add_argument('--ttl-hours', type=float, default=TOR_CACHE_TTL_HOURS,
                         help='TTL considerado ao usar --skip-if-fresh.')
     parser.add_argument('--skip-if-fresh', action='store_true',

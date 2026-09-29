@@ -32,6 +32,28 @@ def _fmt_int(n):
         return str(n)
 
 
+def _parse_datas(series):
+    """Converte a coluna `Data` bruta para datetime ingênuo (hora local do log).
+
+    Substitui dois atalhos que liam datas brasileiras como mês/dia: escolher o
+    formato olhando só a primeira linha, e `pd.to_datetime(valor)` linha a
+    linha (`05/03/2024` virava 3 de maio). `parse_data` infere a ordem pela
+    coluna inteira. Fuso explícito é descartado mantendo a hora de parede,
+    como o `strftime` anterior fazia.
+    """
+    from validators import parse_data
+    dt = parse_data(series)
+    if not pd.api.types.is_datetime64_any_dtype(dt):
+        # Fusos mistos: pandas devolve objetos; normaliza um a um.
+        dt = pd.to_datetime(
+            dt.map(lambda x: x.replace(tzinfo=None)
+                   if pd.notna(x) and getattr(x, 'tzinfo', None) else x),
+            errors='coerce')
+    elif getattr(dt.dt, 'tz', None) is not None:
+        dt = dt.dt.tz_localize(None)
+    return dt
+
+
 def _preencher_periodo(df, col='Periodo'):
     """Deriva `Periodo` de `Data`; deixa vazio quando não dá para saber.
 
@@ -43,11 +65,7 @@ def _preencher_periodo(df, col='Periodo'):
         df[col] = None
         return
     try:
-        sample = df['Data'].iloc[0] if not df.empty else None
-        if sample and '/' in str(sample):
-            data_dt = pd.to_datetime(df['Data'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
-        else:
-            data_dt = pd.to_datetime(df['Data'], errors='coerce')
+        data_dt = _parse_datas(df['Data'])
         df[col] = data_dt.dt.hour.map(lambda h: get_periodo(int(h)) if pd.notna(h) else None)
     except (AttributeError, TypeError, ValueError) as e:
         logger.warning(f"Erro ao calcular Periodo: {e}")
@@ -169,12 +187,7 @@ def carregar_arquivo_log(input_file, update_callback=None, alvo='desconhecido'):
                         # Gerar ISO_Date a partir da Data
                         if 'Data' in df.columns:
                             try:
-                                sample = df['Data'].iloc[0] if not df.empty else None
-                                if sample and '/' in str(sample):
-                                    data_dt = pd.to_datetime(df['Data'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
-                                else:
-                                    data_dt = pd.to_datetime(df['Data'], errors='coerce')
-
+                                data_dt = _parse_datas(df['Data'])
                                 df['ISO_Date'] = data_dt.apply(
                                     lambda dt: format_iso_date(dt.to_pydatetime()) if pd.notna(dt) else None
                                 )
@@ -249,26 +262,11 @@ def carregar_arquivo_log(input_file, update_callback=None, alvo='desconhecido'):
                     if not data:
                         data = data_arquivo
 
-                    # Determinar período do dia
+                    # Data, Periodo e ISO_Date são derivados depois do laço,
+                    # numa passada vetorizada sobre a coluna inteira: a ordem
+                    # dia/mês só se decide olhando todas as datas.
                     periodo = None
                     iso_date = None
-
-                    if data:
-                        # Tentar converter a data para calcular período e ISO_Date
-                        try:
-                            data_dt = pd.to_datetime(data).to_pydatetime()
-
-                            hora = data_dt.hour
-                            periodo = get_periodo(hora)
-                            iso_date = format_iso_date(data_dt)
-                        except (AttributeError, TypeError, ValueError) as e:
-                            logger.warning(f"Erro ao converter data '{data}': {e}")
-
-                        # Converter data para formato padrão
-                        try:
-                            data = pd.to_datetime(data).strftime('%Y-%m-%d %H:%M:%S')
-                        except (AttributeError, TypeError, ValueError) as e:
-                            logger.warning(f"Erro ao formatar data '{data}': {e}")
 
                     # Criar registro no formato do modelo
                     registro = {
@@ -301,6 +299,17 @@ def carregar_arquivo_log(input_file, update_callback=None, alvo='desconhecido'):
             if df_resultado.empty:
                 df_resultado = pd.DataFrame(columns=COLUNAS_MODELO)
             else:
+                data_dt = _parse_datas(df_resultado['Data'])
+                ok = data_dt.notna()
+                falhas = int((~ok & df_resultado['Data'].notna()).sum())
+                if falhas:
+                    # Valor não interpretável fica como veio do documento, sem
+                    # período nem ISO_Date — nada é inventado.
+                    logger.warning("%d datas não interpretáveis mantidas como no original", falhas)
+                df_resultado.loc[ok, 'Data'] = data_dt[ok].dt.strftime('%Y-%m-%d %H:%M:%S')
+                df_resultado.loc[ok, 'Periodo'] = data_dt[ok].dt.hour.map(get_periodo)
+                df_resultado.loc[ok, 'ISO_Date'] = data_dt[ok].map(
+                    lambda dt: format_iso_date(dt.to_pydatetime()))
                 # Garantir a ordem das colunas
                 for col in COLUNAS_MODELO:
                     if col not in df_resultado.columns:
@@ -324,9 +333,12 @@ def carregar_arquivo_log(input_file, update_callback=None, alvo='desconhecido'):
 
 
 async def processar_log_acesso_async(input_file_or_content, output_file, is_file=True, batch_size=500, period=0,
-                               cache_file='ip_cache.json', incremental=True,
+                               cache_file=None, incremental=True,
                                update_callback=None, progress_callback=None, alvo='desconhecido', api_key=None):
     """Processa arquivo de log ou texto, consultando IPs na API"""
+    if cache_file is None:
+        from api_client import IP_CACHE_PATH
+        cache_file = IP_CACHE_PATH
     try:
         # Atualizar status
         if update_callback:
@@ -412,8 +424,11 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
                 lat_missing = df_resultado['Ip_Lat'].isna().all() if 'Ip_Lat' in df_resultado.columns else True
                 if lat_missing and cache_file and os.path.exists(cache_file):
                     try:
-                        with open(cache_file, 'r', encoding='utf-8') as cf:
-                            ip_cache_data = json.load(cf)
+                        # Leitor único: desembrulha o envelope assinado e só
+                        # devolve coordenadas dentro do TTL — geolocalização
+                        # expirada não é servida como atual.
+                        from api_client import filter_fresh_cache, read_ip_cache
+                        ip_cache_data, expiradas = filter_fresh_cache(read_ip_cache(cache_file))
                         df_resultado['Ip_Lat'] = df_resultado['Ip'].map(
                             lambda ip: ip_cache_data.get(ip, {}).get('Ip_Lat'))
                         df_resultado['Ip_Lon'] = df_resultado['Ip'].map(
@@ -421,8 +436,13 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
                         recovered = df_resultado['Ip_Lat'].notna().sum()
                         if update_callback and recovered > 0:
                             update_callback(f"Coordenadas recuperadas do cache para {recovered} registros")
+                        if update_callback and expiradas:
+                            update_callback(f"{expiradas} entradas do cache ignoradas por estarem "
+                                            "expiradas ou sem data")
                     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as e:
-                        logger.warning(f"Erro ao recuperar coordenadas do cache: {e}")
+                        logger.exception("Erro ao recuperar coordenadas do cache")
+                        if update_callback:
+                            update_callback(f"⚠️ Coordenadas não recuperadas do cache: {e}")
 
                 if update_callback:
                     update_callback(f"Arquivo existente carregado: {len(df_resultado)} registros")
@@ -554,23 +574,35 @@ def salvar_exportacao(df, export_cols, output_file, update_callback=None,
     Returns:
         (df_export, xlsx_path or None)
     """
+    from helpers.atomic_io import atomic_write
     from validators import sanitize_dataframe_for_csv
 
     cols = [c for c in export_cols if c in df.columns]
     df_export = sanitize_dataframe_for_csv(df[cols])
-    df_export.to_csv(output_file, index=False, sep=';', encoding='utf-8-sig')
+    # Atômico: uma falha no meio deixava um CSV truncado com cara de
+    # resultado completo — e é esse arquivo que o laudo cita.
+    atomic_write(output_file,
+                 lambda fh: df_export.to_csv(fh, index=False, sep=';'),
+                 mode='w', encoding='utf-8-sig', newline='')
 
     xlsx_path = None
     if gerar_xlsx:
         candidato = os.path.splitext(output_file)[0] + '.xlsx'
+        parcial = candidato + '.part'
         progresso = None
         if update_callback:
             def progresso(feitas, total):
                 update_callback("Excel colorido: %s de %s linhas..."
                                 % (_fmt_int(feitas), _fmt_int(total)))
         try:
-            export_xlsx_colored(df_export, candidato, progress_callback=progresso)
+            resumo = export_xlsx_colored(df_export, parcial, progress_callback=progresso)
+            os.replace(parcial, candidato)
             xlsx_path = candidato
+            if update_callback and resumo.get('abas', 1) > 1:
+                # Continuação em abas precisa ser declarada: quem abre a
+                # planilha vê a primeira aba cheia e não sabe que há mais.
+                update_callback(f"Excel: {_fmt_int(resumo['linhas'])} linhas em "
+                                f"{resumo['abas']} abas (limite de 1.048.575 por aba).")
         except ValueError as exc:
             logger.warning("Excel colorido não gerado: %s", exc)
             if update_callback:
@@ -579,6 +611,12 @@ def salvar_exportacao(df, export_cols, output_file, update_callback=None,
             logger.exception("Falha ao gerar Excel colorido")
             if update_callback:
                 update_callback(f"Excel não gerado ({exc}) — CSV salvo normalmente.")
+        finally:
+            if os.path.exists(parcial):
+                try:
+                    os.remove(parcial)
+                except OSError:
+                    logger.exception("Falha ao remover o parcial %s", parcial)
 
     if update_callback:
         destino = f"{output_file} e .xlsx" if xlsx_path else output_file

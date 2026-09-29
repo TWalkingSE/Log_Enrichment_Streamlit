@@ -55,7 +55,6 @@ from analysis import (
     detect_vpn_heuristics,
     detect_vpn_timing,
     generate_behavioral_profile,
-    scan_folder_for_logs,
 )
 from api_client import IPAPIClient, is_cgnat_ip, is_private_ip, is_valid_ip, resolve_rdns
 from audit_logger import (

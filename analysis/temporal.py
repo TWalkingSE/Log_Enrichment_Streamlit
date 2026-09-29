@@ -26,7 +26,7 @@ def analyze_time_patterns(df, date_col='Data'):
         return result
 
     df_t = df.copy()
-    df_t['_dt'] = pd.to_datetime(df_t[date_col], errors='coerce')
+    df_t['_dt'] = parse_data(df_t[date_col])
     df_t = df_t.dropna(subset=['_dt'])
 
     if df_t.empty:
@@ -74,8 +74,6 @@ def analyze_provider_timing(df, date_col='Data', min_records=5):
     usage type (always_on / scheduled / sporadic).
     Detects VPN-only hours vs residential-only hours.
     """
-    ip_col = 'Sender IP' if 'Sender IP' in df.columns else 'Ip'
-
     if df.empty or date_col not in df.columns or 'Ip_Dono' not in df.columns:
         return {'providers': {}, 'transitions': [], 'vpn_schedule': {'detected': False}}
 
@@ -176,8 +174,6 @@ def detect_provider_transitions(df, date_col='Data', window_minutes=30):
     Find systematic provider switches. Detect sandwich pattern A→B→A (VPN session).
     Returns dict with transition matrix and patterns.
     """
-    ip_col = 'Sender IP' if 'Sender IP' in df.columns else 'Ip'
-
     if df.empty or date_col not in df.columns or 'Ip_Dono' not in df.columns:
         return {'transitions': [], 'sandwich_patterns': [], 'matrix': {}}
 

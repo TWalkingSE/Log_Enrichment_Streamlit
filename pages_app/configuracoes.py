@@ -10,11 +10,27 @@ import json
 import logging
 from datetime import datetime
 
-from audit_logger import get_audit_trail, verify_audit_integrity
+from audit_logger import count_audit_events, get_audit_trail, verify_audit_integrity
 
+from helpers.large_data import show_truncation
 from i18n import t
 
 logger = logging.getLogger(__name__)
+
+
+@st.cache_data(ttl=300, max_entries=2, show_spinner=False)
+def _cache_info(cache_path, mtime):
+    """(entradas, assinado). `mtime` na chave: relê só quando o arquivo muda.
+
+    Antes o JSON inteiro (MBs) era carregado a cada rerun, porque o corpo de
+    toda aba de `st.tabs` executa mesmo fechado.
+    """
+    from helpers.signed_cache import is_signed_envelope
+    with open(cache_path, 'r', encoding='utf-8') as f:
+        cache_data = json.load(f)
+    signed = is_signed_envelope(cache_data)
+    n_entries = len(cache_data.get('payload', {})) if signed else len(cache_data)
+    return n_entries, signed
 
 
 def page_configuracoes():
@@ -62,17 +78,11 @@ def page_configuracoes():
             st.subheader(t('configuracoes.cache_title'))
             st.session_state.use_cache = st.toggle(
                 t('configuracoes.use_cache'), value=st.session_state.use_cache)
-            if os.path.exists('ip_cache.json'):
+            from api_client import IP_CACHE_PATH
+            if os.path.exists(IP_CACHE_PATH):
                 try:
-                    with open('ip_cache.json', 'r', encoding='utf-8') as f:
-                        cache_data = json.load(f)
-                    from helpers.signed_cache import is_signed_envelope
-                    n_entries = (
-                        len(cache_data.get('payload', {}))
-                        if is_signed_envelope(cache_data)
-                        else len(cache_data)
-                    )
-                    signed_note = " (HMAC)" if is_signed_envelope(cache_data) else ""
+                    n_entries, signed = _cache_info(IP_CACHE_PATH, os.path.getmtime(IP_CACHE_PATH))
+                    signed_note = " (HMAC)" if signed else ""
                     st.caption(t('configuracoes.cache_count', count=n_entries) + signed_note)
                     c_exp, c_clr = st.columns(2)
                     with c_exp:
@@ -82,12 +92,10 @@ def page_configuracoes():
                                 if not get_cache_hmac_secret():
                                     st.error(t('configuracoes.signed_cache_no_secret'))
                                 else:
-                                    payload = (
-                                        cache_data['payload']
-                                        if is_signed_envelope(cache_data)
-                                        else cache_data
-                                    )
-                                    pkg = build_signed_package(payload)
+                                    # Leitor único: verifica a assinatura de um
+                                    # cache já assinado antes de reassiná-lo.
+                                    from api_client import read_ip_cache
+                                    pkg = build_signed_package(read_ip_cache(IP_CACHE_PATH))
                                     st.download_button(
                                         t('configuracoes.download_signed_cache'),
                                         json.dumps(pkg, ensure_ascii=False, indent=2),
@@ -96,14 +104,16 @@ def page_configuracoes():
                                         key='dl_signed_cache',
                                     )
                             except Exception as e:
+                                logger.exception("Falha ao exportar cache assinado")
                                 st.error(str(e))
                     with c_clr:
                         if st.button(t('configuracoes.clear_cache')):
-                            os.remove('ip_cache.json')
+                            os.remove(IP_CACHE_PATH)
                             st.success(t('configuracoes.cache_cleared'))
                             st.rerun()
-                except Exception as e:
-                    logger.warning(f"Erro ao ler cache: {e}")
+                except (OSError, ValueError) as e:
+                    logger.exception("Erro ao ler cache")
+                    st.warning(f"⚠️ Cache de IPs ilegível: {e}")
 
             signed_up = st.file_uploader(
                 t('configuracoes.import_signed_cache'),
@@ -119,8 +129,10 @@ def page_configuracoes():
                         if not ok:
                             st.error(t('configuracoes.signed_cache_bad', msg=msg))
                         else:
-                            with open('ip_cache.json', 'w', encoding='utf-8') as f:
-                                json.dump(pkg, f, ensure_ascii=False)
+                            # Atômico: uma falha no meio não destrói o cache atual.
+                            from api_client import IP_CACHE_PATH
+                            from helpers.atomic_io import atomic_write_json
+                            atomic_write_json(IP_CACHE_PATH, pkg, ensure_ascii=False)
                             st.success(t('configuracoes.signed_cache_imported', count=len(payload)))
                             st.rerun()
                     else:
@@ -133,8 +145,9 @@ def page_configuracoes():
                 st.caption(t('configuracoes.history_count', count=len(st.session_state.history)))
                 if st.button(t('configuracoes.clear_history')):
                     st.session_state.history = []
-                    if os.path.exists('processing_history.json'):
-                        os.remove('processing_history.json')
+                    from helpers.shared import HISTORY_FILE
+                    if os.path.exists(HISTORY_FILE):
+                        os.remove(HISTORY_FILE)
                     st.success(t('configuracoes.history_cleared'))
                     st.rerun()
 
@@ -442,7 +455,10 @@ ollama list
         if os.path.exists(audit_file):
             trail = get_audit_trail(limit=50)
             if trail:
-                st.markdown(t('configuracoes.audit_events', count=len(trail)))
+                # Total real do arquivo, não o tamanho da fatia exibida.
+                total_eventos = count_audit_events()
+                st.markdown(t('configuracoes.audit_events', count=total_eventos))
+                show_truncation(len(trail), total_eventos, 'eventos')
                 trail_df = pd.DataFrame(trail)
                 if 'timestamp' in trail_df.columns:
                     trail_df = trail_df.sort_values('timestamp', ascending=False)
@@ -455,6 +471,16 @@ ollama list
                         st.success(t('configuracoes.audit_intact'))
                     else:
                         st.error(t('configuracoes.audit_broken'))
+                    st.caption(
+                        f"{integrity.get('total', 0)} eventos verificados · "
+                        f"{integrity.get('invalid', 0)} inválidos · "
+                        f"{integrity.get('chain_breaks', 0)} quebras de cadeia · "
+                        f"{integrity.get('hmac_failures', 0)} falhas de HMAC · "
+                        f"{integrity.get('checkpoints', 0)} checkpoints de retenção")
+                    if integrity.get('details'):
+                        with st.expander("Eventos com problema"):
+                            st.dataframe(pd.DataFrame(integrity['details']),
+                                         use_container_width=True, hide_index=True)
             else:
                 st.info(t('configuracoes.audit_no_events'))
         else:

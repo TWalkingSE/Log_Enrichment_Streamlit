@@ -1,4 +1,4 @@
-# Log Enrichment v5.3 Pro
+# Log Enrichment v5.4 Pro
 
 > 🇺🇸 [English](docs/English/README.md) · 🇪🇸 [Español](docs/Spanish/README.md)
 
@@ -237,7 +237,7 @@ Módulo especializado para uso investigativo policial:
 - Interface disponível em **Português**, **Inglês** e **Espanhol**
 - Seletor de idioma na sidebar para troca em tempo real
 - Sistema de tradução baseado em JSON (`locales/pt.json`, `locales/en.json`, `locales/es.json`)
-- Documentação traduzida em `docs/Portuguese/`, `docs/English/`, `docs/Spanish/`
+- Documentação traduzida em `docs/English/` e `docs/Spanish/` (a versão em português é a da raiz)
 - Fallback automático para Português quando uma chave de tradução não existe no idioma selecionado
 
 ### 📂 Modo Offline
@@ -670,7 +670,6 @@ Sem dependência de pacote:
 | `AUTH_PASSWORD_HASH` | Hash Argon2/bcrypt (recomendado) ou SHA-256 hex legado | (vazio) |
 | `TZ_OFFSET_HOURS` | Offset UTC do fuso horário | `-3` |
 | `TZ_LABEL` | Label customizado do fuso | Auto |
-| `WATCH_FOLDER` | Pasta para varredura automática | (vazio) |
 
 ### Arquivos de Configuração
 | Arquivo | Descrição |
@@ -702,8 +701,7 @@ Log Enrichment/
 │   ├── pt.json                    # Português (referência)
 │   ├── en.json                    # Inglês
 │   └── es.json                    # Espanhol
-├── docs/                          # Documentação traduzida
-│   ├── Portuguese/                # Docs em Português
+├── docs/                          # Documentação traduzida (PT na raiz)
 │   ├── English/                   # Docs em Inglês
 │   └── Spanish/                   # Docs em Espanhol
 ├── ai_assistant.py                # Assistente AI local (Ollama/Qwen3.5) — structured output
@@ -765,7 +763,7 @@ Log Enrichment/
 │   ├── correlation.py             # Correlação cruzada entre alvos
 │   ├── subnet.py                  # Padrões de sub-rede /24 e /48
 │   ├── profile.py                 # Perfil comportamental, WiFi compartilhado
-│   ├── comms.py, cache_ops.py, io_scan.py, export_kml.py, _config.py
+│   ├── comms.py, cache_ops.py, export_kml.py, _config.py
 ├── advanced_analysis.py           # VirusTotal, AbuseIPDB, relay chains
 ├── tor_updater.py                 # Atualizador local do cache Tor (torbulkexitlist + Onionoo)
 ├── audit_logger.py                # Audit trail forense (SHA-256, JSONL)
@@ -849,7 +847,7 @@ Teste de carga sobre dataset de tamanho real — 202.128 linhas, alguns minutos:
 python -m pytest tests/test_load.py -m slow
 ```
 
-**244 testes automatizados** (236 rápidos + 8 marcados `slow`) organizados em `tests/` por domínio, cobrindo: validação de IP, IPs privados, rDNS, fuso horário, parsers (WhatsApp, Meta, Google, genérico e HTML), risk score, padrões temporais, geofencing, correlação cruzada, números descartáveis, cliente API, definição de colunas, **validators** (schema, domain, CSV injection), **VPN heuristics**, **IP confidence**, **life patterns**, **impossible jumps**, **base locations**, **movement area**, **infrastructure classification**, **audit logger**, **report generator** (rápido/profissional), **cache compression**, **relay chains**, **device fingerprinting**, **shared Wi-Fi**, **digital silence**, **timezone validation**, **data health**, **helpers de período**, **score unificado**, **VPN timing**, **correlação temporal**, **perfil de uso**, **precisão geográfica**, **KML animado**, **AI assistant** (prompts, validação, offline), **detecção tipo IP**, **ZIP security** (bomb detection, path traversal), **input sanitization**, **geofence coordinate validation**, updater Tor oficial com fallback de cache e smoke tests cobrindo entrada simples, relatório, exportação XLSX e enriquecimento de interceptação. A suíte `slow` ([`tests/test_load.py`](tests/test_load.py)) roda análises, relatório e exportação sobre 202.128 linhas, medindo pico de memória e tempo — é ela que pega regressões de complexidade que fixtures de poucas linhas não revelam.
+**350 testes automatizados** (341 rápidos + 9 marcados `slow`) organizados em `tests/` por domínio, cobrindo: validação de IP, IPs privados, rDNS, fuso horário, parsers (WhatsApp, Meta, Google, genérico e HTML), risk score, padrões temporais, geofencing, correlação cruzada, números descartáveis, cliente API, definição de colunas, **validators** (schema, domain, CSV injection), **VPN heuristics**, **IP confidence**, **life patterns**, **impossible jumps**, **base locations**, **movement area**, **infrastructure classification**, **audit logger**, **report generator** (rápido/profissional), **cache compression**, **relay chains**, **device fingerprinting**, **shared Wi-Fi**, **digital silence**, **timezone validation**, **data health**, **helpers de período**, **score unificado**, **VPN timing**, **correlação temporal**, **perfil de uso**, **precisão geográfica**, **KML animado**, **AI assistant** (prompts, validação, offline), **detecção tipo IP**, **ZIP security** (bomb detection, path traversal), **input sanitization**, **geofence coordinate validation**, updater Tor oficial com fallback de cache e smoke tests cobrindo entrada simples, relatório, exportação XLSX e enriquecimento de interceptação. A suíte `slow` ([`tests/test_load.py`](tests/test_load.py)) roda análises, relatório e exportação sobre 202.128 linhas, medindo pico de memória e tempo — é ela que pega regressões de complexidade que fixtures de poucas linhas não revelam.
 
 ## 🔐 Governança
 
@@ -863,6 +861,57 @@ python -m pytest tests/test_load.py -m slow
 Este projeto é distribuído sob a licença MIT. Veja o arquivo `LICENSE` para o texto completo.
 
 ## 🔄 Changelog
+
+### v5.4 (2026)
+
+Auditoria de defeitos que alteravam a prova ou a cadeia de custódia.
+Regressões em [`tests/test_evidencia.py`](tests/test_evidencia.py).
+
+**Resultados que mudam em relação à v5.3** (por isso a versão consta no laudo)
+- Datas `NN/NN/AAAA` ambíguas são lidas como **dia/mês** (pt-BR); a ordem é decidida
+  pela coluna inteira (`validators.infer_dayfirst`), não pela primeira linha. Antes
+  `05/03/2024` virava 3 de maio nas análises e no loader genérico
+- A detecção VPN→residencial (`detect_vpn_timing`) tomava proxy vindo como `'1'` ou
+  `'VERDADEIRO'` por residencial
+- Faixas de risco únicas (alto ≥ 70, médio ≥ 40) em `analysis.risk`; a página usava
+  50/20 e o relatório 70/40
+
+**Exports e cache**
+- Chaves de cache com o filtro ativo e um token por sessão: dois filtros com o mesmo
+  número de linhas recebiam o mesmo CSV/Excel, e duas sessões podiam trocar exports
+- Trocar de alvo apaga os resultados de IA, VirusTotal, Shodan e Tor do alvo anterior
+- Filtro "Todos" funcionava só em português (em inglês a tabela ficava vazia)
+- CSV de interceptação, da análise investigativa e de IOC passam pela sanitização
+  contra fórmula; BOM UTF-8 restaurado onde `to_csv` o descartava
+- Leitor único do cache de IPs (`api_client.read_ip_cache`): desembrulha o envelope
+  assinado (páginas mostravam "sem histórico") e rejeita assinatura inválida; o mapa
+  aplica o TTL antes de servir coordenadas
+- Chave paga recusada (403) interrompe o job em vez de rebaixar em silêncio para HTTP
+- Modo air-gapped passa a bloquear VirusTotal, AbuseIPDB, Shodan, lista Tor e rDNS
+
+**Cadeia de custódia**
+- A retenção **arquiva** o audit trail (`audit_trail.<data>.jsonl`) e ancora a cadeia
+  com um evento `RETENTION_CHECKPOINT`; antes reescrevia o arquivo e a verificação
+  acusava adulteração. A verificação lê o arquivo inteiro (antes parava em 10 mil
+  eventos) e conta linha corrompida como inválida
+- Falha ao gravar evento de auditoria é mostrada na tela
+- A retenção não destrói mais o cache assinado e roda uma vez por processo
+- Divergência de sha256 da sessão restaurada aparece para o analista
+
+**Truncagem e falhas visíveis**
+- Relatório HTML declara "Exibindo N de M" nas tabelas e lista as seções omitidas por
+  falha; mapa declara pontos, agrupamentos e amostragem de rota
+- ZIP de interceptação: nomes em maiúsculas (`RECORDS.HTML`) eram ignorados; entradas
+  puladas agora são listadas
+
+**Segurança**
+- Relatório HTML com autoescape (popups do mapa interpolavam provedor/cidade crus)
+- Limite global de tentativas de login (o limite por sessão zerava com nova sessão)
+- Chaves do `.env` não pré-preenchem mais campos do navegador
+
+**Limpeza**
+- Removidos `docs/Portuguese/` (cópia antiga dos `.md` da raiz), `analysis/io_scan.py`
+  e funções sem uso; `WATCH_FOLDER` (nunca lido) saiu do `.env.example`
 
 ### v5.3 (2026)
 

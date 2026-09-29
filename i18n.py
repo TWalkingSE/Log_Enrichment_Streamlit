@@ -88,8 +88,3 @@ def _resolve_key(data, key):
         else:
             return None
     return current if isinstance(current, str) else None
-
-
-def reload_translations():
-    """Clear the translation cache to force reload from disk."""
-    _translations_cache.clear()

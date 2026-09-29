@@ -78,8 +78,7 @@ Relatório gerado na implementação do plano de auditoria (segurança, bugs, pe
 - testes `TestEnrichService`
 
 ### Lote 4 — modularização analysis + deploy
-- Pacote `analysis/` (14 módulos) no lugar do monólito `analysis.py` (~2k linhas)
-- Backup: `analysis_monolith.py.bak`; script `_split_analysis.py`
+- Pacote `analysis/` no lugar do monólito `analysis.py` (~2k linhas)
 - `pages_app/configuracoes.py` — i18n API/Tor/audit/about
 - `tests/test_api_client.py` — validação IP, cache, consultar com mock HTTP
 - `docs/DEPLOY.md` — auth, HTTPS, proxy, checklist produção
@@ -94,7 +93,8 @@ Relatório gerado na implementação do plano de auditoria (segurança, bugs, pe
 ### Lote 6 — air-gap, retenção, camadas, worker
 - `AIR_GAPPED` + toggle em configurações; `IPAPIClient` cache-only
 - `helpers/retention.py` + `scripts/retention_cleanup.py` (audit/sessions/cache)
-- Esqueleto `domain/` · `application/` · `infrastructure/`
+- ~~Esqueleto `domain/` · `application/` · `infrastructure/`~~ — removido depois; nunca
+  foi usado pelo pipeline
 - `scripts/enrich_worker.py` — processamento headless (avaliação de scale-out)
 
 ### Lote 7 — STIX/IOC + cancelamento cooperativo
@@ -107,8 +107,39 @@ Relatório gerado na implementação do plano de auditoria (segurança, bugs, pe
 - Comparação A/B de períodos (`helpers/period_compare.py` + página Análise)
 - Cache assinado HMAC (`helpers/signed_cache.py`, export/import em Configurações)
 - `SIGN_IP_CACHE` / `CACHE_HMAC_SECRET` no `.env.example`
-- Pipeline principal via `application.enrich_use_case.enrich_ip_list`
+- ~~Pipeline principal via `application.enrich_use_case.enrich_ip_list`~~ — o pipeline
+  usa `enrich_service` diretamente
 - i18n residual (cancel, IOC/STIX, comparacao, signed cache) pt/en/es
+
+### Lote 9 — prova errada, custódia e limpeza (2026-09)
+
+Achados que não apareciam nos testes (a suíte estava verde) e alteravam o conteúdo
+do laudo. Regressões em `tests/test_evidencia.py`.
+
+| ID | Achado | Status |
+|----|--------|--------|
+| P1 | `cache_key` sem filtros nem identidade de sessão: export de um filtro servido para outro de mesmo tamanho; sessões compartilhavam cache | **Corrigido** |
+| P2 | Filtro "Todos" quebrado em EN/ES (tabela vazia) | **Corrigido** |
+| P3 | Análise de IA recebia frame por IP (`calculate_risk_scores`) em vez de registros | **Corrigido** |
+| P4 | Faixas de risco 50/20 na página e 70/40 no relatório | **Corrigido** (70/40 em `analysis.risk`) |
+| P5 | `detect_vpn_timing` com `str(x).lower() != 'true'` | **Corrigido** |
+| P6 | Datas `NN/NN/AAAA` lidas como mês/dia; formato decidido pela 1ª linha | **Corrigido** (`infer_dayfirst`) |
+| P7 | CSV de interceptação, investigativa e IOC sem sanitização | **Corrigido** |
+| P8 | Páginas liam `ip_cache.json` sem envelope/TTL e com caminhos diferentes | **Corrigido** (`read_ip_cache`, `IP_CACHE_PATH`) |
+| P9 | 403 da chave paga rebaixava para HTTP em claro no meio do job | **Corrigido** (`InvalidApiKeyError`) |
+| P10 | ZIP: `RECORDS.HTML`/`.ZIP` ignorados; entradas puladas só no log | **Corrigido** |
+| C1 | Retenção reescrevia o audit trail → quebra de cadeia | **Corrigido** (arquivar + `RETENTION_CHECKPOINT`) |
+| C2 | Verificação limitada a 10 mil eventos; linha corrompida pulada | **Corrigido** |
+| C3 | Retenção destruía cache assinado; rodava a cada sessão | **Corrigido** |
+| C4 | sha256 divergente da sessão restaurada só no log | **Corrigido** |
+| S7 | Relatório HTML sem autoescape; popups do mapa sem escape | **Corrigido** |
+| S8 | Bloqueio de login por sessão (nova sessão zerava) | **Corrigido** (teto global) |
+| S9 | Air-gapped não bloqueava VirusTotal/AbuseIPDB/Shodan/Tor/rDNS | **Corrigido** |
+
+Pendências registradas como roadmap: dividir `data_processor.py` e
+`advanced_analysis.py`; i18n das páginas (259 chaves sem uso); testes dos parsers
+Discord e Preservation Google; smoke tests das páginas; job Windows no CI;
+sessão persistida `current` global ao processo (exige identidade por usuário).
 
 ## 4. Roadmap 30 / 60 / 90 dias
 
@@ -127,7 +158,7 @@ Relatório gerado na implementação do plano de auditoria (segurança, bugs, pe
 - ~~Persistência opcional parquet fora do session_state~~ **feito (`helpers/persistence.py`)**
 
 ### 90 dias
-- ~~Camadas domain/application/infrastructure~~ **esqueleto feito (Lote 6)**
+- ~~Camadas domain/application/infrastructure~~ **esqueleto feito (Lote 6), depois removido**
 - ~~Audit trail com HMAC opcional~~ **feito (`AUDIT_HMAC_SECRET`)**
 - ~~Modo air-gapped + retenção~~ **feito (Lote 6)**
 - ~~Avaliar worker assíncrono se volume crescer~~ **CLI `scripts/enrich_worker.py`**
@@ -139,7 +170,7 @@ Relatório gerado na implementação do plano de auditoria (segurança, bugs, pe
 - ~~Política de retenção de `ip_cache.json` e audit trail~~ **feito**
 - ~~Export STIX/TAXII ou IOCs para integração SIEM~~ **STIX 2.1 + IOC (Lote 7)**
 - ~~Cache assinado / assinatura de pacotes offline~~ **HMAC (Lote 8)**
-- ~~Migrar pipelines UI para `application.enrich_use_case`~~ **pipeline principal (Lote 8)**
+- ~~Migrar pipelines UI para `application.enrich_use_case`~~ **substituído por `enrich_service`**
 - TAXII push server-side (além do download STIX) — **fora de escopo / opcional**
 
 ## 6. Verificação
@@ -150,7 +181,7 @@ python -m pytest tests -q
 
 Critérios de aceite do plano: exports sanitizados, HTML escapado, paths em `output/`, audit com cadeia, testes de regressão nos helpers.
 
-**Última verificação:** ~196 testes passando (Lotes 1–8).
+**Última verificação:** 350 testes (341 rápidos + 9 `slow`), Lote 9.
 
 ## 7. Mapa de módulos novos (referência)
 
@@ -164,9 +195,7 @@ Critérios de aceite do plano: exports sanitizados, HTML escapado, paths em `out
 | `helpers/retention.py` | Retenção audit/sessions/cache |
 | `helpers/persistence.py` | Parquet/pickle de sessão |
 | `helpers/runtime_flags.py` | `AIR_GAPPED` etc. |
-| `application/enrich_use_case.py` | Facade de aplicação |
-| `domain/ip_models.py` | Modelo de domínio |
-| `infrastructure/ip_api_gateway.py` | Adapter IP-API |
+| `helpers/atomic_io.py` | Escrita atômica (`.part` + `os.replace`) |
 | `scripts/enrich_worker.py` | Worker headless |
 | `scripts/retention_cleanup.py` | CLI de retenção |
 | `pages_app/analise/comparacao.py` | UI A/B |
@@ -176,7 +205,7 @@ Critérios de aceite do plano: exports sanitizados, HTML escapado, paths em `out
 ## 8. Documentação de produto
 
 - README raiz (PT, completo): `README.md`
-- Espelhos resumidos: `docs/English/README.md`, `docs/Spanish/README.md`, `docs/Portuguese/README.md`
+- Espelhos resumidos: `docs/English/README.md`, `docs/Spanish/README.md` (o português é o da raiz)
 - Segurança: `SECURITY.md` (+ traduções em `docs/*/SECURITY.md`)
 - Deploy: `docs/DEPLOY.md`
 - Env template: `.env.example`

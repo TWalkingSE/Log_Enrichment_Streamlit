@@ -387,7 +387,6 @@ def records_to_dataframe(records, update_callback=None):
 # Limites de segurança para extração de ZIP
 MAX_ZIP_FILE_SIZE = 500 * 1024 * 1024  # 500 MB por arquivo extraído
 MAX_ZIP_TOTAL_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB total extraído
-MAX_ZIP_DEPTH = 2  # Máximo de ZIPs aninhados
 MAX_ZIP_RATIO = 100  # Ratio máximo compressed/uncompressed (proteção zip bomb)
 
 
@@ -429,98 +428,114 @@ def parse_zip_interception(zip_path_or_bytes, update_callback=None):
     - ZIP with HTML files directly
     - Single HTML file
 
+    Toda entrada ignorada (tamanho, aninhamento excessivo, path traversal,
+    erro de leitura) é contada e informada: arquivo da interceptação que não
+    entrou no resultado precisa aparecer para o analista, não só no log.
+
     Returns:
         DataFrame with all extracted records
     """
     all_records = []
+    ignoradas = []
+
+    def _ignorar(nome, motivo, nivel=logging.WARNING):
+        ignoradas.append((nome, motivo))
+        logger.log(nivel, "Entrada ZIP ignorada (%s): %s", motivo, nome)
+        if update_callback:
+            update_callback(f"⚠️ Ignorado ({motivo}): {nome}")
+
+    def _eh_records_html(nome):
+        # Comparação sem caixa: `RECORDS.HTML` e `Records.htm` eram
+        # descartados em silêncio pela comparação sensível a maiúsculas.
+        base = nome.lower()
+        return base.endswith(('.html', '.htm')) and 'records' in base
+
+    def _parse_html_entry(zf_atual, nome, rotulo, source):
+        html = zf_atual.read(nome).decode('utf-8', errors='replace')
+        records = parse_html_records(html, update_callback, source=source)
+        all_records.extend(records)
+        if update_callback:
+            update_callback(f"Processado {rotulo}: {len(records)} registros")
 
     if isinstance(zip_path_or_bytes, (str, os.PathLike)):
         zf = zipfile.ZipFile(zip_path_or_bytes)
     else:
         zf = zipfile.ZipFile(io.BytesIO(zip_path_or_bytes))
 
-    # Verificar zip bomb
-    safe, reason = _check_zip_bomb(zf)
-    if not safe:
-        logger.error(f"ZIP rejeitado por segurança: {reason}")
-        if update_callback:
-            update_callback(f"⚠️ ZIP rejeitado: {reason}")
-        zf.close()
-        return records_to_dataframe([], update_callback)
-
     file_count = 0
-    for name in zf.namelist():
-        # Proteção contra path traversal
-        if not _is_safe_zip_entry(name):
-            logger.warning(f"Entrada ZIP ignorada (path traversal): {name}")
-            continue
+    with zf:
+        # Verificar zip bomb
+        safe, reason = _check_zip_bomb(zf)
+        if not safe:
+            logger.error(f"ZIP rejeitado por segurança: {reason}")
+            if update_callback:
+                update_callback(f"⚠️ ZIP rejeitado: {reason}")
+            return records_to_dataframe([], update_callback)
 
-        if name.endswith('.zip'):
-            # Inner ZIP — extract and parse records.html from it (depth=1)
-            try:
-                info = zf.getinfo(name)
+        for info in zf.infolist():
+            name = info.filename
+            if info.is_dir():
+                continue
+            # Proteção contra path traversal
+            if not _is_safe_zip_entry(name):
+                _ignorar(name, "path traversal")
+                continue
+
+            if name.lower().endswith('.zip'):
+                # Inner ZIP — extract and parse records.html from it (depth=1)
                 if info.file_size > MAX_ZIP_FILE_SIZE:
-                    logger.warning(f"Arquivo {name} excede limite ({info.file_size} bytes), ignorando")
+                    _ignorar(name, f"excede {MAX_ZIP_FILE_SIZE // (1024 * 1024)} MB")
                     continue
-                inner_data = zf.read(name)
-                inner_zf = zipfile.ZipFile(io.BytesIO(inner_data))
-                # Verificar zip bomb no ZIP interno
-                inner_safe, inner_reason = _check_zip_bomb(inner_zf)
-                if not inner_safe:
-                    logger.warning(f"ZIP interno {name} rejeitado: {inner_reason}")
-                    inner_zf.close()
-                    continue
-                for inner_name in inner_zf.namelist():
-                    if not _is_safe_zip_entry(inner_name):
-                        logger.warning(f"Entrada ZIP interna ignorada (path traversal): {inner_name}")
-                        continue
-                    # Não permitir mais ZIPs aninhados (depth=2 seria 3o nível)
-                    if inner_name.endswith('.zip'):
-                        logger.warning(f"ZIP aninhado demais ignorado: {name}/{inner_name}")
-                        continue
-                    if inner_name.endswith('.html') and 'records' in inner_name.lower():
-                        inner_info = inner_zf.getinfo(inner_name)
-                        if inner_info.file_size > MAX_ZIP_FILE_SIZE:
-                            logger.warning(f"Arquivo {inner_name} excede limite, ignorando")
+                try:
+                    with zipfile.ZipFile(io.BytesIO(zf.read(name))) as inner_zf:
+                        inner_safe, inner_reason = _check_zip_bomb(inner_zf)
+                        if not inner_safe:
+                            _ignorar(name, inner_reason)
                             continue
-                        html = inner_zf.read(inner_name).decode('utf-8', errors='replace')
-                        records = parse_html_records(
-                            html, update_callback,
-                            source=name.split('/')[-1]
-                        )
-                        all_records.extend(records)
-                        file_count += 1
-                        if update_callback:
-                            update_callback(f"Processado {name}/{inner_name}: {len(records)} registros")
-                inner_zf.close()
-            except Exception as e:
-                logger.error(f"Erro ao processar {name}: {e}")
-                if update_callback:
-                    update_callback(f"Erro em {name}: {e}")
+                        for inner_info in inner_zf.infolist():
+                            inner_name = inner_info.filename
+                            rotulo = f"{name}/{inner_name}"
+                            if inner_info.is_dir():
+                                continue
+                            if not _is_safe_zip_entry(inner_name):
+                                _ignorar(rotulo, "path traversal")
+                                continue
+                            # Não permitir mais ZIPs aninhados (seria o 3º nível)
+                            if inner_name.lower().endswith('.zip'):
+                                _ignorar(rotulo, "ZIP aninhado além de 2 níveis")
+                                continue
+                            if _eh_records_html(inner_name):
+                                if inner_info.file_size > MAX_ZIP_FILE_SIZE:
+                                    _ignorar(rotulo, f"excede {MAX_ZIP_FILE_SIZE // (1024 * 1024)} MB")
+                                    continue
+                                _parse_html_entry(inner_zf, inner_name, rotulo,
+                                                  name.split('/')[-1])
+                                file_count += 1
+                except MemoryError:
+                    raise
+                except Exception as e:  # um arquivo ruim não derruba a interceptação toda
+                    logger.exception("Erro ao processar %s", name)
+                    _ignorar(name, f"erro: {e}", nivel=logging.ERROR)
 
-        elif name.endswith('.html') and 'records' in name.lower():
-            # Direct HTML in ZIP
-            try:
-                info = zf.getinfo(name)
+            elif _eh_records_html(name):
+                # Direct HTML in ZIP
                 if info.file_size > MAX_ZIP_FILE_SIZE:
-                    logger.warning(f"Arquivo {name} excede limite ({info.file_size} bytes), ignorando")
+                    _ignorar(name, f"excede {MAX_ZIP_FILE_SIZE // (1024 * 1024)} MB")
                     continue
-                html = zf.read(name).decode('utf-8', errors='replace')
-                records = parse_html_records(
-                    html, update_callback,
-                    source=name.split('/')[-1]
-                )
-                all_records.extend(records)
-                file_count += 1
-                if update_callback:
-                    update_callback(f"Processado {name}: {len(records)} registros")
-            except Exception as e:
-                logger.error(f"Erro ao processar {name}: {e}")
-
-    zf.close()
+                try:
+                    _parse_html_entry(zf, name, name, name.split('/')[-1])
+                    file_count += 1
+                except MemoryError:
+                    raise
+                except Exception as e:  # um arquivo ruim não derruba a interceptação toda
+                    logger.exception("Erro ao processar %s", name)
+                    _ignorar(name, f"erro: {e}", nivel=logging.ERROR)
 
     if update_callback:
-        update_callback(f"Total: {len(all_records)} registros de {file_count} arquivos HTML")
+        resumo = f"Total: {len(all_records)} registros de {file_count} arquivos HTML"
+        if ignoradas:
+            resumo += f" — {len(ignoradas)} entrada(s) do ZIP ignorada(s), listadas acima"
+        update_callback(resumo)
 
     return records_to_dataframe(all_records, update_callback)
 

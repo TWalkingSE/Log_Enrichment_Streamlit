@@ -249,7 +249,7 @@ def page_entrada():
             sel = st.session_state.example_select
             st.session_state.pasted_text = example_map.get(sel, "")
 
-        example = st.selectbox(
+        st.selectbox(
             t('entrada.load_example'),
             [t('entrada.select_placeholder'), "Genérico (Lista de IPs)",
              "Meta Platforms (Instagram/Facebook)", "WhatsApp", "Google",
@@ -317,7 +317,8 @@ def page_entrada():
                 if alvo_val == t('common.unknown'):
                     st.warning(t('entrada.no_target_warning'))
                 output = st.session_state.output_file
-                cache_file = 'ip_cache.json' if st.session_state.use_cache else None
+                from api_client import IP_CACHE_PATH
+                cache_file = IP_CACHE_PATH if st.session_state.use_cache else None
 
                 st.session_state.processing = True
                 st.session_state.log_messages = []
@@ -355,19 +356,29 @@ def page_entrada():
                             bump_data_version()
                             try:
                                 from helpers.persistence import save_dataframe
-                                save_dataframe(result, name='current')
+                                salvo = save_dataframe(result, name='current')
                                 if alvo_val:
-                                    save_dataframe(result, name=alvo_val)
+                                    salvo = save_dataframe(result, name=alvo_val) and salvo
+                                if not salvo:
+                                    st.warning("⚠️ O resultado não foi persistido em disco: "
+                                               "ele não será restaurado se a aplicação reiniciar.")
+                            except MemoryError:
+                                raise
                             except Exception as persist_err:
-                                logger.debug(f"Persistência opcional ignorada: {persist_err}")
+                                logger.exception("Falha ao persistir o resultado")
+                                st.warning(f"⚠️ O resultado não foi persistido em disco "
+                                           f"({persist_err}).")
                             add_log(t('entrada.completed', count=len(result)))
                             save_history(alvo_val, len(result), output, detected_format or t('common.unknown'))
                             status.update(label=t('entrada.records_processed', count=len(result)), state="complete")
 
-                            log_audit_event('processing_complete', {
+                            evento = log_audit_event('processing_complete', {
                                 'alvo': alvo_val, 'records': len(result),
                                 'format': detected_format or t('common.unknown'),
                             })
+                            if not evento.get('_persisted', True):
+                                st.error("❌ O processamento NÃO foi registrado no audit trail "
+                                         "(veja o log da aplicação).")
 
                             try:
                                 validation = validate_dataframe(result)
@@ -380,11 +391,19 @@ def page_entrada():
                                     for err in all_errs[:5]:
                                         msg = err.get('message', str(err)) if isinstance(err, dict) else str(err)
                                         st.warning(t('entrada.validation_warning', msg=msg))
+                                    if len(all_errs) > 5:
+                                        show_truncation(5, len(all_errs), 'erros de validação')
                                 n_warn = validation.get('total_warnings', 0)
                                 if n_warn > 0:
                                     st.caption(t('entrada.validation_notices', count=n_warn))
+                            except MemoryError:
+                                raise
                             except Exception as val_err:
-                                logger.debug(f"Validação ignorada: {val_err}")
+                                # Validação que não rodou não pode parecer
+                                # validação aprovada.
+                                logger.exception("Validação do resultado falhou")
+                                st.warning(f"⚠️ A validação do resultado não pôde ser "
+                                           f"executada: {val_err}")
 
                             st.warning(t('entrada.api_precision_warning'))
 
@@ -397,6 +416,7 @@ def page_entrada():
                         status.update(label="Cancelado", state="error")
                         log_audit_event('processing_cancelled', {'alvo': alvo_val})
                     except Exception as e:
+                        logger.exception("Falha no processamento")
                         st.error(t('entrada.error_label', error=str(e)))
                         add_log(f"Erro: {str(e)}")
                         status.update(label=t('entrada.error_processing'), state="error")
@@ -436,6 +456,8 @@ def page_entrada():
     if st.session_state.log_messages:
         with st.expander(t('entrada.log_title'), expanded=False):
             st.code("\n".join(st.session_state.log_messages[-30:]), language=None)
+            show_truncation(min(30, len(st.session_state.log_messages)),
+                            len(st.session_state.log_messages), 'mensagens (as mais recentes)')
 
     # History
     if st.session_state.history:

@@ -85,7 +85,48 @@ def bool_series(df, col: str, default: bool = False):
     return s.map(lambda v: as_bool(v, default, field=col)).astype(bool)
 
 
-def parse_data(series):
+_DMY_PREFIX = r'^\s*(\d{1,2})[/.\-](\d{1,2})[/.\-]\d{2,4}'
+
+
+def infer_dayfirst(series) -> bool:
+    """Decide se datas numéricas `NN/NN/AAAA` da coluna são dia-primeiro.
+
+    Olha a coluna INTEIRA, não a primeira linha: `05/03/2024` é ambíguo,
+    mas um único `13/03/2024` (ou `03/13/2024`) na coluna resolve.
+
+    - algum 1º campo > 12 e nenhum 2º campo > 12: dia primeiro;
+    - algum 2º campo > 12 e nenhum 1º campo > 12: mês primeiro;
+    - tudo ambíguo: dia primeiro (padrão pt-BR), com aviso no log;
+    - evidência nos dois sentidos: vence a maioria, com aviso.
+
+    Datas ISO (`AAAA-MM-DD`) não casam o padrão e não influenciam.
+    """
+    if series is None or len(series) == 0:
+        return True
+    partes = series.dropna().astype(str).str.extract(_DMY_PREFIX)
+    partes = partes.dropna()
+    if partes.empty:
+        return True
+    primeiro = pd.to_numeric(partes[0], errors='coerce')
+    segundo = pd.to_numeric(partes[1], errors='coerce')
+    evid_dia = int((primeiro > 12).sum())
+    evid_mes = int((segundo > 12).sum())
+    if evid_dia and not evid_mes:
+        return True
+    if evid_mes and not evid_dia:
+        logger.info("infer_dayfirst: %d datas só fazem sentido como mês/dia — "
+                    "coluna lida como mês primeiro", evid_mes)
+        return False
+    if evid_dia and evid_mes:
+        logger.warning("infer_dayfirst: coluna mistura dia/mês (%d) e mês/dia (%d); "
+                       "adotando a maioria", evid_dia, evid_mes)
+        return evid_dia >= evid_mes
+    logger.warning("infer_dayfirst: %d datas NN/NN/AAAA ambíguas; assumindo dia/mês (pt-BR)",
+                   len(partes))
+    return True
+
+
+def parse_data(series, dayfirst=None):
     """Converte a coluna de data usando o formato canônico do pipeline.
 
     O pipeline grava sempre '%Y-%m-%d %H:%M:%S'. `format='mixed'` cai no
@@ -93,13 +134,21 @@ def parse_data(series):
     200k linhas. Aqui o caminho rápido cobre o caso normal e o fallback
     trata apenas os valores divergentes (arquivos importados de fora),
     registrando quantos foram.
+
+    No fallback, `05/03/2024` era lido como 3 de maio (mês primeiro, padrão
+    do dateutil). `dayfirst=None` infere a ordem pela coluna inteira
+    (`infer_dayfirst`); `dayfirst=True` não altera datas ISO.
     """
     if series is None or len(series) == 0:
         return pd.to_datetime(pd.Series([], dtype='object'), errors='coerce')
     out = pd.to_datetime(series, format=DATA_FMT, errors='coerce')
     missing = out.isna() & series.notna()
     if missing.any():
-        out.loc[missing] = pd.to_datetime(series[missing], format='mixed', errors='coerce')
+        fora = series[missing]
+        if dayfirst is None:
+            dayfirst = infer_dayfirst(fora)
+        out.loc[missing] = pd.to_datetime(fora, format='mixed', dayfirst=dayfirst,
+                                          errors='coerce')
         logger.info("parse_data: %d de %d valores fora do formato canônico",
                     int(missing.sum()), len(series))
     return out

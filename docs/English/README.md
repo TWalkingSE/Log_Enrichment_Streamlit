@@ -1,6 +1,6 @@
-﻿# Log Enrichment v5.2 Pro
+﻿# Log Enrichment v5.4 Pro
 
-> 🇧🇷 [Português](../Portuguese/README.md) · 🇪🇸 [Español](../Spanish/README.md) · Full PT docs: [root README](../../README.md)
+> 🇧🇷 [Português](../../README.md) · 🇪🇸 [Español](../Spanish/README.md) · Full PT docs: [root README](../../README.md)
 
 Professional tool for extraction, forensic analysis, and enrichment of IP addresses in access logs and telematic interception (IP-API, VirusTotal, AbuseIPDB, Shodan).
 
@@ -22,7 +22,7 @@ May process IPs, ports, timestamps, geo, ASN/provider and related metadata. With
 - **Air-gapped**: `AIR_GAPPED=true` (cache-only)
 - **HMAC-signed cache**: `CACHE_HMAC_SECRET` / `SIGN_IP_CACHE` (export/import in Settings)
 - Session restore: `data/sessions/` (parquet/pickle)
-- Application layer: `application.enrich_use_case` + `enrich_service`
+- Shared enrichment service: `enrich_service` (access logs and interceptions)
 - Modular `analysis/` package
 - Retention: `scripts/retention_cleanup.py` + `RETENTION_*`
 - **SIEM export**: IOC txt/csv + **STIX 2.1** on Results (+ ZIP)
@@ -92,7 +92,7 @@ tests/
 python -m pytest tests -q
 ```
 
-~196 automated tests (security, cache, STIX, cancel, A/B, API client mocks, …).
+350 automated tests (341 fast + 9 `slow` load tests over 202,128 rows).
 
 ## Docs
 

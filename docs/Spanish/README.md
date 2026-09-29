@@ -1,6 +1,6 @@
-﻿# Log Enrichment v5.2 Pro
+﻿# Log Enrichment v5.4 Pro
 
-> 🇧🇷 [Português](../Portuguese/README.md) · 🇺🇸 [English](../English/README.md) · Docs PT completas: [README raíz](../../README.md)
+> 🇧🇷 [Português](../../README.md) · 🇺🇸 [English](../English/README.md) · Docs PT completas: [README raíz](../../README.md)
 
 Herramienta profesional para extracción, análisis forense y enriquecimiento de IPs en logs de acceso e interceptación telemática (IP-API, VirusTotal, AbuseIPDB, Shodan).
 
@@ -22,7 +22,7 @@ Puede procesar IPs, puertos, timestamps, geo, ASN/proveedor y metadatos. Con API
 - **Air-gapped**: `AIR_GAPPED=true` (solo caché)
 - **Caché firmado HMAC**: `CACHE_HMAC_SECRET` / `SIGN_IP_CACHE`
 - Persistencia de sesión: `data/sessions/`
-- Capa de aplicación: `application.enrich_use_case` + `enrich_service`
+- Servicio de enriquecimiento compartido: `enrich_service` (logs de acceso e interceptaciones)
 - Paquete modular `analysis/`
 - Retención: `scripts/retention_cleanup.py`
 - **Export SIEM**: IOC + **STIX 2.1**
@@ -56,7 +56,7 @@ python -m pytest tests -q
 
 ## Tests
 
-~196 tests automatizados.
+350 tests automatizados (341 rápidos + 9 `slow` de carga sobre 202.128 filas).
 
 ## Documentación
 

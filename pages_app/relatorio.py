@@ -17,8 +17,6 @@ from analysis import (
     detect_shared_wifi, detect_geo_changes,
     cross_target_correlation,
 )
-import json
-import os
 from audit_logger import log_audit_event, generate_integrity_receipt
 from html_report_generator import generate_html_report
 
@@ -27,12 +25,21 @@ from i18n import t
 logger = logging.getLogger(__name__)
 
 
-def _try(fn, *args, **kwargs):
-    """Executa uma análise tolerando falhas; retorna None em caso de erro."""
+def _try(falhas, rotulo, fn, *args, **kwargs):
+    """Executa uma análise opcional tolerando falhas; retorna None em caso de erro.
+
+    A falha não some: vai para o log com traceback e para `falhas`, que a
+    página exibe e o relatório declara como seção omitida. Antes a seção
+    simplesmente não aparecia — ausência de achado e falha de análise ficavam
+    indistinguíveis no laudo. MemoryError sobe (é tratado no nível da página).
+    """
     try:
         return fn(*args, **kwargs)
+    except MemoryError:
+        raise
     except Exception as exc:
-        logger.warning(f"Análise {getattr(fn, '__name__', fn)} falhou: {exc}")
+        logger.exception("Análise %s falhou", getattr(fn, '__name__', fn))
+        falhas.append(f"{rotulo} (erro: {exc})")
         return None
 
 
@@ -123,24 +130,30 @@ def page_relatorio():
                 analyses['life_patterns'] = _stage('life_patterns', n_rows, detect_life_patterns, df)
 
                 # ── Análises adicionais (Fase 1) ──
-                analyses['digital_silence'] = _try(detect_digital_silence, df)
-                analyses['subnet_patterns'] = _try(analyze_subnet_patterns, df)
-                analyses['timezone_consistency'] = _try(validate_timezone_consistency, df)
-                analyses['provider_timing'] = _try(analyze_provider_timing, df)
+                secoes_falhas = []
+                analyses['digital_silence'] = _try(secoes_falhas, "Silêncio digital",
+                                                   detect_digital_silence, df)
+                analyses['subnet_patterns'] = _try(secoes_falhas, "Consistência de subnets",
+                                                   analyze_subnet_patterns, df)
+                analyses['timezone_consistency'] = _try(secoes_falhas, "Validação de fuso horário",
+                                                        validate_timezone_consistency, df)
+                analyses['provider_timing'] = _try(secoes_falhas, "Padrão temporal por provedor",
+                                                   analyze_provider_timing, df)
 
-                # Carrega cache para detectar mudanças geográficas históricas
-                cache_path = os.path.join(
-                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                    'ip_cache.json')
+                # Mudanças geográficas históricas, pelo leitor único do cache
+                # (desembrulha envelope assinado; histórico não filtra TTL).
+                from api_client import read_ip_cache
                 cache_data = {}
-                if os.path.exists(cache_path):
-                    try:
-                        with open(cache_path, 'r', encoding='utf-8') as cf:
-                            cache_data = json.load(cf)
-                    except Exception as ce:
-                        logger.warning(f'Falha ao ler ip_cache.json: {ce}')
+                try:
+                    cache_data = read_ip_cache()
+                except MemoryError:
+                    raise
+                except Exception as ce:
+                    logger.exception('Falha ao ler o cache de IPs')
+                    secoes_falhas.append(f"Mudanças geográficas históricas (cache ilegível: {ce})")
                 if cache_data:
-                    analyses['geo_changes'] = _try(detect_geo_changes, df, cache_data)
+                    analyses['geo_changes'] = _try(secoes_falhas, "Mudanças geográficas históricas",
+                                                   detect_geo_changes, df, cache_data)
 
                 # Análises cross-target (somente se houver múltiplos alvos armazenados)
                 stored = st.session_state.get('stored_targets', {}) or {}
@@ -149,8 +162,10 @@ def page_relatorio():
                 if alvo and alvo not in multi_targets:
                     multi_targets[alvo] = df
                 if len(multi_targets) >= 2:
-                    analyses['shared_wifi'] = _try(detect_shared_wifi, multi_targets)
-                    analyses['cross_correlation'] = _try(cross_target_correlation, multi_targets)
+                    analyses['shared_wifi'] = _try(secoes_falhas, "WiFi compartilhado",
+                                                   detect_shared_wifi, multi_targets)
+                    analyses['cross_correlation'] = _try(secoes_falhas, "Correlação entre alvos",
+                                                         cross_target_correlation, multi_targets)
 
                 receipt = generate_integrity_receipt(
                     input_file=None, output_file=None,
@@ -186,13 +201,14 @@ def page_relatorio():
                     'branding': branding,
                     'signatures': signatures,
                     'coc': coc,
+                    'secoes_omitidas': secoes_falhas,
                 }
 
                 html_bytes = generate_html_report(
                     df, alvo, config=config, analyses=analyses,
                     audit_hash=receipt.get('receipt_hash', ''))
 
-                log_audit_event('report_generated', {
+                evento_relatorio = log_audit_event('report_generated', {
                     'alvo': alvo, 'type': 'html_professional',
                     'records': len(df), 'sha256': receipt.get('receipt_hash', ''),
                 })
@@ -206,9 +222,18 @@ def page_relatorio():
                     key="dl_pro_html",
                 )
                 st.success("✅ Relatório HTML profissional gerado! Abra o arquivo em qualquer navegador.")
+                if secoes_falhas:
+                    st.warning("⚠️ Seções omitidas por falha (declaradas no relatório):\n\n"
+                               + "\n".join(f"- {s}" for s in secoes_falhas))
+                for evento in (receipt.get('_audit_event'), evento_relatorio):
+                    if evento is not None and not evento.get('_persisted', True):
+                        st.error("❌ O evento de auditoria NÃO foi gravado no audit trail "
+                                 "(veja o log da aplicação). A cadeia de custódia deste "
+                                 "relatório está incompleta.")
+                        break
 
                 with st.expander("🔒 Recibo de Integridade"):
-                    st.json(receipt)
+                    st.json({k: v for k, v in receipt.items() if not k.startswith('_')})
             except MemoryError:
                 logger.exception("Falha de memória ao gerar relatório HTML (%d registros)", len(df))
                 st.error(

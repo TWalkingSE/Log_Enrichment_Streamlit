@@ -5,6 +5,7 @@ import logging
 import os
 from datetime import datetime, timedelta  # noqa: F401  (re-export)
 from api_client import is_valid_ip
+from validators import as_bool, parse_data
 # Re-exports intencionais: data_processor é a fachada pública sobre o pacote
 # data_processing, e outros módulos importam estes nomes a partir daqui
 # (ex.: pages_app/analise/operacional.py usa periodo_matches).
@@ -566,7 +567,7 @@ def extrair_ips_do_formato_preservation_google(content_or_df, update_callback=No
     for _, row in df_csv.iterrows():
         # Filtrar IPs não roteáveis
         if 'Is Non-routable IP Address' in df_csv.columns:
-            if str(row.get('Is Non-routable IP Address', '')).strip().lower() == 'yes':
+            if as_bool(row.get('Is Non-routable IP Address'), field='Is Non-routable IP Address'):
                 continue
 
         ip_raw = str(row.get('IP Address', '')).strip()
@@ -1258,7 +1259,7 @@ def processar_resultados(df_original, resultados_ips):
     # Calcular Periodo e ISO_Date vetorizado
     if 'Data' in df_processado.columns:
         try:
-            data_parsed = pd.to_datetime(df_processado['Data'], errors='coerce')
+            data_parsed = parse_data(df_processado['Data'])
             valid_mask = data_parsed.notna()
             if valid_mask.any():
                 horas = data_parsed[valid_mask].dt.hour

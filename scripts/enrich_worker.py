@@ -27,7 +27,7 @@ def main() -> int:
     p.add_argument("--alvo", default="worker")
     p.add_argument("--batch-size", type=int, default=500)
     p.add_argument("--period", type=int, default=0)
-    p.add_argument("--cache", default="ip_cache.json")
+    p.add_argument("--cache", default=str(ROOT / "ip_cache.json"))
     p.add_argument("--api-key", default=os.getenv("IPAPI_KEY") or None)
     p.add_argument("--air-gapped", action="store_true", help="Cache-only, no external HTTP")
     p.add_argument("--no-cache", action="store_true")

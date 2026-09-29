@@ -15,8 +15,13 @@ import ipaddress
 from datetime import datetime
 from collections import defaultdict
 from validators import as_bool, bool_series, parse_data
+from helpers.runtime_flags import AirGappedError, ensure_network_allowed
 
 logger = logging.getLogger(__name__)
+
+# Caminho absoluto: com o nome relativo, o cache Tor lido/gravado dependia do
+# diretório de onde o app (ou o `tor_updater`) foi iniciado.
+TOR_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tor_exit_nodes.json')
 
 
 # ============================================================
@@ -56,6 +61,7 @@ async def check_abuseipdb(session, ip, api_key):
 
 async def batch_check_abuseipdb(ips, api_key, max_concurrent=5):
     """Check multiple IPs against AbuseIPDB. Returns list of dicts."""
+    ensure_network_allowed('AbuseIPDB')
     results = []
     sem = asyncio.Semaphore(max_concurrent)
 
@@ -122,6 +128,7 @@ async def check_virustotal(session, ip, api_key):
 
 async def batch_check_virustotal(ips, api_key, max_concurrent=4):
     """Check multiple IPs against VirusTotal (free: 4 req/min)."""
+    ensure_network_allowed('VirusTotal')
     results = []
     sem = asyncio.Semaphore(max_concurrent)
 
@@ -742,6 +749,7 @@ async def check_shodan(session, ip, api_key):
 
 async def batch_check_shodan(ips, api_key, max_concurrent=1):
     """Check multiple IPs against Shodan (free: ~1 req/sec)."""
+    ensure_network_allowed('Shodan')
     results = []
     sem = asyncio.Semaphore(max_concurrent)
 
@@ -965,7 +973,12 @@ def fetch_tor_exit_nodes(list_url=TOR_BULK_EXIT_LIST_URL, return_error=False):
     import urllib.request
 
     try:
-        req = urllib.request.Request(list_url, headers={'User-Agent': 'LogEnrichment/5.2'})
+        ensure_network_allowed('torbulkexitlist')
+    except AirGappedError as e:
+        return (set(), str(e)) if return_error else set()
+
+    try:
+        req = urllib.request.Request(list_url, headers={'User-Agent': 'LogEnrichment/5.4'})
         with urllib.request.urlopen(req, timeout=20) as resp:
             content = resp.read().decode('utf-8', errors='replace')
 
@@ -1000,7 +1013,12 @@ def fetch_tor_exit_nodes_from_onionoo(api_url=TOR_ONIONOO_DETAILS_URL, return_er
     import urllib.request
 
     try:
-        req = urllib.request.Request(api_url, headers={'User-Agent': 'LogEnrichment/5.2'})
+        ensure_network_allowed('Onionoo')
+    except AirGappedError as e:
+        return (set(), str(e)) if return_error else set()
+
+    try:
+        req = urllib.request.Request(api_url, headers={'User-Agent': 'LogEnrichment/5.4'})
         with urllib.request.urlopen(req, timeout=25) as resp:
             payload = json.loads(resp.read().decode('utf-8', errors='replace'))
 
@@ -1027,7 +1045,7 @@ def fetch_tor_exit_nodes_from_onionoo(api_url=TOR_ONIONOO_DETAILS_URL, return_er
         return set()
 
 
-def load_tor_exit_nodes(cache_file='tor_exit_nodes.json', ttl_hours=TOR_CACHE_TTL_HOURS,
+def load_tor_exit_nodes(cache_file=TOR_CACHE_FILE, ttl_hours=TOR_CACHE_TTL_HOURS,
                         allow_stale=False, return_metadata=False):
     """Load Tor exit nodes from local cache, optionally accepting stale data."""
     import time as _time
@@ -1075,24 +1093,25 @@ def load_tor_exit_nodes(cache_file='tor_exit_nodes.json', ttl_hours=TOR_CACHE_TT
     return metadata if return_metadata else None
 
 
-def get_tor_exit_cache_status(cache_file='tor_exit_nodes.json', ttl_hours=TOR_CACHE_TTL_HOURS):
+def get_tor_exit_cache_status(cache_file=TOR_CACHE_FILE, ttl_hours=TOR_CACHE_TTL_HOURS):
     """Return Tor cache metadata for UI/status display."""
     return load_tor_exit_nodes(cache_file, ttl_hours, allow_stale=True, return_metadata=True)
 
 
-def save_tor_exit_nodes(nodes, cache_file='tor_exit_nodes.json'):
+def save_tor_exit_nodes(nodes, cache_file=TOR_CACHE_FILE):
     """Persist Tor exit nodes to local cache."""
     import time as _time
 
+    from helpers.atomic_io import atomic_write_json
     try:
-        with open(cache_file, 'w', encoding='utf-8') as f:
-            json.dump({'cached_at': _time.time(), 'nodes': sorted(nodes)}, f, ensure_ascii=False, indent=2)
+        atomic_write_json(cache_file, {'cached_at': _time.time(), 'nodes': sorted(nodes)},
+                          ensure_ascii=False, indent=2)
         logger.info("Tor exit nodes saved to cache: %d", len(nodes))
     except OSError as e:
         logger.error("Error saving Tor cache: %s", e)
 
 
-def update_tor_exit_nodes_cache(cache_file='tor_exit_nodes.json',
+def update_tor_exit_nodes_cache(cache_file=TOR_CACHE_FILE,
                                 list_url=TOR_BULK_EXIT_LIST_URL,
                                 onionoo_url=TOR_ONIONOO_DETAILS_URL):
     """Refresh the Tor cache using torbulkexitlist plus Onionoo."""
@@ -1132,7 +1151,7 @@ def update_tor_exit_nodes_cache(cache_file='tor_exit_nodes.json',
     }
 
 
-def get_tor_exit_nodes(cache_file='tor_exit_nodes.json', ttl_hours=TOR_CACHE_TTL_HOURS,
+def get_tor_exit_nodes(cache_file=TOR_CACHE_FILE, ttl_hours=TOR_CACHE_TTL_HOURS,
                        list_url=TOR_BULK_EXIT_LIST_URL,
                        onionoo_url=TOR_ONIONOO_DETAILS_URL):
     """Get Tor exit nodes from cache or refresh from the two official Tor sources."""

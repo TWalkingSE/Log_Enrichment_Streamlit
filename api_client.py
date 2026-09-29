@@ -4,17 +4,24 @@ import gzip
 import json
 import io
 import os
-import tempfile
 import time
 import re
 import logging
 import socket
 from ipaddress import ip_address, ip_network
+from typing import Any, Dict, Optional, Tuple
+
+from helpers.atomic_io import atomic_write
 
 logger = logging.getLogger(__name__)
 
 # TTL padrão do cache: 30 dias (em segundos)
 CACHE_TTL_SECONDS = 30 * 24 * 60 * 60
+
+# Caminho canônico do cache de IPs. Antes umas páginas usavam 'ip_cache.json'
+# relativo ao diretório de trabalho e outras a raiz do projeto: iniciado de
+# outro diretório, o app lia um cache e gravava em outro.
+IP_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ip_cache.json')
 
 CGNAT_NETWORK = ip_network('100.64.0.0/10')
 
@@ -41,19 +48,101 @@ FREE_API_RATE_LIMIT = 45
 FREE_API_PERIOD = 60
 
 
-def summarize_ip_cache(cache_file='ip_cache.json', ttl_seconds=CACHE_TTL_SECONDS):
+class InvalidApiKeyError(RuntimeError):
+    """A chave da API paga foi recusada (HTTP 403).
+
+    O job para aqui. O comportamento anterior trocava em silêncio para o
+    endpoint gratuito em HTTP em claro no meio do processamento: a fonte do
+    dado mudava no meio de um laudo e os IPs passavam a trafegar sem TLS, com
+    o analista vendo só "API Key inválida" num callback.
+    """
+
+    MESSAGE = ("Chave da IP-API recusada (HTTP 403). O processamento foi interrompido "
+               "para não trocar a fonte do dado no meio do job. Corrija a chave, ou "
+               "remova-a para usar o tier gratuito (HTTP sem criptografia, 45 req/min).")
+
+    def __init__(self, message: str = MESSAGE):
+        super().__init__(message)
+
+
+class SignedCacheError(ValueError):
+    """Cache assinado cuja assinatura não confere (ou não pôde ser verificada)."""
+
+
+def _cache_ts(entry: Dict[str, Any]) -> Optional[float]:
+    """`_cached_at` da entrada, ou None se ausente, zero ou inválido."""
+    ts = entry.get('_cached_at')
+    if isinstance(ts, (int, float)) and not isinstance(ts, bool) and ts > 0:
+        return float(ts)
+    return None
+
+
+def read_ip_cache(path: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+    """Lê o cache de IPs em disco como {ip: entrada}, pronto para consulta.
+
+    Único leitor do arquivo fora do `IPAPIClient`. Páginas que faziam
+    `json.load` direto recebiam o ENVELOPE assinado ({'payload', 'signature',
+    ...}) no lugar das entradas — e mostravam "sem histórico" em vez de dados.
+
+    - Arquivo ausente: `{}`.
+    - Envelope assinado: verificado e desembrulhado; assinatura inválida
+      levanta `SignedCacheError` (falha fechada — nunca serve dado adulterado).
+    - JSON ilegível: a exceção sobe; ilegível e vazio são estados diferentes
+      numa perícia.
+    """
+    cache_path = path or IP_CACHE_PATH
+    if not os.path.exists(cache_path):
+        return {}
+    if cache_path.endswith('.gz'):
+        with gzip.open(cache_path, 'rt', encoding='utf-8') as fh:
+            raw = json.load(fh)
+    else:
+        with open(cache_path, 'r', encoding='utf-8') as fh:
+            raw = json.load(fh)
+    from helpers.signed_cache import is_signed_envelope, verify_signed_package
+    if is_signed_envelope(raw):
+        ok, msg, payload = verify_signed_package(raw)
+        if not ok:
+            raise SignedCacheError(f"Cache assinado rejeitado ({cache_path}): {msg}")
+        raw = payload
+    if not isinstance(raw, dict):
+        raise ValueError(f"Cache de IPs com formato inesperado: {type(raw).__name__}")
+    return {k: v for k, v in raw.items() if isinstance(v, dict)}
+
+
+def filter_fresh_cache(entries: Dict[str, Dict[str, Any]],
+                       ttl_seconds: float = CACHE_TTL_SECONDS
+                       ) -> Tuple[Dict[str, Dict[str, Any]], int]:
+    """Separa as entradas dentro do TTL. Retorna (frescas, descartadas).
+
+    Entrada sem `_cached_at` válido tem idade desconhecida e é descartada,
+    como no `IPAPIClient`: geolocalização de vintage incerta não é servida
+    como atual.
+    """
+    now = time.time()
+    fresh: Dict[str, Dict[str, Any]] = {}
+    for ip_key, entry in entries.items():
+        ts = _cache_ts(entry)
+        if ts is not None and (now - ts) < ttl_seconds:
+            fresh[ip_key] = entry
+    return fresh, len(entries) - len(fresh)
+
+
+def summarize_ip_cache(cache_file: Optional[str] = None,
+                       ttl_seconds: float = CACHE_TTL_SECONDS) -> Optional[Dict[str, Any]]:
     """Resumo de frescor do cache de enriquecimento, para a interface.
 
     Retorna {'total', 'expirados', 'sem_data', 'mais_antigo_dias'} ou None se
     o arquivo não existe/está ilegível. Números — não presença/ausência — são
     o que permite ao analista decidir se a geolocalização servida é atual.
     """
-    try:
-        with open(cache_file, 'r', encoding='utf-8') as fh:
-            raw = json.load(fh)
-    except (OSError, ValueError):
+    cache_file = cache_file or IP_CACHE_PATH
+    if not os.path.exists(cache_file):
         return None
-    if not isinstance(raw, dict):
+    try:
+        raw = read_ip_cache(cache_file)
+    except (OSError, ValueError):
+        logger.exception("Resumo do cache de IPs indisponível (%s)", cache_file)
         return None
     now = time.time()
     expirados = 0
@@ -62,8 +151,8 @@ def summarize_ip_cache(cache_file='ip_cache.json', ttl_seconds=CACHE_TTL_SECONDS
     for entry in raw.values():
         if not isinstance(entry, dict):
             continue
-        ts = entry.get('_cached_at')
-        if not isinstance(ts, (int, float)) or isinstance(ts, bool) or ts <= 0:
+        ts = _cache_ts(entry)
+        if ts is None:
             sem_data += 1
             continue
         idade = now - ts
@@ -78,29 +167,8 @@ def summarize_ip_cache(cache_file='ip_cache.json', ttl_seconds=CACHE_TTL_SECONDS
     }
 
 
-def _atomic_write(path, write_fn, mode='w', **open_kwargs):
-    """Escreve via arquivo temporário + os.replace (atômico em NTFS e POSIX).
-
-    O padrão anterior (`open(path, 'w')` + dump) trunca o arquivo ANTES de
-    escrever: uma falha no meio deixava JSON inválido, e o carregamento
-    seguinte começava do zero silenciosamente — descartando milhares de IPs
-    já enriquecidos.
-    """
-    directory = os.path.dirname(os.path.abspath(path)) or '.'
-    fd, tmp = tempfile.mkstemp(dir=directory, prefix='.tmp_cache_', suffix='.part')
-    os.close(fd)
-    try:
-        with open(tmp, mode, **open_kwargs) as f:
-            write_fn(f)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    finally:
-        if os.path.exists(tmp):
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
+# Movido para helpers.atomic_io; o nome antigo continua valendo aqui.
+_atomic_write = atomic_write
 
 
 class IPAPIClient:
@@ -109,13 +177,10 @@ class IPAPIClient:
     def __init__(self, batch_size=500, period=0, cache_file=None, api_key=None, cache_ttl=None,
                  air_gapped=None):
         self.api_key = api_key
-        self._api_key_lock = asyncio.Lock()
         if air_gapped is None:
-            try:
-                from helpers.runtime_flags import is_air_gapped
-                air_gapped = is_air_gapped()
-            except Exception:
-                air_gapped = False
+            # Sem `except`: um erro aqui desligava o air-gapped em silêncio.
+            from helpers.runtime_flags import is_air_gapped
+            air_gapped = is_air_gapped()
         self.air_gapped = bool(air_gapped)
 
         # API paga (com key) = pro endpoint HTTPS ilimitado
@@ -170,18 +235,21 @@ class IPAPIClient:
             else:
                 with open(cache_file, 'r', encoding='utf-8') as f:
                     raw_cache = json.load(f)
-            # Envelope assinado (HMAC) opcional
-            try:
-                from helpers.signed_cache import is_signed_envelope, verify_signed_package
-                if is_signed_envelope(raw_cache):
+            # Envelope assinado (HMAC) opcional. Uma falha na VERIFICAÇÃO
+            # rejeita o cache (falha fechada): antes ela era registrada em
+            # debug e o envelope cru seguia adiante como se fosse o cache.
+            from helpers.signed_cache import is_signed_envelope, verify_signed_package
+            if is_signed_envelope(raw_cache):
+                try:
                     ok, msg, payload = verify_signed_package(raw_cache)
-                    if not ok:
-                        logger.error(f"Cache assinado rejeitado: {msg}")
-                        return
-                    raw_cache = payload
-                    logger.info("Cache assinado verificado com sucesso")
-            except Exception as sig_err:
-                logger.debug(f"Verificação de assinatura de cache ignorada: {sig_err}")
+                except Exception:
+                    logger.exception("Falha ao verificar o cache assinado; cache rejeitado")
+                    return
+                if not ok:
+                    logger.error(f"Cache assinado rejeitado: {msg}")
+                    return
+                raw_cache = payload
+                logger.info("Cache assinado verificado com sucesso")
             # Migrar cache antigo (sem TTL) e filtrar expirados
             now = time.time()
             expired_count = 0
@@ -264,7 +332,7 @@ class IPAPIClient:
 
         # Validar IP
         try:
-            ip_obj = ip_address(ip)
+            ip_address(ip)
         except ValueError:
             if callback:
                 callback(f"IP inválido: {ip}")
@@ -308,20 +376,12 @@ class IPAPIClient:
                         continue
 
                     if response.status == 403 and 'pro.' in url:
-                        # API key inválida/expirada — fallback para API gratuita
-                        # Thread-safe: usar lock para evitar race condition
-                        async with self._api_key_lock:
-                            if self.api_key:
-                                logger.warning("API Key inválida (403). Fazendo fallback para API gratuita (45 req/min).")
-                                self.api_key = None
-                                self.API_URL = "http://ip-api.com/json/"
-                                self.batch_size = min(self.batch_size, FREE_API_RATE_LIMIT)
-                                self.period = max(self.period, FREE_API_PERIOD)
-                                self._request_times = []
-                        if callback and attempt == 0:
-                            callback("⚠️ API Key inválida. Usando API gratuita.")
-                        # Retry este IP com a API gratuita
-                        continue
+                        # Chave inválida/expirada: interrompe em vez de rebaixar
+                        # para HTTP em claro (ver InvalidApiKeyError).
+                        logger.error("IP-API: chave recusada (403); job interrompido.")
+                        if callback:
+                            callback("❌ " + InvalidApiKeyError.MESSAGE)
+                        raise InvalidApiKeyError()
 
                     if response.status != 200:
                         if callback:
@@ -369,8 +429,6 @@ class IPAPIClient:
                             old_lon = old_entry.get('Ip_Lon')
                             old_city = old_entry.get('Ip_Cidade', '')
                             old_isp = old_entry.get('Ip_Dono', '')
-                            new_lat = result.get('Ip_Lat')
-                            new_lon = result.get('Ip_Lon')
                             new_city = result.get('Ip_Cidade', '')
                             new_isp = result.get('Ip_Dono', '')
                             geo_changed = (old_city != new_city) or (old_isp != new_isp)
@@ -513,6 +571,12 @@ class IPAPIClient:
                             await asyncio.sleep(wait)
                             continue
 
+                        if response.status == 403 and self.api_key:
+                            logger.error("IP-API batch: chave recusada (403); job interrompido.")
+                            if callback:
+                                callback("❌ " + InvalidApiKeyError.MESSAGE)
+                            raise InvalidApiKeyError()
+
                         if response.status != 200:
                             logger.warning(f"Batch HTTP {response.status}, fallback para individual")
                             break
@@ -569,6 +633,8 @@ class IPAPIClient:
                 tasks = [_query_one_chunk(chunk, wave_start + i) for i, chunk in enumerate(wave)]
                 wave_results = await asyncio.gather(*tasks, return_exceptions=True)
                 for wr in wave_results:
+                    if isinstance(wr, InvalidApiKeyError):
+                        raise wr
                     if isinstance(wr, dict):
                         resultados.update(wr)
                         processed_count += len(wr)
@@ -741,46 +807,12 @@ def is_cgnat_ip(ip_str):
 
 def resolve_rdns(ip_str):
     """Realiza lookup reverso de DNS para um IP (síncrono)"""
+    from helpers.runtime_flags import is_air_gapped
+    if is_air_gapped():
+        # Consulta DNS reversa sai para a rede: bloqueada no modo air-gapped.
+        return None
     try:
         hostname, _, _ = socket.gethostbyaddr(ip_str.strip())
         return hostname
     except (socket.herror, socket.gaierror, OSError):
         return None
-
-
-async def resolve_rdns_async(ip_str, timeout_sec=3):
-    """Realiza lookup reverso de DNS de forma assíncrona."""
-    loop = asyncio.get_event_loop()
-    try:
-        hostname = await asyncio.wait_for(
-            loop.run_in_executor(None, resolve_rdns, ip_str),
-            timeout=timeout_sec
-        )
-        return ip_str, hostname
-    except asyncio.TimeoutError:
-        logger.debug("rDNS timeout para %s", ip_str)
-        return ip_str, None
-    except Exception as e:
-        logger.debug("rDNS falhou para %s: %s", ip_str, e)
-        return ip_str, None
-
-
-async def batch_resolve_rdns(ips, max_concurrent=20, timeout_sec=3):
-    """Resolve rDNS para múltiplos IPs em paralelo. Retorna dict {ip: hostname}."""
-    sem = asyncio.Semaphore(max_concurrent)
-    results = {}
-
-    async def _resolve(ip):
-        async with sem:
-            return await resolve_rdns_async(ip, timeout_sec)
-
-    tasks = [_resolve(ip) for ip in ips]
-    done = await asyncio.gather(*tasks, return_exceptions=True)
-
-    for item in done:
-        if isinstance(item, tuple):
-            results[item[0]] = item[1]
-        elif isinstance(item, Exception):
-            logger.debug(f"rDNS resolve exception: {item}")
-
-    return results

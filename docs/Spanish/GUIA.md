@@ -1,4 +1,4 @@
-# 📘 Guía del Usuario — Log Enrichment v5.2 Pro
+# 📘 Guía del Usuario — Log Enrichment v5.4 Pro
 
 ## Índice
 

@@ -15,6 +15,10 @@ from validators import as_bool
 
 logger = logging.getLogger(__name__)
 
+# Caminho absoluto: relativo, o histórico dependia do diretório de trabalho.
+HISTORY_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            'processing_history.json')
+
 
 def add_log(msg):
     timestamp = datetime.now().strftime('%H:%M:%S')
@@ -40,26 +44,29 @@ def save_history(alvo, total_ips, output_file, fmt):
         'formato': fmt
     }
     st.session_state.history.append(entry)
+    from helpers.atomic_io import atomic_write_json
     try:
-        hist_file = 'processing_history.json'
         existing = []
-        if os.path.exists(hist_file):
-            with open(hist_file, 'r') as f:
+        if os.path.exists(HISTORY_FILE):
+            with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
                 existing = json.load(f)
         existing.append(entry)
-        with open(hist_file, 'w') as f:
-            json.dump(existing[-50:], f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        logger.error(f"Erro ao salvar histórico: {e}")
+        # Atômico e em UTF-8: sem `encoding`, o Windows gravava em cp1252 e um
+        # alvo com caractere fora dele quebrava a escrita no meio do arquivo.
+        atomic_write_json(HISTORY_FILE, existing[-50:], indent=2, ensure_ascii=False)
+    except (OSError, ValueError, TypeError):
+        logger.exception("Erro ao salvar histórico")
+        st.warning("⚠️ Não foi possível gravar o histórico de processamento (veja o log).")
 
 
 def load_history():
     try:
-        if os.path.exists('processing_history.json'):
-            with open('processing_history.json', 'r') as f:
+        if os.path.exists(HISTORY_FILE):
+            with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
                 st.session_state.history = json.load(f)
-    except Exception as e:
-        logger.error(f"Erro ao carregar histórico: {e}")
+    except (OSError, ValueError):
+        logger.exception("Erro ao carregar histórico")
+        st.warning("⚠️ Histórico de processamento ilegível (veja o log).")
 
 
 def detect_anomalies(df):

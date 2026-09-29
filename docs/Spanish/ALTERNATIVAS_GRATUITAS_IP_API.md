@@ -1,6 +1,6 @@
 # Alternativas Gratuitas a la API ip-api.com para Enriquecimiento de Datos IP
 
-> Esta es una traducción resumida del documento original en portugués. Para el análisis técnico completo, vea la [versión en portugués](../Portuguese/ALTERNATIVAS_GRATUITAS_IP_API.md).
+> Esta es una traducción resumida del documento original en portugués. Para el análisis técnico completo, vea la [versión en portugués](../../ALTERNATIVAS_GRATUITAS_IP_API.md).
 
 ## Introducción
 

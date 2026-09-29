@@ -11,6 +11,7 @@ Gera um único arquivo .html self-contained com:
 """
 
 import hashlib
+from html import escape as html_escape
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -59,9 +60,10 @@ def _build_findings(df, analyses, n_total):
 
     risk = analyses.get('risk_scores')
     if isinstance(risk, pd.DataFrame) and not risk.empty and 'Score' in risk.columns:
-        high_risk = len(risk[risk['Score'] >= 70])
+        from analysis.risk import RISK_HIGH
+        high_risk = len(risk[risk['Score'] >= RISK_HIGH])
         if high_risk > 0:
-            findings.append(f'{high_risk} IP(s) com risco elevado (>= 70)')
+            findings.append(f'{high_risk} IP(s) com risco elevado (>= {RISK_HIGH})')
 
     return findings, proxy_n, hosting_n, mobile_n
 
@@ -163,10 +165,12 @@ def _generate_map_html(df):
 
     lats, lons = [], []
     for _, row in agg.iterrows():
-        ip = str(row.get(ip_col, 'N/A'))
-        cidade = _safe(row.get('Ip_Cidade'))
-        pais = _safe(row.get('Ip_Pais'))
-        dono = _safe(row.get('Ip_Dono'))
+        # Escapados: o popup é HTML cru dentro do relatório, e provedor/cidade
+        # vêm da API externa ou do próprio documento analisado.
+        ip = html_escape(str(row.get(ip_col, 'N/A')))
+        cidade = html_escape(_safe(row.get('Ip_Cidade')))
+        pais = html_escape(_safe(row.get('Ip_Pais')))
+        dono = html_escape(_safe(row.get('Ip_Dono')))
         count = int(row['_count'])
 
         is_proxy = as_bool(row.get('Ip_Proxy'), field='Ip_Proxy')
@@ -527,7 +531,7 @@ def generate_html_report(df, alvo, config=None, analyses=None, audit_hash=None):
     # Período
     periodo_inicio = periodo_fim = dias_atividade = ""
     if 'Data' in df.columns:
-        dates = pd.to_datetime(df['Data'], errors='coerce').dropna()
+        dates = parse_data(df['Data']).dropna()
         if len(dates) > 0:
             periodo_inicio = dates.min().strftime('%d/%m/%Y')
             periodo_fim = dates.max().strftime('%d/%m/%Y')
@@ -559,9 +563,11 @@ def generate_html_report(df, alvo, config=None, analyses=None, audit_hash=None):
         'hostname': coc_in.get('hostname', ''),
         'enrichment_source': coc_in.get('enrichment_source', 'ip-api.com'),
         # v5.3: coerção de booleanos corrigida (1/0 e VERDADEIRO passaram a ser
-        # reconhecidos). Relatórios v5.2 e v5.3 podem divergir sobre o mesmo
+        # reconhecidos). v5.4: datas NN/NN/AAAA ambíguas lidas como dia/mês
+        # (antes mês/dia) e pares VPN→residencial com flags textuais corrigidos.
+        # Relatórios de versões diferentes podem divergir sobre o mesmo
         # arquivo de entrada — por isso a versão consta na cadeia de custódia.
-        'tool_version': coc_in.get('tool_version', 'Log Enrichment v5.3'),
+        'tool_version': coc_in.get('tool_version', 'Log Enrichment v5.4'),
         'receipt_hash': coc_in.get('receipt_hash', ''),
         'generated_at_iso': coc_in.get('generated_at_iso', datetime.now().isoformat()),
     }
@@ -613,6 +619,21 @@ def generate_html_report(df, alvo, config=None, analyses=None, audit_hash=None):
     has_geo = bool(map_html)
 
     # ----- TABELAS -----
+    # Totais reais de cada lista que o relatório exibe truncada: o template
+    # declara "Exibindo N de M" em vez de apresentar a fatia como o todo.
+    totais = {
+        'provedores': int(df['Ip_Dono'].nunique()) if 'Ip_Dono' in df.columns else 0,
+        'paises': int(df['Ip_Pais'].nunique()) if 'Ip_Pais' in df.columns else 0,
+        'regioes': int(df['Ip_Regiao'].nunique()) if 'Ip_Regiao' in df.columns else 0,
+        'top_ips': int(df['Ip'].nunique()) if 'Ip' in df.columns else 0,
+        'brutos': n_total,
+    }
+    for chave, nome in (('risco', 'risk_scores'), ('saltos', 'impossible_jumps'),
+                        ('confianca', 'ip_confidence'), ('wifi', 'shared_wifi'),
+                        ('correlacao', 'cross_correlation')):
+        valor = analyses.get(nome)
+        totais[chave] = len(valor) if isinstance(valor, (pd.DataFrame, list)) else 0
+
     provider_table = []
     if 'Ip_Dono' in df.columns:
         for prov, cnt in df['Ip_Dono'].value_counts().head(15).items():
@@ -642,9 +663,8 @@ def generate_html_report(df, alvo, config=None, analyses=None, audit_hash=None):
     risk_high = risk_med = risk_low = 0
     risk_df = analyses.get('risk_scores')
     if isinstance(risk_df, pd.DataFrame) and not risk_df.empty and 'Score' in risk_df.columns:
-        risk_high = len(risk_df[risk_df['Score'] >= 70])
-        risk_med = len(risk_df[(risk_df['Score'] >= 40) & (risk_df['Score'] < 70)])
-        risk_low = len(risk_df[risk_df['Score'] < 40])
+        from analysis.risk import risk_level_counts
+        risk_high, risk_med, risk_low = risk_level_counts(risk_df)
         for _, r in risk_df.head(20).iterrows():
             risk_scores.append({
                 'ip': str(r.get('IP', '')),
@@ -830,13 +850,17 @@ def generate_html_report(df, alvo, config=None, analyses=None, audit_hash=None):
 
     # ----- RENDER -----
     try:
-        from jinja2 import Template
+        from jinja2 import Environment
     except ImportError:
         logger.error("Jinja2 não está instalado — necessário para gerar relatório HTML")
         raise
 
+    # Autoescape: todo valor interpolado vem de dados (API externa, documento
+    # analisado, campos do analista). Só os fragmentos que o próprio gerador
+    # produz (mapa folium, gráficos plotly) passam crus, marcados com `| safe`
+    # no template.
     template_text = _TEMPLATE_PATH.read_text(encoding='utf-8')
-    template = Template(template_text)
+    template = Environment(autoescape=True).from_string(template_text)
 
     html = template.render(
         title=config.get('title', 'Relatório de Análise de IPs'),
@@ -895,6 +919,8 @@ def generate_html_report(df, alvo, config=None, analyses=None, audit_hash=None):
         geo_changes=geo_changes,
         shared_wifi=shared_wifi,
         cross_correlation=cross_correlation,
+        totais=totais,
+        secoes_omitidas=config.get('secoes_omitidas') or [],
     )
 
     return html.encode('utf-8')
