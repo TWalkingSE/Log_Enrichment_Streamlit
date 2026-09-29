@@ -68,55 +68,38 @@ def page_relatorio():
 
     alvo = st.session_state.alvo or 'desconhecido'
 
-    st.subheader("📋 Pré-visualização do Relatório")
+    st.subheader(t('relatorio.preview_title'))
     total = len(df)
     unique = df['Ip'].nunique() if 'Ip' in df.columns else 0
     providers = df['Ip_Dono'].dropna().nunique() if 'Ip_Dono' in df.columns else 0
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.metric("Registros", total)
+        st.metric(t('relatorio.records'), total)
     with c2:
-        st.metric("IPs Únicos", unique)
+        st.metric(t('relatorio.unique_ips'), unique)
     with c3:
-        st.metric("Provedores", providers)
+        st.metric(t('relatorio.providers'), providers)
 
-    with st.expander("⚙️ Configuração do Relatório", expanded=True):
+    with st.expander(t('relatorio.config_title'), expanded=True):
         rc1, rc2 = st.columns(2)
         with rc1:
-            org = st.text_input("Organização", placeholder="Ex: Polícia Civil de MG", key="rpt_org")
-            case_num = st.text_input("Número do Caso", placeholder="Ex: IPL 001/2025", key="rpt_case")
-            analyst_name = st.text_input("Analista", placeholder="Seu nome", key="rpt_analyst")
+            org = st.text_input(t('relatorio.organization'), placeholder=t('relatorio.org_placeholder'), key="rpt_org")
+            case_num = st.text_input(t('relatorio.case_number'), placeholder=t('relatorio.case_placeholder'),
+                                     key="rpt_case")
+            analyst_name = st.text_input(t('relatorio.analyst'), placeholder=t('relatorio.analyst_placeholder'),
+                                         key="rpt_analyst")
         with rc2:
-            classification = st.selectbox("Classificação",
-                ["", "CONFIDENCIAL", "RESTRITO", "SIGILOSO", "USO INTERNO"], key="rpt_class")
-            include_raw = st.checkbox("Incluir amostra de dados brutos", key="rpt_raw")
+            # Os valores vão para o laudo, que é redigido em português.
+            classification = st.selectbox(t('relatorio.classification'),
+                ["", "CONFIDENCIAL", "RESTRITO", "SIGILOSO", "USO INTERNO"],
+                format_func=lambda v: v or t('relatorio.classification_none'), key="rpt_class")
+            include_raw = st.checkbox(t('relatorio.include_raw'), key="rpt_raw")
 
-    st.markdown("""
-    O relatório HTML interativo incluirá automaticamente apenas as seções relevantes:
-    - **Sumário Executivo** com métricas e achados
-    - **Perfil Comportamental** (quando houver dados temporais)
-    - **Mapa Geográfico Interativo** com clusterização
-    - **Distribuição de Provedores** com gráficos Plotly
-    - **Tipos de Conexão** (residencial, móvel, proxy/VPN, hosting)
-    - **Análise de Risco** com scoring por IP
-    - **Saltos Impossíveis** (quando detectados)
-    - **Heurísticas de VPN** (quando detectadas)
-    - **Confiança de IPs** (real vs mascarado)
-    - **Locais Base** (casa/trabalho estimados)
-    - **Padrões de Vida** (clustering geoespacial)
-    - **Silêncio Digital** (gaps > 24h, viagens, troca de chip)
-    - **Consistência de Subnets** (/24 IPv4 e /48 IPv6)
-    - **Validação de Fuso Horário** (atividade em horário de sono no fuso do IP)
-    - **Padrão Temporal por Provedor** (always-on, agendado, esporádico, VPN programada)
-    - **Mudanças Geográficas Históricas** (a partir do cache de enriquecimento)
-    - **WiFi Compartilhado** e **Correlação entre Alvos** (quando houver múltiplos alvos)
-    - **IPs Mais Recorrentes**
-    - **Hash SHA-256** para cadeia de custódia
-    """)
+    st.markdown(t('relatorio.sections_intro'))
 
-    if st.button("🌐 Gerar Relatório HTML Profissional", type="primary", key="btn_pro_html"):
-        with st.spinner("Gerando relatório HTML interativo com análises..."):
+    if st.button(t('relatorio.generate_html'), type="primary", key="btn_pro_html"):
+        with st.spinner(t('relatorio.generating_html')):
             try:
                 analyses = {}
                 n_rows = len(df)
@@ -215,31 +198,26 @@ def page_relatorio():
 
                 filename = f"relatorio_{alvo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
                 st.download_button(
-                    "📥 Baixar Relatório HTML",
+                    t('relatorio.download_html'),
                     data=html_bytes,
                     file_name=filename,
                     mime="text/html",
                     key="dl_pro_html",
                 )
-                st.success("✅ Relatório HTML profissional gerado! Abra o arquivo em qualquer navegador.")
+                st.success(t('relatorio.html_generated'))
                 if secoes_falhas:
-                    st.warning("⚠️ Seções omitidas por falha (declaradas no relatório):\n\n"
+                    st.warning(t('relatorio.sections_omitted') + "\n\n"
                                + "\n".join(f"- {s}" for s in secoes_falhas))
                 for evento in (receipt.get('_audit_event'), evento_relatorio):
                     if evento is not None and not evento.get('_persisted', True):
-                        st.error("❌ O evento de auditoria NÃO foi gravado no audit trail "
-                                 "(veja o log da aplicação). A cadeia de custódia deste "
-                                 "relatório está incompleta.")
+                        st.error(t('relatorio.audit_not_saved'))
                         break
 
-                with st.expander("🔒 Recibo de Integridade"):
+                with st.expander(t('relatorio.integrity_receipt')):
                     st.json({k: v for k, v in receipt.items() if not k.startswith('_')})
             except MemoryError:
                 logger.exception("Falha de memória ao gerar relatório HTML (%d registros)", len(df))
-                st.error(
-                    f"Memória insuficiente para gerar o relatório com {len(df):,} registros. "
-                    .replace(',', '.') +
-                    "Filtre o período ou o provedor na página de Resultados e tente novamente.")
+                st.error(t('relatorio.memory_error', rows=f"{len(df):,}".replace(',', '.')))
             except Exception as e:
                 logger.exception("Erro ao gerar relatório HTML")
-                st.error(f"Erro ao gerar relatório HTML: {e}")
+                st.error(t('relatorio.html_error', error=e))

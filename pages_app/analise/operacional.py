@@ -15,7 +15,7 @@ from helpers.large_data import gate
 from ip_investigativo import calcular_score, render_analise_investigativa, selecionar_provedores
 from components.visualizations import render_health_gauges
 from ai_assistant import AI_MODELS, check_ollama_status, get_default_ai_tier, run_ai_analysis
-from i18n import t
+from i18n import t, t_or
 from helpers.atomic_io import atomic_write_json
 
 logger = logging.getLogger(__name__)
@@ -33,8 +33,7 @@ def _load_snapshots():
             return json.load(f)
     except (OSError, ValueError) as exc:
         logger.exception("Snapshots ilegíveis em %s", _SNAPSHOTS_FILE)
-        st.error(f"⚠️ Não foi possível ler os snapshots salvos ({exc}). "
-                 f"Arquivo: {_SNAPSHOTS_FILE}")
+        st.error(t('operacional.snapshots_unreadable', error=exc, path=_SNAPSHOTS_FILE))
         return []
 
 
@@ -58,38 +57,44 @@ def page_operacional():
 
     # ── Investigativa ──
     with st.container(border=True):
-        st.subheader("🔍 Análise Investigativa")
+        st.subheader(t('operacional.investigative_title'))
         render_analise_investigativa(df)
 
     # ── Análise AI ──
     with st.container(border=True):
-        st.subheader("🤖 Análise AI (Ollama)")
+        st.subheader(t('operacional.ai_title'))
 
         # Status do Ollama
         ollama_url = st.session_state.get('ai_ollama_url', 'http://localhost:11434')
         status = check_ollama_status(ollama_url)
 
         if status['online']:
-            st.success(f"✅ Ollama online — {len(status['models'])} modelo(s) disponível(is)")
+            st.success(t('operacional.ollama_online', count=len(status['models'])))
 
             col_ai1, col_ai2 = st.columns(2)
             with col_ai1:
                 current_tier = st.session_state.get('ai_tier', get_default_ai_tier())
                 if current_tier not in AI_MODELS:
                     current_tier = get_default_ai_tier()
-                tier = st.selectbox("Tier do modelo", list(AI_MODELS.keys()),
+                tier = st.selectbox(t('operacional.model_tier'), list(AI_MODELS.keys()),
                                      index=list(AI_MODELS.keys()).index(current_tier),
-                                     format_func=lambda t: f"{t.title()} — {AI_MODELS[t]['label']}",
+                                     format_func=lambda k: f"{k.title()} — {AI_MODELS[k]['label']}",
                                      key="ai_tier_sel")
                 st.session_state['ai_tier'] = tier
-                ips_por_prov = st.slider("IPs por provedor", 3, 10, 5, key="ai_ips_prov")
+                ips_por_prov = st.slider(t('operacional.ips_per_provider'), 3, 10, 5, key="ai_ips_prov")
             with col_ai2:
-                dt_fato = st.date_input("Data do fato", value=date.today(), key="ai_dt_fato")
-                periodo_fato = st.selectbox("Período do fato", ["manhã", "tarde", "noite", "madrugada", "desconhecido"], key="ai_periodo")
-                janela_h = st.slider("Janela temporal (horas)", 1, 48, 24, key="ai_janela")
+                dt_fato = st.date_input(t('operacional.fact_date'), value=date.today(), key="ai_dt_fato")
+                # Mesmos códigos da análise investigativa: `calcular_score`
+                # compara com o `Periodo` dos registros (Diurno/Noturno). As
+                # opções anteriores (manhã/tarde/noite/madrugada) nunca
+                # coincidiam, e os 15 pontos de período nunca eram somados.
+                periodo_fato = st.selectbox(t('operacional.fact_period'), ["Diurno", "Noturno"],
+                                            format_func=lambda k: t(f'common.period.{k}'),
+                                            key="ai_periodo")
+                janela_h = st.slider(t('operacional.time_window'), 1, 48, 24, key="ai_janela")
 
-            if st.button("🧠 Executar Análise AI", type="primary", key="ai_run_btn"):
-                with st.spinner("Analisando com IA... pode levar alguns minutos."):
+            if st.button(t('operacional.run_ai'), type="primary", key="ai_run_btn"):
+                with st.spinner(t('operacional.ai_running')):
                     # O prompt da IA descreve REGISTROS (Ip, Data, Ip_Dono,
                     # Ip_Proxy...). `calculate_risk_scores` devolve uma linha
                     # por IP com outras colunas — o prompt saía com "0 IPs" e
@@ -120,23 +125,29 @@ def page_operacional():
             if ai_result:
                 if ai_result['success']:
                     data = ai_result['data']
-                    st.success(f"✅ Análise concluída em {ai_result['elapsed_seconds']}s (modelo: {ai_result['model_used']})")
+                    st.success(t('operacional.ai_done', seconds=ai_result['elapsed_seconds'],
+                                 model=ai_result['model_used']))
 
                     # Confiança
                     conf = data.get('confianca', 'desconhecida')
                     conf_colors = {'alta': '🟢', 'media': '🟡', 'baixa': '🔴'}
-                    st.markdown(f"**Confiança:** {conf_colors.get(conf, '⚪')} {conf.title()} — {data.get('motivo_confianca', '')}")
+                    st.markdown(t('operacional.confidence', icon=conf_colors.get(conf, '⚪'),
+                                  level=t_or(f'operacional.conf.{conf}', conf.title()),
+                                  reason=data.get('motivo_confianca', '')))
 
                     # Narrativa
                     if data.get('resumo_narrativo'):
-                        st.markdown(f"**Resumo:**\n\n{data['resumo_narrativo']}")
+                        st.markdown(t('operacional.summary', text=data['resumo_narrativo']))
 
                     # Provedores selecionados
                     provedores_ai = data.get('provedores', [])
                     if provedores_ai:
-                        st.markdown("**Provedores selecionados:**")
+                        st.markdown(t('operacional.selected_providers'))
                         for prov in provedores_ai:
-                            with st.expander(f"📡 {prov.get('nome', '?')} — {prov.get('registros_total', 0)} registros ({prov.get('percentual_cobertura', 0):.0f}%)", expanded=False):
+                            with st.expander(t('operacional.provider_expander', name=prov.get('nome', '?'),
+                                               count=prov.get('registros_total', 0),
+                                               pct=f"{prov.get('percentual_cobertura', 0):.0f}"),
+                                             expanded=False):
                                 st.caption(prov.get('justificativa', ''))
                                 ips_sel = prov.get('ips_selecionados', [])
                                 if ips_sel:
@@ -144,64 +155,63 @@ def page_operacional():
                                     for ip_info in ips_sel:
                                         ip_rows.append({
                                             'IP': ip_info.get('ip', ''),
-                                            'Tipo': ip_info.get('tipo', ''),
-                                            'Data': ip_info.get('data', ''),
-                                            'Provedor': ip_info.get('provedor', ''),
+                                            t('operacional.col_type'): ip_info.get('tipo', ''),
+                                            t('operacional.col_date'): ip_info.get('data', ''),
+                                            t('operacional.col_provider'): ip_info.get('provedor', ''),
                                             'Score': ip_info.get('score', 0),
-                                            'Motivo': ip_info.get('motivo', ''),
+                                            t('operacional.col_reason'): ip_info.get('motivo', ''),
                                         })
                                     st.dataframe(pd.DataFrame(ip_rows), hide_index=True, use_container_width=True)
 
                     # Alertas
                     alertas = data.get('alertas', [])
                     if alertas:
-                        st.markdown("**Alertas:**")
+                        st.markdown(t('operacional.alerts'))
                         for alerta in alertas:
                             st.warning(alerta)
 
                     # Cobertura
                     cob = data.get('cobertura_total', 0)
-                    st.caption(f"Cobertura total: {cob:.0f}%")
+                    st.caption(t('operacional.coverage', pct=f"{cob:.0f}"))
 
                     # Warnings de validação
                     warnings = ai_result.get('validation_warnings', [])
                     if warnings:
-                        with st.expander("⚠️ Avisos de validação", expanded=False):
+                        with st.expander(t('operacional.validation_warnings'), expanded=False):
                             for w in warnings:
                                 st.caption(f"• {w}")
                     if ai_result.get('fallback_used'):
-                        st.info(
-                            f"Fallback automático ativado: solicitado `{ai_result.get('requested_model')}`, "
-                            f"usado `{ai_result.get('model_used')}`."
-                        )
+                        st.info(t('operacional.fallback', requested=ai_result.get('requested_model'),
+                                  used=ai_result.get('model_used')))
                     for note in ai_result.get('notes', []):
                         st.info(note)
                 else:
                     for note in ai_result.get('notes', []):
                         st.warning(note)
-                    st.error(f"❌ Erro na análise AI: {ai_result.get('error', 'Erro desconhecido')}")
+                    st.error(t('operacional.ai_error',
+                               error=ai_result.get('error') or t('operacional.unknown_error')))
         else:
-            st.warning(f"⚠️ Ollama offline: {status.get('error', '')}")
-            st.caption("Para usar a análise AI, instale e inicie o Ollama: [ollama.ai](https://ollama.ai)")
+            st.warning(t('operacional.ollama_offline', error=status.get('error', '')))
+            st.caption(t('operacional.ollama_install'))
 
     # ── Comparação Temporal ──
     with st.container(border=True):
-        st.subheader("📅 Comparação Temporal entre Investigações")
-        st.caption("Salve snapshots da análise atual e compare com análises anteriores do mesmo alvo")
+        st.subheader(t('operacional.comparison_title'))
+        st.caption(t('operacional.snapshots_subtitle'))
 
         alvo_atual = st.session_state.get('alvo', '')
         inv_result = st.session_state.get('inv_result')
 
-        tab_save, tab_compare = st.tabs(["💾 Salvar Snapshot", "📊 Comparar"])
+        tab_save, tab_compare = st.tabs([t('operacional.tab_save'), t('operacional.tab_compare')])
 
         with tab_save:
             if inv_result and alvo_atual:
                 snap_label = st.text_input(
-                    "Rótulo do snapshot",
+                    t('operacional.snapshot_label'),
                     value=f"{alvo_atual} — {datetime.now().strftime('%d/%m/%Y %H:%M')}",
                     key="snap_label"
                 )
-                if st.button("💾 Salvar Análise Atual", key="snap_save_btn"):
+                if st.button(t('operacional.save_snapshot'), key="snap_save_btn"):
                     scored = inv_result.get('df_scored', pd.DataFrame())
                     selecionados = inv_result.get('df_selecionados', pd.DataFrame())
                     snapshot = {
@@ -221,20 +231,22 @@ def page_operacional():
                         'resumo': inv_result.get('resumo_narrativo', '')[:500],
                     }
                     _save_snapshot(snapshot)
-                    st.success(f"✅ Snapshot salvo: **{snap_label}**")
+                    st.success(t('operacional.snapshot_saved', label=snap_label))
             else:
-                st.info("Execute a Análise Investigativa primeiro para salvar um snapshot.")
+                st.info(t('operacional.run_investigative_first'))
 
         with tab_compare:
             snapshots = _load_snapshots()
             if len(snapshots) < 2:
-                st.info(f"{'Nenhum snapshot salvo.' if not snapshots else '1 snapshot salvo — salve ao menos 2 para comparar.'}")
+                st.info(t('operacional.no_snapshots') if not snapshots else t('operacional.one_snapshot'))
             else:
                 # Filtrar por alvo se disponível
                 alvos = sorted(set(s.get('alvo', '') for s in snapshots))
                 if len(alvos) > 1:
-                    alvo_filter = st.selectbox("Filtrar por alvo", ['Todos'] + alvos, key="snap_filter_alvo")
-                    if alvo_filter != 'Todos':
+                    opt_all = t('common.all')
+                    alvo_filter = st.selectbox(t('operacional.filter_target'), [opt_all] + alvos,
+                                               key="snap_filter_alvo")
+                    if alvo_filter != opt_all:
                         snapshots = [s for s in snapshots if s.get('alvo') == alvo_filter]
 
                 labels = [f"{s['label']} ({s['timestamp'][:10]})" for s in snapshots]
@@ -252,16 +264,16 @@ def page_operacional():
                 if idx_a != idx_b:
                     a, b = snapshots[idx_a], snapshots[idx_b]
 
-                    st.markdown("#### Comparação lado a lado")
+                    st.markdown(t('operacional.side_by_side'))
                     comp_data = []
                     metrics = [
-                        ('Registros', 'total_registros'),
-                        ('IPs Únicos', 'ips_unicos'),
+                        (t('operacional.m_records'), 'total_registros'),
+                        (t('common.unique_ips'), 'ips_unicos'),
                         ('IPv6', 'n_ipv6'),
-                        ('Selecionados', 'n_selecionados'),
-                        ('Score Médio', 'score_medio'),
-                        ('Unicidade', 'score_unicidade'),
-                        ('Cobertura %', 'cobertura'),
+                        (t('operacional.m_selected'), 'n_selecionados'),
+                        (t('operacional.m_avg_score'), 'score_medio'),
+                        (t('operacional.m_uniqueness'), 'score_unicidade'),
+                        (t('operacional.m_coverage'), 'cobertura'),
                     ]
                     for label, key in metrics:
                         va = a.get(key, 0)
@@ -274,7 +286,7 @@ def page_operacional():
                         else:
                             diff_str = '-'
                         comp_data.append({
-                            'Métrica': label,
+                            t('operacional.col_metric'): label,
                             f'A: {a["label"][:30]}': va,
                             f'B: {b["label"][:30]}': vb,
                             'Δ': diff_str,
@@ -291,18 +303,18 @@ def page_operacional():
 
                     mc1, mc2, mc3 = st.columns(3)
                     with mc1:
-                        st.metric("🟢 Mantidos", len(mantidos))
+                        st.metric(t('operacional.kept'), len(mantidos))
                     with mc2:
-                        st.metric("🔵 Novos em B", len(novos))
+                        st.metric(t('operacional.new_in_b'), len(novos))
                     with mc3:
-                        st.metric("🔴 Removidos de A", len(removidos))
+                        st.metric(t('operacional.removed_from_a'), len(removidos))
 
                     if novos:
-                        with st.expander(f"🔵 {len(novos)} IPs novos em B"):
+                        with st.expander(t('operacional.new_ips_b', count=len(novos))):
                             for ip in sorted(novos):
                                 st.code(ip, language=None)
                     if removidos:
-                        with st.expander(f"🔴 {len(removidos)} IPs de A não presentes em B"):
+                        with st.expander(t('operacional.missing_ips_b', count=len(removidos))):
                             for ip in sorted(removidos):
                                 st.code(ip, language=None)
 
@@ -310,13 +322,13 @@ def page_operacional():
                     prov_a = set(a.get('provedores', []))
                     prov_b = set(b.get('provedores', []))
                     if prov_a != prov_b:
-                        st.warning(f"Provedores mudaram: A={', '.join(prov_a)} → B={', '.join(prov_b)}")
+                        st.warning(t('operacional.providers_changed', a=', '.join(prov_a), b=', '.join(prov_b)))
                 else:
-                    st.warning("Selecione dois snapshots diferentes para comparar.")
+                    st.warning(t('operacional.pick_two'))
 
     # ── Saúde dos Dados ──
     with st.container(border=True):
-        st.subheader("💊 Saúde dos Dados")
-        if gate('💊 Calcular saúde dos dados', df, 'op_health'):
+        st.subheader(t('operacional.health_title'))
+        if gate(t('operacional.gate_health'), df, 'op_health'):
             health = compute_data_health(df)
             render_health_gauges(health)

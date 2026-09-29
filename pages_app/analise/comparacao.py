@@ -9,6 +9,7 @@ from datetime import timedelta
 import pandas as pd
 import streamlit as st
 
+from helpers.large_data import show_truncation
 from helpers.period_compare import compare_periods, date_bounds
 from i18n import t
 
@@ -99,6 +100,7 @@ def page_comparacao():
             st.info("—")
         st.subheader(t("comparacao.ips_only_a"))
         st.code("\n".join(result["ips_only_a"]) or "—")
+        show_truncation(len(result["ips_only_a"]), result["ips_only_a_total"], "IPs")
     with col_b:
         st.subheader(t("comparacao.top_providers_b"))
         if kb["top_providers"]:
@@ -111,3 +113,4 @@ def page_comparacao():
             st.info("—")
         st.subheader(t("comparacao.ips_only_b"))
         st.code("\n".join(result["ips_only_b"]) or "—")
+        show_truncation(len(result["ips_only_b"]), result["ips_only_b_total"], "IPs")

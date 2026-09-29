@@ -18,8 +18,8 @@ from file_handler import export_xlsx_colored, export_xlsx_to_disk
 from i18n import t
 from validators import bool_series
 from helpers.large_data import (
-    bump_data_version, cache_key, data_token, estimate_xlsx_seconds, fmt_duracao,
-    prepare_button, show_truncation,
+    bump_data_version, cache_key, data_token, declare_sheets, estimate_xlsx_seconds, fmt_duracao,
+    prepare_button, show_truncation, xlsx_progress_bar,
     PREVIEW_ROWS, XLSX_DISK_THRESHOLD, fmt,
 )
 
@@ -114,12 +114,7 @@ def _xlsx_grande(df_data, key, nome_base):
     if estado and estado['key'] == key and os.path.exists(estado['caminho']):
         return estado['caminho'], estado['resumo']
 
-    barra = st.progress(0.0, text="Gerando Excel colorido...")
-
-    def _progresso(feitas, total):
-        barra.progress(min(feitas / max(total, 1), 1.0),
-                       text=f"Gerando Excel colorido: {fmt(feitas)} de {fmt(total)} linhas")
-
+    barra, _progresso = xlsx_progress_bar()
     try:
         caminho, resumo = export_xlsx_to_disk(df_data, nome_base, _progresso)
     finally:
@@ -128,23 +123,6 @@ def _xlsx_grande(df_data, key, nome_base):
     st.session_state['_xlsx_disco'] = {
         'key': key, 'caminho': caminho, 'resumo': resumo}
     return caminho, resumo
-
-
-def _declarar_abas(resumo):
-    """Declara quantas linhas foram gravadas e em quantas abas.
-
-    Acima de 1.048.575 linhas o resultado continua em `Resultado (2)`, `(3)`...
-    Sem essa legenda o analista abre a planilha, vê a primeira aba cheia e não
-    tem como saber que existe continuação.
-    """
-    if not resumo:
-        return
-    if resumo.get('abas', 1) > 1:
-        st.caption(f"✅ {fmt(resumo['linhas'])} linhas gravadas em "
-                   f"{resumo['abas']} abas — o formato XLSX não aceita mais de "
-                   f"1.048.575 linhas por planilha.")
-    else:
-        st.caption(f"✅ {fmt(resumo['linhas'])} linhas gravadas (total).")
 
 
 def page_resultados():
@@ -157,7 +135,7 @@ def page_resultados():
         empty_state(t('resultados.no_data'), "📊", t('common.process_data_first'))
         output_file = st.session_state.output_file
         if output_file and os.path.exists(output_file):
-            if st.button(f"📂 Carregar: {os.path.basename(output_file)}"):
+            if st.button(t('resultados.load_file', name=os.path.basename(output_file))):
                 try:
                     if output_file.lower().endswith(('.xlsx', '.xls')):
                         df = pd.read_excel(output_file)
@@ -167,7 +145,8 @@ def page_resultados():
                     bump_data_version()
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Erro: {e}")
+                    logger.exception("Falha ao carregar %s", output_file)
+                    st.error(t('resultados.error', error=e))
         return
 
     # Frescor do enriquecimento: geolocalização de cache pode estar velha —
@@ -180,29 +159,26 @@ def page_resultados():
     except OSError:
         stats = None
     if stats and (stats['expirados'] or stats['sem_data'] or stats['mais_antigo_dias'] > 25):
-        st.warning(
-            f"⏱️ Cache de IPs: {stats['expirados']} expirada(s), "
-            f"{stats['sem_data']} sem carimbo de data, mais antigo há "
-            f"{stats['mais_antigo_dias']:.0f} dias. O enriquecimento pode "
-            "não refletir o estado atual da rede.")
+        st.warning(t('resultados.cache_stale', expired=stats['expirados'], undated=stats['sem_data'],
+                     days=f"{stats['mais_antigo_dias']:.0f}"))
     elif stats and stats['total']:
-        st.caption(f"🌐 Enriquecimento: {stats['total']} IPs em cache — "
-                   f"mais antigo há {stats['mais_antigo_dias']:.0f} dias (TTL 30d).")
+        st.caption(t('resultados.cache_fresh', total=stats['total'],
+                     days=f"{stats['mais_antigo_dias']:.0f}"))
 
     # Proveniência consolidada: o que o dataset cobre e o que ficou de fora.
-    with st.expander("🧾 Proveniência do dataset", expanded=False):
+    with st.expander(t('resultados.provenance'), expanded=False):
         q = _data_quality(df, cache_key('dq', len(df)))
         qc1, qc2, qc3, qc4 = st.columns(4)
-        qc1.metric("Registros", fmt(q['linhas']))
-        qc2.metric("IPs únicos", fmt(q.get('ips_unicos', 0)))
-        qc3.metric("Sem data parseável", fmt(q.get('sem_data', 0)))
-        qc4.metric("Sem enriquecimento", fmt(q.get('erro_enriquecimento', 0)))
+        qc1.metric(t('relatorio.records'), fmt(q['linhas']))
+        qc2.metric(t('common.unique_ips'), fmt(q.get('ips_unicos', 0)))
+        qc3.metric(t('resultados.no_parseable_date'), fmt(q.get('sem_data', 0)))
+        qc4.metric(t('resultados.no_enrichment'), fmt(q.get('erro_enriquecimento', 0)))
         faltas = [f"{fmt(v)} {label}" for label, v in (
-            ('sem IP', q.get('sem_ip', 0)),
-            ('sem período', q.get('sem_periodo', 0)),
+            (t('resultados.missing_ip'), q.get('sem_ip', 0)),
+            (t('resultados.missing_period'), q.get('sem_periodo', 0)),
         ) if v]
         if faltas:
-            st.caption("Também ausentes: " + ", ".join(faltas) + ".")
+            st.caption(t('resultados.also_missing', items=", ".join(faltas)))
 
     # Filters
     c_search, c_prov, c_region, c_type = st.columns([2, 1, 1, 1])
@@ -342,19 +318,19 @@ def page_resultados():
 
     c_exp1, c_exp2, c_exp3, c_exp4 = st.columns(4)
     with c_exp1:
-        if prepare_button("⚙️ Preparar CSV", df_export, 'csv'):
+        if prepare_button(t('common.prepare_csv'), df_export, 'csv'):
             st.download_button(t('resultados.csv_filtered'),
                                _generate_csv_export(df_export, export_key),
                                "resultado_filtrado.csv", "text/csv")
     with c_exp2:
-        if prepare_button("⚙️ Preparar JSON", df_export, 'json'):
+        if prepare_button(t('common.prepare_json'), df_export, 'json'):
             st.download_button(t('resultados.json_export'),
                                _generate_json_export(df_export, export_key),
                                "resultado.json", "application/json")
     with c_exp3:
         _est = fmt_duracao(estimate_xlsx_seconds(len(df_export), len(display_cols)))
-        if prepare_button("⚙️ Preparar Excel", df_export, 'xlsx',
-                          help=f"{fmt(len(df_export))} linhas — {_est} de geração"):
+        if prepare_button(t('common.prepare_excel'), df_export, 'xlsx',
+                          help=t('guards.xlsx_help', rows=fmt(len(df_export)), duration=_est)):
             if len(df_export) <= XLSX_DISK_THRESHOLD:
                 st.download_button(t('resultados.excel_colored'),
                                    _generate_xlsx_export(df_export, export_key),
@@ -372,7 +348,7 @@ def page_resultados():
                                        "application/vnd.openxmlformats-officedocument."
                                        "spreadsheetml.sheet",
                                        key="dl_xlsx_grande")
-                _declarar_abas(resumo)
+                declare_sheets(resumo)
     with c_exp4:
         if st.session_state.output_file and os.path.exists(st.session_state.output_file):
             xlsx_complete = os.path.splitext(st.session_state.output_file)[0] + '.xlsx'
@@ -392,16 +368,16 @@ def page_resultados():
     only_susp = st.checkbox(t('resultados.ioc_only_suspicious'), value=False, key="ioc_only_susp")
     i1, i2, i3 = st.columns(3)
     with i1:
-        if prepare_button("⚙️ Preparar IOC (txt)", df_f, 'ioc_txt'):
+        if prepare_button(t('resultados.prepare_ioc_txt'), df_f, 'ioc_txt'):
             st.download_button(t('resultados.ioc_txt'),
                                export_ioc_list(df_f, only_suspicious=only_susp),
                                "iocs.txt", "text/plain", key="dl_ioc_txt")
     with i2:
-        if prepare_button("⚙️ Preparar IOC (csv)", df_f, 'ioc_csv'):
+        if prepare_button(t('resultados.prepare_ioc_csv'), df_f, 'ioc_csv'):
             st.download_button(t('resultados.ioc_csv'), export_ioc_csv(df_f),
                                "iocs.csv", "text/csv", key="dl_ioc_csv")
     with i3:
-        if prepare_button("⚙️ Preparar STIX", df_f, 'stix'):
+        if prepare_button(t('resultados.prepare_stix'), df_f, 'stix'):
             alvo_name = st.session_state.get("alvo") or "Log Enrichment"
             st.download_button(
                 t('resultados.stix_export'),
@@ -429,7 +405,7 @@ def page_resultados():
                 caminho_zip, resumo_zip = _xlsx_grande(df_export, export_key,
                                                        nome_xlsx_disco)
                 zf.write(caminho_zip, "resultado.xlsx")
-                _declarar_abas(resumo_zip)
+                declare_sheets(resumo_zip)
             zf.writestr("iocs.txt", export_ioc_list(df_f, only_suspicious=only_susp))
             zf.writestr("iocs.csv", export_ioc_csv(df_f))
             zf.writestr(
@@ -446,7 +422,7 @@ def page_resultados():
                 if html_data:
                     zf.writestr("relatorio.html", html_data)
             except Exception as e:
-                logger.warning(f"Relatório HTML não incluído no ZIP: {e}")
+                logger.exception("Relatório HTML não incluído no ZIP: %s", e)
                 st.toast(t('resultados.pdf_not_included'))
         zip_buf.seek(0)
         st.download_button(t('resultados.download_zip'), zip_buf.getvalue(),

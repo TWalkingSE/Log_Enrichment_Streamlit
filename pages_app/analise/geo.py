@@ -13,7 +13,7 @@ from analysis import (
     analyze_subnet_patterns, correlate_subnets_cross_target, compute_subnet_consistency,
 )
 from helpers.large_data import cache_key, gate
-from i18n import t
+from i18n import t, t_or
 
 logger = logging.getLogger(__name__)
 
@@ -61,15 +61,18 @@ def page_geo():
             # Cache ilegível não pode ser apresentado como "sem
             # histórico" — são estados diferentes numa perícia.
             logger.exception("Cache de IPs ilegível")
-            st.warning(f"⚠️ Cache de IPs ilegível ({exc}) — histórico indisponível.")
+            st.warning(t('common.cache_unreadable', error=exc))
         if cache:
             result = detect_geo_changes(df, cache)
             changes = result.get('changed_ips', [])
             if changes:
                 st.warning(t('geo.geo_changes_found', count=result['total_changes']))
                 for ch in changes:
-                    sev_icon = {'Crítico': '🔴', 'Alto': '🟠', 'Médio': '🟡'}.get(ch.get('severity', ''), '⚪')
-                    with st.expander(f"{sev_icon} {ch['ip']} — {ch.get('severity', '')}"):
+                    sev = ch.get('severity', '')
+                    sev_icon = {'Crítico': '🔴', 'Alto': '🟠', 'Médio': '🟡'}.get(sev, '⚪')
+                    sev_label = {'Crítico': t('common.critical'), 'Alto': t('common.high'),
+                                 'Médio': t('common.medium')}.get(sev, sev)
+                    with st.expander(f"{sev_icon} {ch['ip']} — {sev_label}"):
                         st.markdown(f"**{t('geo.current')}:** {ch.get('new_city', '')} / {ch.get('new_isp', '')}")
                         st.markdown(f"**{t('geo.previous')}:** {ch.get('old_city', '')} / {ch.get('old_isp', '')}")
                         st.markdown(f"**{t('geo.change_date')}:** {ch.get('change_date', 'N/A')}")
@@ -88,50 +91,53 @@ def page_geo():
             ipv6_mask = st.slider("IPv6", 32, 64, 48, key="subnet_v6")
 
         ck_sub = cache_key('subnet', len(df), ipv4_mask, ipv6_mask)
-        if gate('🌐 Analisar sub-redes', df, 'geo_subnets'):
+        if gate(t('geo.gate_subnets'), df, 'geo_subnets'):
             result = _cached_subnet_patterns(df, ipv4_mask, ipv6_mask, ck_sub)
             consistency = _cached_subnet_consistency(df, ipv4_mask, ipv6_mask, ck_sub)
         else:
             result = {'total_subnets': 0, 'dominant_subnets': []}
             consistency = {'consistency_score': 0}
         c1, c2 = st.columns(2)
-        c1.metric("Subnets", result['total_subnets'])
-        c2.metric("Consistency", f"{consistency['consistency_score']}%")
+        c1.metric(t('geo.subnets'), result['total_subnets'])
+        c2.metric(t('geo.consistency'), f"{consistency['consistency_score']}%")
 
         if result['dominant_subnets']:
-            st.markdown("**Top Sub-redes:**")
+            st.markdown(t('geo.top_subnets'))
             dom_df = pd.DataFrame(result['dominant_subnets'])
             display_cols = [c for c in ['subnet', 'ip_count', 'record_count', 'providers', 'cities'] if c in dom_df.columns]
             st.dataframe(dom_df[display_cols], use_container_width=True, hide_index=True)
 
         if consistency.get('top_subnets'):
-            st.markdown(f"**Sub-rede primária:** `{consistency['primary_subnet']}` ({consistency.get('primary_pct', 0)}%)")
-            st.markdown(f"**Trocas de sub-rede:** {consistency['subnet_changes']}")
+            st.markdown(t('geo.primary_subnet', subnet=consistency['primary_subnet'],
+                          pct=consistency.get('primary_pct', 0)))
+            st.markdown(t('geo.subnet_changes', count=consistency['subnet_changes']))
 
         # Cross-target subnet correlation
         stored = st.session_state.stored_targets
         if len(stored) >= 2:
             st.divider()
-            if st.button("🔗 Correlação de Sub-redes entre Alvos", key="subnet_cross"):
+            if st.button(t('geo.cross_subnets_btn'), key="subnet_cross"):
                 shared = correlate_subnets_cross_target(stored, ipv4_mask=ipv4_mask, ipv6_mask=ipv6_mask)
                 if shared:
-                    st.warning(f"⚠️ **{len(shared)}** sub-rede(s) compartilhada(s)!")
+                    st.warning(t('geo.shared_subnets', count=len(shared)))
                     st.dataframe(pd.DataFrame([{
-                        'Sub-rede': s['subnet'],
-                        'Alvos': ', '.join(s['targets']),
-                        'Total IPs': s['total_ips']
+                        t('geo.col_subnet'): s['subnet'],
+                        t('geo.col_targets'): ', '.join(s['targets']),
+                        t('geo.col_total_ips'): s['total_ips']
                     } for s in shared]), use_container_width=True, hide_index=True)
                 else:
-                    st.success("✅ Nenhuma sub-rede compartilhada.")
+                    st.success(t('geo.no_shared_subnets'))
 
     # ── Padrões de Vida ──
     with st.container(border=True):
         st.subheader(t('geo.life_patterns_title'))
-        if gate('🧬 Detectar padrões de vida', df, 'geo_life'):
+        if gate(t('geo.gate_life'), df, 'geo_life'):
             life = _cached_life_patterns(df, cache_key('life', len(df)))
             if life.get('has_data'):
                 for c in life.get('clusters', []):
                     icon = {'home': '🏠', 'work': '🏢', 'other': '📍'}.get(c.get('type', ''), '📍')
-                    st.markdown(f"**{icon} {c.get('label', '')}** — {c.get('city', '')} ({c.get('count', 0)} acessos)")
+                    label = c.get('label', '')
+                    st.markdown(t('geo.cluster_line', icon=icon, label=t_or(f'geo.cluster.{label}', label),
+                                  city=c.get('city', ''), count=c.get('count', 0)))
             else:
-                st.info(t('geo.life_patterns_subtitle'))
+                st.info(t('geo.no_life_patterns'))

@@ -16,7 +16,7 @@ SUPPORTED_LANGUAGES = {
 DEFAULT_LANGUAGE = 'pt'
 
 _LOCALES_DIR = os.path.join(os.path.dirname(__file__), 'locales')
-_translations_cache = {}
+_translations_cache: dict = {}
 
 
 def _load_locale(lang):
@@ -88,3 +88,13 @@ def _resolve_key(data, key):
         else:
             return None
     return current if isinstance(current, str) else None
+
+
+def t_or(key, fallback, **kwargs):
+    """Como `t`, mas devolve `fallback` quando a chave não existe.
+
+    Para rótulos que vêm das análises (ex.: 'Casa (provável)'): um valor sem
+    tradução aparece como está, não como o nome da chave.
+    """
+    value = t(key, **kwargs)
+    return fallback if value == key else value

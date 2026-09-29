@@ -107,8 +107,12 @@ def compare_periods(
         "kpis_a": ka,
         "kpis_b": kb,
         "deltas": deltas,
+        # Listas cortadas em 50 para exibição; os totais acompanham para a
+        # página declarar a truncagem.
         "ips_only_a": sorted(set_a - set_b)[:50],
         "ips_only_b": sorted(set_b - set_a)[:50],
+        "ips_only_a_total": len(set_a - set_b),
+        "ips_only_b_total": len(set_b - set_a),
         "ips_shared": len(set_a & set_b),
         "count_a": len(df_a),
         "count_b": len(df_b),

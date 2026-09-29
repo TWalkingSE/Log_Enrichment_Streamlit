@@ -56,7 +56,8 @@ def save_history(alvo, total_ips, output_file, fmt):
         atomic_write_json(HISTORY_FILE, existing[-50:], indent=2, ensure_ascii=False)
     except (OSError, ValueError, TypeError):
         logger.exception("Erro ao salvar histórico")
-        st.warning("⚠️ Não foi possível gravar o histórico de processamento (veja o log).")
+        from i18n import t
+        st.warning(t('common.history_write_error'))
 
 
 def load_history():
@@ -66,7 +67,8 @@ def load_history():
                 st.session_state.history = json.load(f)
     except (OSError, ValueError):
         logger.exception("Erro ao carregar histórico")
-        st.warning("⚠️ Histórico de processamento ilegível (veja o log).")
+        from i18n import t
+        st.warning(t('common.history_read_error'))
 
 
 def detect_anomalies(df):

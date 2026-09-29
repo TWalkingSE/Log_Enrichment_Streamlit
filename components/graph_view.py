@@ -7,6 +7,7 @@ Renders IP/ASN/location network graphs directly in the UI.
 import json
 import streamlit as st
 import streamlit.components.v1 as components
+from i18n import t
 from styles.theme import COLORS
 
 # Tetos de renderização: vis.js roda física em O(nós+arestas) no navegador,
@@ -22,12 +23,12 @@ def render_ip_network_graph(df, height=650):
     Shows connections between IPs, ASNs, and locations.
     """
     if df is None or df.empty:
-        st.info("Nenhum dado disponível para o grafo.")
+        st.info(t('graph.no_data'))
         return
 
     ip_col = 'Sender IP' if 'Sender IP' in df.columns else 'Ip'
     if ip_col not in df.columns:
-        st.warning("Coluna IP não encontrada.")
+        st.warning(t('graph.no_ip_column'))
         return
 
     # O grafo é de IPs, não de registros: iterar 200k linhas para produzir os
@@ -123,12 +124,9 @@ def render_ip_network_graph(df, height=650):
     if truncated_edges:
         edges = edges[:MAX_EDGES]
     if len(node_ids) >= MAX_NODES or truncated_edges:
-        st.warning(
-            f"Grafo truncado para {len(nodes)} nós e {len(edges)} arestas "
-            f"(de {total_ips} IPs únicos). Filtre os dados para ver o grafo completo."
-        )
+        st.warning(t('graph.truncated', nodes=len(nodes), edges=len(edges), ips=total_ips))
     else:
-        st.caption(f"{len(nodes)} nós e {len(edges)} arestas a partir de {total_ips} IPs únicos.")
+        st.caption(t('graph.summary', nodes=len(nodes), edges=len(edges), ips=total_ips))
 
     graph_data = json.dumps({'nodes': nodes, 'edges': edges}, ensure_ascii=False)
 

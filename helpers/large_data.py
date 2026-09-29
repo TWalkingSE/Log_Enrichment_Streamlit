@@ -19,6 +19,8 @@ from typing import Optional
 
 import streamlit as st
 
+from i18n import t
+
 logger = logging.getLogger(__name__)
 
 # Acima deste número de linhas, trabalho pesado exige clique explícito.
@@ -62,17 +64,17 @@ def fmt(n) -> str:
         return str(n)
 
 
-def truncation_notice(shown: int, total: int, unit: str = 'linhas') -> str:
-    return f"Exibindo {fmt(shown)} de {fmt(total)} {unit}."
+def truncation_notice(shown: int, total: int, unit: Optional[str] = None) -> str:
+    return t('guards.showing_of', shown=fmt(shown), total=fmt(total),
+             unit=unit or t('guards.unit_rows'))
 
 
-def show_truncation(shown: int, total: int, unit: str = 'linhas') -> None:
+def show_truncation(shown: int, total: int, unit: Optional[str] = None) -> None:
     """Renderiza a legenda de truncagem quando há dados omitidos."""
     if shown < total:
-        st.caption(f"⚠️ {truncation_notice(shown, total, unit)} "
-                   "Use os filtros para analisar o restante.")
+        st.caption(f"⚠️ {truncation_notice(shown, total, unit)} {t('guards.use_filters')}")
     else:
-        st.caption(f"Exibindo {fmt(total)} {unit} (total).")
+        st.caption(t('guards.showing_total', total=fmt(total), unit=unit or t('guards.unit_rows')))
 
 
 def data_version() -> int:
@@ -138,8 +140,7 @@ def gate(label: str, df, key: str, *, threshold: int = LARGE_ROW_THRESHOLD,
     flag = f"_gate_{key}"
     if st.session_state.get(flag):
         return True
-    st.info(f"Dataset grande — {fmt(n)} linhas. "
-            "Esta análise não roda automaticamente para preservar memória.")
+    st.info(t('guards.large_dataset', rows=fmt(n)))
     if st.button(label, key=f"btn_gate_{key}", help=help):
         st.session_state[flag] = True
         st.rerun()
@@ -162,10 +163,35 @@ def prepare_button(label: str, df, key: str, *,
     if st.session_state.get(flag):
         return True
     if st.button(label, key=f"btn_prep_{key}",
-                 help=help or f"{fmt(n)} linhas — gerado sob demanda"):
+                 help=help or t('guards.on_demand', rows=fmt(n))):
         st.session_state[flag] = True
         st.rerun()
     return False
+
+
+def declare_sheets(resumo) -> None:
+    """Declara quantas linhas foram gravadas no Excel e em quantas abas.
+
+    Acima de 1.048.575 linhas o resultado continua em `Resultado (2)`, `(3)`...
+    Sem essa legenda o analista abre a planilha, vê a primeira aba cheia e não
+    tem como saber que existe continuação.
+    """
+    if not resumo:
+        return
+    if resumo.get('abas', 1) > 1:
+        st.caption(t('guards.sheets_multi', rows=fmt(resumo['linhas']), sheets=resumo['abas']))
+    else:
+        st.caption(t('guards.sheets_single', rows=fmt(resumo['linhas'])))
+
+
+def xlsx_progress_bar():
+    """Barra de progresso do Excel em disco e o callback `(feitas, total)`."""
+    barra = st.progress(0.0, text=t('guards.xlsx_progress_start'))
+
+    def _progresso(feitas, total):
+        barra.progress(min(feitas / max(total, 1), 1.0),
+                       text=t('guards.xlsx_progress', done=fmt(feitas), total=fmt(total)))
+    return barra, _progresso
 
 
 def estimate_xlsx_seconds(n_linhas: int, n_colunas: int = 15) -> int:

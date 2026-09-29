@@ -11,6 +11,7 @@ from analysis import (
     calculate_risk_scores, compute_data_health,
     detect_vpn_heuristics, compute_ip_confidence,
 )
+from analysis.risk import RISK_HIGH, risk_level_counts
 from helpers.large_data import cache_key, gate
 from validators import bool_series
 from i18n import t
@@ -28,7 +29,8 @@ def _cached_overview_kpis(_df, ip_col, key):
     health_score = health.get('overall_score', 0)
     scores = calculate_risk_scores(df, ip_col=ip_col)
     avg_risk = float(scores['Score'].mean()) if not scores.empty else 0.0
-    high_risk = int(len(scores[scores['Score'] >= 50])) if not scores.empty else 0
+    # Mesmo limiar da página de Risco e do relatório (antes: 50 aqui).
+    high_risk = risk_level_counts(scores)[0]
     vpn = detect_vpn_heuristics(df)
     ip_conf = compute_ip_confidence(df)
     masked = int(len(ip_conf[ip_conf['Classification'] == 'IP Mascarado'])) if not ip_conf.empty else 0
@@ -58,7 +60,7 @@ def page_overview():
 
     # Toda a página é derivada de varreduras completas do frame — um clique
     # libera tudo de uma vez em datasets grandes.
-    if not gate('📊 Calcular visão geral', df, 'overview_kpis'):
+    if not gate(t('overview.calculate'), df, 'overview_kpis'):
         return
 
     # ── Row 1: KPIs (cached) ──
@@ -73,17 +75,18 @@ def page_overview():
 
     with st.container(border=True):
         c1, c2, c3, c4, c5, c6 = st.columns(6)
-        c1.metric("IPs Únicos", unique_ips)
-        c2.metric("Score Médio Risco", f"{avg_risk:.0f}", delta=f"{high_risk} alto risco",
+        c1.metric(t('common.unique_ips'), unique_ips)
+        c2.metric(t('overview.avg_risk_score'), f"{avg_risk:.0f}",
+                  delta=t('overview.high_risk', count=high_risk),
                   delta_color="inverse" if high_risk > 0 else "off")
-        c3.metric("% VPN/Proxy", f"{proxy_pct:.1f}%",
-                  delta="Alto" if proxy_pct > 20 else "Normal",
+        c3.metric(t('overview.vpn_proxy_pct'), f"{proxy_pct:.1f}%",
+                  delta=t('common.high') if proxy_pct > 20 else t('common.normal'),
                   delta_color="inverse" if proxy_pct > 20 else "off")
-        c4.metric("Provedores", n_providers)
-        c5.metric("Score VPN", f"{kpis['vpn_score']}/100",
+        c4.metric(t('common.providers'), n_providers)
+        c5.metric(t('overview.vpn_score'), f"{kpis['vpn_score']}/100",
                   delta_color="inverse" if kpis['vpn_score'] >= 50 else "off")
-        c6.metric("Saúde Dados", f"{health_score}%",
-                  delta="Boa" if health_score >= 80 else "Atenção",
+        c6.metric(t('overview.data_health'), f"{health_score}%",
+                  delta=t('common.good') if health_score >= 80 else t('common.attention'),
                   delta_color="normal" if health_score >= 80 else "inverse")
 
     # ── Row 2: Quick Status ──
@@ -92,32 +95,32 @@ def page_overview():
         tor_result = st.session_state.get('tor_result')
         with s1:
             if tor_result:
-                st.metric("🧅 Tor Nodes", tor_result['total_tor'],
-                          delta="Detectado!" if tor_result['total_tor'] > 0 else "Limpo",
+                st.metric(t('overview.tor_nodes'), tor_result['total_tor'],
+                          delta=t('common.detected') if tor_result['total_tor'] > 0 else t('common.clean'),
                           delta_color="inverse" if tor_result['total_tor'] > 0 else "normal")
             else:
-                st.metric("🧅 Tor Nodes", "—", delta="Não verificado", delta_color="off")
+                st.metric(t('overview.tor_nodes'), "—", delta=t('common.not_verified'), delta_color="off")
         with s2:
             shodan_risk = st.session_state.get('shodan_risk')
             if shodan_risk:
                 flagged = len([r for r in shodan_risk if r.get('risk_level') in ('Alto', 'Crítico')])
-                st.metric("🔎 Shodan Alerts", flagged,
-                          delta="Atenção" if flagged > 0 else "Limpo",
+                st.metric(t('overview.shodan_alerts'), flagged,
+                          delta=t('common.attention') if flagged > 0 else t('common.clean'),
                           delta_color="inverse" if flagged > 0 else "normal")
             else:
-                st.metric("🔎 Shodan Alerts", "—", delta="Não consultado", delta_color="off")
+                st.metric(t('overview.shodan_alerts'), "—", delta=t('common.not_queried'), delta_color="off")
         with s3:
             masked = kpis['masked']
-            st.metric("🎯 IPs Mascarados", masked,
-                      delta="Suspeito" if masked > 0 else "OK",
+            st.metric(t('overview.masked_ips'), masked,
+                      delta=t('common.suspect') if masked > 0 else t('common.ok'),
                       delta_color="inverse" if masked > 0 else "normal")
         with s4:
-            st.metric("📦 Alvos Armazenados", len(st.session_state.get('stored_targets', {})))
+            st.metric(t('overview.stored_targets'), len(st.session_state.get('stored_targets', {})))
 
     # ── Row 3: Top Risk IPs ──
     if not scores.empty:
         with st.container(border=True):
-            st.subheader("🛡️ Top 10 IPs por Risco")
+            st.subheader(t('overview.top_risk_ips'))
             fig = px.bar(scores.head(10), x='Score', y='IP', orientation='h',
                          color='Score', color_continuous_scale='RdYlGn_r',
                          hover_data=['Provedor', 'Cidade', 'Fatores'])
@@ -127,10 +130,10 @@ def page_overview():
 
     # ── Row 4: Resumo Executivo ──
     with st.container(border=True):
-        st.subheader("📋 Resumo Executivo")
-        st.caption("Briefing de uma página para despacho rápido")
+        st.subheader(t('overview.exec_summary'))
+        st.caption(t('overview.exec_subtitle'))
 
-        alvo = st.session_state.get('alvo', 'Não informado')
+        alvo = st.session_state.get('alvo') or t('common.not_informed')
         dt_fato = st.session_state.get('dt_fato', None)
         dt_fato_str = dt_fato.strftime('%d/%m/%Y') if hasattr(dt_fato, 'strftime') else str(dt_fato or '—')
 
@@ -144,63 +147,62 @@ def page_overview():
 
         # Determinar classificação de risco geral
         if avg_risk >= 60:
-            risco_geral = "🔴 ALTO"
-            risco_desc = "Múltiplos indicadores de risco elevado detectados."
+            risco_geral = t('overview.risk_high')
+            risco_desc = t('overview.risk_high_desc')
         elif avg_risk >= 35:
-            risco_geral = "🟡 MÉDIO"
-            risco_desc = "Indicadores moderados — requer atenção."
+            risco_geral = t('overview.risk_medium')
+            risco_desc = t('overview.risk_medium_desc')
         else:
-            risco_geral = "🟢 BAIXO"
-            risco_desc = "Sem indicadores significativos de risco."
+            risco_geral = t('overview.risk_low')
+            risco_desc = t('overview.risk_low_desc')
 
         # Briefing formatado
-        briefing = f"""
-**INVESTIGAÇÃO:** {alvo}
-**DATA DO FATO:** {dt_fato_str}
-**CLASSIFICAÇÃO GERAL DE RISCO:** {risco_geral}
-
----
-
-| Indicador | Valor |
-|---|---|
-| Total de registros | {total_regs:,} |
-| IPs únicos | {unique_ips:,} |
-| IPv6 / IPv4 | {ipv6_count:,} / {ipv4_count:,} |
-| Provedores identificados | {n_providers} |
-| Países | {paises} |
-| Cidades | {cidades} |
-| Score médio de risco | {avg_risk:.0f}/100 |
-| IPs de alto risco (≥50) | {high_risk} |
-| Uso de VPN/Proxy | {proxy_pct:.1f}% |
-| IPs mascarados | {masked} |
-| Saúde dos dados | {health_score}% |
-"""
+        linhas_tabela = [
+            (t('overview.total_records'), f"{total_regs:,}"),
+            (t('overview.unique_ips'), f"{unique_ips:,}"),
+            (t('overview.ipv6_ipv4'), f"{ipv6_count:,} / {ipv4_count:,}"),
+            (t('overview.identified_providers'), n_providers),
+            (t('common.countries'), paises),
+            (t('common.cities'), cidades),
+            (t('overview.avg_risk'), f"{avg_risk:.0f}/100"),
+            (t('overview.high_risk_ips', threshold=RISK_HIGH), high_risk),
+            (t('overview.vpn_proxy_usage'), f"{proxy_pct:.1f}%"),
+            (t('overview.masked_ips_label'), masked),
+            (t('overview.data_health_label'), f"{health_score}%"),
+        ]
+        briefing = (
+            f"\n**{t('overview.investigation')}:** {alvo}\n"
+            f"**{t('overview.fact_date')}:** {dt_fato_str}\n"
+            f"**{t('overview.risk_classification')}:** {risco_geral}\n\n---\n\n"
+            f"| {t('overview.indicator')} | {t('overview.value')} |\n|---|---|\n"
+            + "".join(f"| {rotulo} | {valor} |\n" for rotulo, valor in linhas_tabela)
+        )
 
         if top_prov:
-            briefing += "\n**Principais provedores:**\n"
+            briefing += f"\n**{t('overview.main_providers')}**\n"
             for p, c in top_prov.items():
-                briefing += f"- {p}: {c:,} registros\n"
+                briefing += f"- {p}: {c:,} {t('overview.records_suffix')}\n"
 
-        briefing += f"\n**Avaliação:** {risco_desc}\n"
+        briefing += f"\n**{t('overview.assessment')}:** {risco_desc}\n"
 
         # Achados relevantes
         findings = []
         if proxy_pct > 20:
-            findings.append(f"⚠️ Alta taxa de VPN/Proxy ({proxy_pct:.1f}%) — possível ocultação de IP real.")
+            findings.append(t('overview.high_vpn_rate', pct=f"{proxy_pct:.1f}"))
         if masked > 0:
-            findings.append(f"⚠️ {masked} IP(s) classificado(s) como mascarado(s).")
+            findings.append(t('overview.masked_classified', count=masked))
         tor_result_exec = st.session_state.get('tor_result')
         if tor_result_exec and tor_result_exec.get('total_tor', 0) > 0:
-            findings.append(f"⚠️ {tor_result_exec['total_tor']} conexão(ões) via rede Tor detectada(s).")
+            findings.append(t('overview.tor_detected', count=tor_result_exec['total_tor']))
         if high_risk > 5:
-            findings.append(f"⚠️ {high_risk} IPs com score de risco elevado (≥50).")
+            findings.append(t('overview.many_high_risk', count=high_risk, threshold=RISK_HIGH))
         if ipv6_count > ipv4_count:
-            findings.append(f"📊 Predominância IPv6 ({ipv6_count}/{total_regs}) — boa rastreabilidade.")
+            findings.append(t('overview.ipv6_predominance', ipv6=ipv6_count, total=total_regs))
         if health_score < 70:
-            findings.append(f"⚠️ Qualidade dos dados abaixo do ideal ({health_score}%).")
+            findings.append(t('overview.low_data_quality', score=health_score))
 
         if findings:
-            briefing += "\n**Achados relevantes:**\n"
+            briefing += f"\n**{t('overview.relevant_findings')}**\n"
             for f in findings:
                 briefing += f"- {f}\n"
 
@@ -208,7 +210,7 @@ def page_overview():
 
         # Botão para copiar
         st.download_button(
-            "📥 Baixar Resumo Executivo (.txt)",
+            t('overview.download_summary'),
             data=briefing.replace('**', '').replace('|', ' '),
             file_name=f"resumo_executivo_{alvo.replace(' ', '_')}.txt",
             mime="text/plain",

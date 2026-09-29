@@ -35,53 +35,54 @@ def page_comportamento():
 
     # ── VPN/Proxy ──
     with st.container(border=True):
-        st.subheader("🕵️ Detecção Heurística de VPN/Proxy")
+        st.subheader(t('comportamento.vpn_title'))
         vpn_result = (_cached_vpn(df, cache_key('vpn', len(df)))
-                      if gate('🕵️ Detectar heurísticas de VPN', df, 'comp_vpn')
+                      if gate(t('comportamento.gate_vpn'), df, 'comp_vpn')
                       else {})
         score = vpn_result.get('score', 0)
         c1, c2 = st.columns([1, 2])
         with c1:
-            delta = "Alto" if score >= 50 else "Médio" if score >= 20 else "Baixo"
-            st.metric("Score VPN", f"{score}/100", delta=delta,
+            delta = (t('common.high') if score >= 50 else t('common.medium') if score >= 20
+                     else t('common.low'))
+            st.metric(t('comportamento.vpn_score'), f"{score}/100", delta=delta,
                       delta_color="inverse" if score >= 50 else "off" if score >= 20 else "normal")
         with c2:
             for k, v in vpn_result.get('indicators', {}).items():
                 st.markdown(f"**{k}**: {v}")
             if not vpn_result.get('indicators') and vpn_result:
-                st.success("Nenhum indicador de VPN comportamental.")
+                st.success(t('comportamento.no_vpn_indicators'))
         suspicious = vpn_result.get('suspicious_ips', [])
         if suspicious:
-            st.warning(f"**{len(suspicious)} IPs suspeitos:**")
+            st.warning(t('comportamento.suspicious_ips', count=len(suspicious)))
             for ip in suspicious:
                 st.code(ip, language=None)
 
     # ── Confiança IP ──
     with st.container(border=True):
-        st.subheader("🎯 Confiança de IPs")
+        st.subheader(t('comportamento.confidence_title'))
         ip_conf = (_cached_confidence(df, cache_key('conf', len(df)))
-                   if gate('🎯 Calcular confiança de IPs', df, 'comp_conf')
+                   if gate(t('comportamento.gate_confidence'), df, 'comp_conf')
                    else pd.DataFrame())
         if not ip_conf.empty:
             c1, c2, c3 = st.columns(3)
-            c1.metric("IP Real", len(ip_conf[ip_conf['Classification'] == 'IP Real']))
-            c2.metric("Incerto", len(ip_conf[ip_conf['Classification'] == 'Incerto']))
-            c3.metric("Mascarado", len(ip_conf[ip_conf['Classification'] == 'IP Mascarado']))
+            c1.metric(t('comportamento.ip_real'), len(ip_conf[ip_conf['Classification'] == 'IP Real']))
+            c2.metric(t('comportamento.uncertain'), len(ip_conf[ip_conf['Classification'] == 'Incerto']))
+            c3.metric(t('comportamento.masked'), len(ip_conf[ip_conf['Classification'] == 'IP Mascarado']))
             st.dataframe(ip_conf, use_container_width=True, height=400, hide_index=True)
 
     # ── Números Descartáveis ──
     with st.container(border=True):
-        st.subheader("📱 Detecção de Números Descartáveis")
+        st.subheader(t('comportamento.disposable_title'))
         df_i = st.session_state.get('df_interceptacao')
         if df_i is not None and not df_i.empty:
-            with st.popover("⚙️ Configurar"):
-                max_app = st.slider("Máximo de aparições", 1, 10, 3, key="disp_max")
-            if gate('📱 Detectar números descartáveis', df_i, 'comp_disp'):
+            with st.popover(t('comportamento.configure')):
+                max_app = st.slider(t('comportamento.max_appearances'), 1, 10, 3, key="disp_max")
+            if gate(t('comportamento.gate_disposable'), df_i, 'comp_disp'):
                 disposable = detect_disposable_numbers(df_i, max_appearances=max_app)
                 if not disposable.empty:
-                    st.warning(f"**{len(disposable)}** números descartáveis")
+                    st.warning(t('comportamento.disposable_found', count=len(disposable)))
                     st.dataframe(disposable, use_container_width=True, hide_index=True)
                 else:
-                    st.success("✅ Nenhum número descartável detectado.")
+                    st.success(t('comportamento.no_disposable'))
         else:
-            st.info("Processe dados de **Interceptação** primeiro.")
+            st.info(t('comportamento.no_interception_data'))

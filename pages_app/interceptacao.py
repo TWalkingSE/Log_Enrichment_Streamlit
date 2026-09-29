@@ -21,8 +21,8 @@ from helpers.atomic_io import atomic_write_bytes
 from helpers.shared import run_async
 from validators import safe_output_path, sanitize_dataframe_for_csv
 from helpers.large_data import (
-    estimate_xlsx_seconds, fmt_duracao, prepare_button, show_truncation,
-    PREVIEW_ROWS, XLSX_DISK_THRESHOLD, fmt,
+    declare_sheets, estimate_xlsx_seconds, fmt_duracao, prepare_button, show_truncation,
+    xlsx_progress_bar, PREVIEW_ROWS, XLSX_DISK_THRESHOLD, fmt,
 )
 
 from i18n import t
@@ -79,12 +79,7 @@ def _xlsx_grande_interceptacao(df_exp, nome_base):
     if estado and estado['key'] == chave and os.path.exists(estado['caminho']):
         return estado['caminho'], estado['resumo']
 
-    barra = st.progress(0.0, text="Gerando Excel colorido...")
-
-    def _progresso(feitas, total):
-        barra.progress(min(feitas / max(total, 1), 1.0),
-                       text=f"Gerando Excel colorido: {fmt(feitas)} de {fmt(total)} linhas")
-
+    barra, _progresso = xlsx_progress_bar()
     try:
         caminho, resumo = export_xlsx_to_disk(df_exp, nome_base, _progresso)
     finally:
@@ -117,7 +112,7 @@ async def _enrich_df_async(df, output_file, batch_size, period, update_callback,
         sanitize_dataframe_for_csv(df[export_cols]).to_csv(
             index=False, sep=';').encode('utf-8-sig'))
     if update_callback:
-        update_callback(f"Salvo em {output_file}")
+        update_callback(t('interceptacao.saved_to', path=output_file))
     return df
 
 
@@ -165,47 +160,47 @@ def page_interceptacao():
                 records = parse_html_records(html_content)
                 c1, c2, c3, c4 = st.columns(4)
                 with c1:
-                    st.metric("Total", len(records))
+                    st.metric(t('common.total'), len(records))
                 with c2:
-                    st.metric("Messages", len([r for r in records if r['type'].startswith('message')]))
+                    st.metric(t('interceptacao.messages'), len([r for r in records if r['type'].startswith('message')]))
                 with c3:
-                    st.metric("Calls", len([r for r in records if r['type'].startswith('call')]))
+                    st.metric(t('interceptacao.calls'), len([r for r in records if r['type'].startswith('call')]))
                 with c4:
-                    st.metric("Logins", len([r for r in records if r['type'].startswith('login')]))
+                    st.metric(t('interceptacao.logins'), len([r for r in records if r['type'].startswith('login')]))
             except Exception as e:
                 logger.warning("Prévia do HTML falhou (%s): %s", uploaded_html.name, e)
-                st.caption(f"⚠️ Não foi possível pré-visualizar o HTML: {e}")
+                st.caption(t('interceptacao.html_preview_error', error=e))
 
-    with st.expander("⚙️ Opções", expanded=False):
+    with st.expander(t('interceptacao.options'), expanded=False):
         c1, c2 = st.columns(2)
         with c1:
-            batch_intercept = st.number_input("Lote", 1, 1000, value=500, key="batch_i")
+            batch_intercept = st.number_input(t('interceptacao.batch'), 1, 1000, value=500, key="batch_i")
         with c2:
-            period_intercept = st.number_input("Período (s)", 0, 300, value=0, key="period_i")
+            period_intercept = st.number_input(t('interceptacao.period_seconds'), 0, 300, value=0, key="period_i")
 
     st.divider()
-    if st.button("▶️ Processar Interceptação", type="primary", key="btn_intercept"):
+    if st.button(t('interceptacao.process_btn'), type="primary", key="btn_intercept"):
         if intercept_data is None:
-            st.error("⚠️ Faça upload de um arquivo ZIP ou HTML!")
+            st.error(t('interceptacao.no_file'))
         else:
-            with st.status("Processando interceptação telemática...", expanded=True) as status:
+            with st.status(t('interceptacao.processing'), expanded=True) as status:
                 try:
                     if is_zip:
-                        st.write("📦 Extraindo dados do ZIP...")
+                        st.write(t('interceptacao.extracting_zip'))
                         df = parse_zip_interception(intercept_data, update_callback=lambda msg: st.write(f"  {msg}"))
                     else:
-                        st.write("📄 Processando HTML...")
+                        st.write(t('interceptacao.processing_html'))
                         html_content = intercept_data.decode('utf-8', errors='replace')
                         records = parse_html_records(html_content, update_callback=lambda msg: st.write(f"  {msg}"))
                         df = records_to_dataframe(records)
 
                     if df.empty:
-                        st.warning("Nenhum registro encontrado")
-                        status.update(label="Sem registros", state="error")
+                        st.warning(t('interceptacao.no_records'))
+                        status.update(label=t('interceptacao.no_records_label'), state="error")
                         return
 
-                    st.write(f"✅ {len(df)} registros extraídos, {df['Sender IP'].nunique()} IPs únicos")
-                    st.write("🔄 Enriquecendo IPs via API...")
+                    st.write(t('interceptacao.records_extracted', count=len(df), ips=df['Sender IP'].nunique()))
+                    st.write(t('interceptacao.enriching_ips'))
 
                     api_key_i = st.session_state.api_key or None
                     if is_zip:
@@ -228,12 +223,14 @@ def page_interceptacao():
 
                     if result is not None and not result.empty:
                         _set_df_interceptacao(result)
-                        status.update(label=f"✅ {len(result)} registros processados!", state="complete")
+                        status.update(label=t('interceptacao.records_processed', count=len(result)),
+                                      state="complete")
                     else:
-                        status.update(label="Sem resultados", state="error")
+                        status.update(label=t('interceptacao.no_results'), state="error")
                 except Exception as e:
-                    st.error(f"❌ Erro: {e}")
-                    status.update(label="Erro", state="error")
+                    logger.exception("Falha no processamento da interceptação")
+                    st.error(t('interceptacao.error', error=e))
+                    status.update(label=t('interceptacao.error_label'), state="error")
 
     # Results
     df_i = st.session_state.get('df_interceptacao')
@@ -245,18 +242,18 @@ def page_interceptacao():
             st.session_state['df_interceptacao'] = df_i
 
         st.divider()
-        st.subheader("📊 Resultados da Interceptação")
+        st.subheader(t('interceptacao.results_title'))
         c1, c2, c3, c4, c5 = st.columns(5)
         with c1:
-            st.metric("Registros", len(df_i))
+            st.metric(t('relatorio.records'), len(df_i))
         with c2:
-            st.metric("IPs Únicos", df_i['Sender IP'].nunique())
+            st.metric(t('common.unique_ips'), df_i['Sender IP'].nunique())
         with c3:
-            st.metric("Messages", len(df_i[df_i['type'].str.startswith('message', na=False)]))
+            st.metric(t('interceptacao.messages'), len(df_i[df_i['type'].str.startswith('message', na=False)]))
         with c4:
-            st.metric("Calls", len(df_i[df_i['type'].str.startswith('call', na=False)]))
+            st.metric(t('interceptacao.calls'), len(df_i[df_i['type'].str.startswith('call', na=False)]))
         with c5:
-            st.metric("Logins", len(df_i[df_i['type'].str.startswith('login', na=False)]))
+            st.metric(t('interceptacao.logins'), len(df_i[df_i['type'].str.startswith('login', na=False)]))
 
         export_cols = [c for c in COLUNAS_EXPORT_INTERCEPTACAO if c in df_i.columns]
         df_display = df_i[export_cols]
@@ -265,28 +262,28 @@ def page_interceptacao():
         st.dataframe(preview, height=400, hide_index=True, use_container_width=True)
         show_truncation(len(preview), len(df_display))
 
-        st.subheader("📥 Downloads")
+        st.subheader(t('interceptacao.downloads_title'))
         # Estes três eram gerados a CADA rerun da página, sem cache: em 200k
         # linhas são centenas de MB serializados por interação.
         df_exp = df_i[export_cols]
         exp_key = (_int_token(), tuple(export_cols))
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            if prepare_button("⚙️ Preparar CSV", df_exp, 'int_csv'):
+            if prepare_button(t('common.prepare_csv'), df_exp, 'int_csv'):
                 st.download_button("📥 CSV", _csv_interceptacao(df_exp, exp_key),
                                    os.path.basename(output_intercept), "text/csv")
         with c2:
-            if prepare_button("⚙️ Preparar JSON", df_exp, 'int_json'):
+            if prepare_button(t('common.prepare_json'), df_exp, 'int_json'):
                 st.download_button("📥 JSON", _json_interceptacao(df_exp, exp_key),
                                    "interceptacao.json", "application/json")
         with c3:
             _est = fmt_duracao(estimate_xlsx_seconds(len(df_exp), len(export_cols)))
-            if prepare_button("⚙️ Preparar Excel", df_exp, 'int_xlsx',
-                              help=f"{fmt(len(df_exp))} linhas — {_est} de geração"):
+            if prepare_button(t('common.prepare_excel'), df_exp, 'int_xlsx',
+                              help=t('guards.xlsx_help', rows=fmt(len(df_exp)), duration=_est)):
                 nome_xlsx = os.path.splitext(os.path.basename(output_intercept))[0]
                 if len(df_exp) <= XLSX_DISK_THRESHOLD:
                     st.download_button(
-                        "📥 Excel (colorido)", _xlsx_interceptacao(df_exp, exp_key),
+                        t('common.excel_colored'), _xlsx_interceptacao(df_exp, exp_key),
                         nome_xlsx + '.xlsx',
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 else:
@@ -295,38 +292,35 @@ def page_interceptacao():
                     caminho, resumo = _xlsx_grande_interceptacao(df_exp, nome_xlsx)
                     with open(caminho, 'rb') as fh:
                         st.download_button(
-                            "📥 Excel (colorido)", fh, os.path.basename(caminho),
+                            t('common.excel_colored'), fh, os.path.basename(caminho),
                             "application/vnd.openxmlformats-officedocument."
                             "spreadsheetml.sheet", key="dl_int_xlsx_grande")
-                    if resumo.get('abas', 1) > 1:
-                        st.caption(f"✅ {fmt(resumo['linhas'])} linhas gravadas em "
-                                   f"{resumo['abas']} abas — o formato XLSX não aceita "
-                                   f"mais de 1.048.575 linhas por planilha.")
-                    else:
-                        st.caption(f"✅ {fmt(resumo['linhas'])} linhas gravadas (total).")
+                    declare_sheets(resumo)
         with c4:
             if os.path.exists(output_intercept):
                 with open(output_intercept, 'rb') as f:
-                    st.download_button("📥 Arquivo Salvo", f,
+                    st.download_button(t('interceptacao.saved_file'), f,
                                        os.path.basename(output_intercept), "text/csv")
 
         if 'Ip_Dono' in df_i.columns and df_i['Ip_Dono'].notna().any():
-            st.subheader("🏢 IPs por Provedor")
+            st.subheader(t('interceptacao.provider_chart'))
             contagem_prov = df_i['Ip_Dono'].value_counts()
             prov = contagem_prov.head(15).reset_index()
-            show_truncation(len(prov), len(contagem_prov), 'provedores')
-            prov.columns = ['Provedor', 'Qtd']
-            fig = px.bar(prov, x='Qtd', y='Provedor', orientation='h',
-                color='Qtd', color_continuous_scale='Viridis')
+            show_truncation(len(prov), len(contagem_prov), t('interceptacao.unit_providers'))
+            col_prov, col_qtd = t('common.provider'), t('common.count')
+            prov.columns = [col_prov, col_qtd]
+            fig = px.bar(prov, x=col_qtd, y=col_prov, orientation='h',
+                color=col_qtd, color_continuous_scale='Viridis')
             fig.update_layout(height=400, showlegend=False, yaxis={'categoryorder':'total ascending'},
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 coloraxis_showscale=False)
             st.plotly_chart(fig, key='intercept_prov')
 
         if 'type' in df_i.columns:
-            st.subheader("📋 Distribuição por Tipo")
+            st.subheader(t('interceptacao.type_distribution'))
             type_counts = df_i['type'].value_counts().reset_index()
-            type_counts.columns = ['Tipo', 'Qtd']
-            fig = px.pie(type_counts, values='Qtd', names='Tipo', hole=0.4)
+            col_tipo, col_qtd = t('common.type'), t('common.count')
+            type_counts.columns = [col_tipo, col_qtd]
+            fig = px.pie(type_counts, values=col_qtd, names=col_tipo, hole=0.4)
             fig.update_layout(height=350, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig, key='intercept_type')

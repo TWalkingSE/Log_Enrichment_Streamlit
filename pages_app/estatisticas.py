@@ -18,21 +18,19 @@ from validators import bool_series, parse_data
 logger = logging.getLogger(__name__)
 
 DAY_ORDER_EN = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-DAY_NAME_PT = {
-    'Sunday': 'Domingo',
-    'Monday': 'Segunda',
-    'Tuesday': 'Terca',
-    'Wednesday': 'Quarta',
-    'Thursday': 'Quinta',
-    'Friday': 'Sexta',
-    'Saturday': 'Sabado',
-}
 
-CONNECTION_COLORS = {
-    'Residencial': COLORS['success'],
-    'Movel': COLORS['mobile'],
-    'Proxy/VPN': COLORS['danger'],
-    'Hosting': COLORS['hosting'],
+
+def _day_name(day_en):
+    return t(f'common.weekday.{day_en}')
+
+
+# Código interno -> (chave de tradução, cor). O rótulo exibido vem do idioma;
+# a lógica nunca compara texto traduzido.
+CONNECTION_TYPES = {
+    'residential': ('common.residential', COLORS['success']),
+    'mobile': ('common.mobile', COLORS['mobile']),
+    'proxy': ('common.proxy_vpn', COLORS['danger']),
+    'hosting': ('common.hosting', COLORS['hosting']),
 }
 
 
@@ -147,7 +145,7 @@ def _build_connection_mix_chart(df):
     residencial_series = ~(proxy_series | hosting_series | mobile_series)
 
     mix_df = pd.DataFrame({
-        'Tipo': ['Residencial', 'Movel', 'Proxy/VPN', 'Hosting'],
+        'Tipo': ['residential', 'mobile', 'proxy', 'hosting'],
         'Qtd': [
             int(residencial_series.sum()),
             int(mobile_series.sum()),
@@ -161,15 +159,15 @@ def _build_connection_mix_chart(df):
 
     fig = go.Figure()
     fig.add_trace(go.Bar(
-        x=mix_df['Tipo'],
+        x=[t(CONNECTION_TYPES[item][0]) for item in mix_df['Tipo']],
         y=mix_df['Qtd'],
-        marker=dict(color=[CONNECTION_COLORS[item] for item in mix_df['Tipo']]),
+        marker=dict(color=[CONNECTION_TYPES[item][1] for item in mix_df['Tipo']]),
         text=mix_df['Qtd'],
         textposition='outside',
         hovertemplate='%{x}<br><b>%{y}</b><extra></extra>',
     ))
     fig.update_layout(
-        title=dict(text='<b>Mix de Conexao</b><br><span style="font-size:12px;color:#94a3b8">Leitura rapida do perfil de infraestrutura</span>', x=0.02, xanchor='left'),
+        title=dict(text=f"<b>{t('estatisticas.connection_mix')}</b><br><span style=\"font-size:12px;color:#94a3b8\">{t('estatisticas.connection_mix_subtitle')}</span>", x=0.02, xanchor='left'),
         height=320,
         showlegend=False,
         paper_bgcolor='rgba(0,0,0,0)',
@@ -186,12 +184,13 @@ def _provider_spotlight_data(df, df_dates):
     if 'Ip_Dono' not in df.columns or 'Ip' not in df.columns:
         return [], pd.DataFrame(), ''
 
-    providers = df['Ip_Dono'].fillna('').replace('', 'Nao informado')
+    providers = df['Ip_Dono'].fillna('').replace('', t('common.not_informed'))
     provider_options = providers.value_counts().head(8).index.tolist()
     if not provider_options:
         return [], pd.DataFrame(), ''
 
-    selected_provider = st.selectbox('Provedor em destaque', provider_options, key='stats_provider_spotlight')
+    selected_provider = st.selectbox(t('estatisticas.provider_spotlight'), provider_options,
+                                     key='stats_provider_spotlight')
 
     provider_mask = providers == selected_provider
     provider_df = df.loc[provider_mask].copy()
@@ -206,12 +205,12 @@ def _provider_spotlight_data(df, df_dates):
         if not provider_dates.empty:
             start = provider_dates['Data_parsed'].min().strftime('%d/%m/%Y')
             end = provider_dates['Data_parsed'].max().strftime('%d/%m/%Y')
-            subtitle_parts.append(f'(utilizada em conexoes entre {start} e {end})')
+            subtitle_parts.append(t('estatisticas.connections_between', start=start, end=end))
 
     if 'Ip_Regiao' in provider_df.columns:
         regions = [region for region in provider_df['Ip_Regiao'].dropna().astype(str).unique()[:3] if region]
         if regions:
-            subtitle_parts.append(f"Regioes de: {', '.join(regions)}")
+            subtitle_parts.append(t('estatisticas.regions_from', regions=', '.join(regions)))
 
     subtitle = '<br>'.join(subtitle_parts)
     return provider_options, spotlight_df, subtitle
@@ -267,12 +266,12 @@ def page_estatisticas():
             top_suspect_ip = proxy_ips['Ip'].value_counts().index[0]
 
     cards = [
-        ('📋', str(total), f'Total Registros{trend_suffix}'),
-        ('🌐', str(unique_ips), 'IPs Unicos'),
-        ('🏢', str(n_providers), 'Provedores'),
-        ('🗺️', str(n_regions), 'Regioes'),
-        ('🛡️', f'{proxy_pct:.1f}%', 'Proxy/VPN'),
-        ('📱', f'{mobile_pct:.1f}%', 'Movel'),
+        ('📋', str(total), t('estatisticas.total_records') + trend_suffix),
+        ('🌐', str(unique_ips), t('estatisticas.unique_ips')),
+        ('🏢', str(n_providers), t('estatisticas.providers')),
+        ('🗺️', str(n_regions), t('estatisticas.regions')),
+        ('🛡️', f'{proxy_pct:.1f}%', t('estatisticas.proxy_vpn')),
+        ('📱', f'{mobile_pct:.1f}%', t('estatisticas.mobile')),
     ]
     card_cols = st.columns(len(cards))
     for index, (icon, value, label) in enumerate(cards):
@@ -281,9 +280,9 @@ def page_estatisticas():
                 st.metric(f'{icon} {label}', value)
 
     if top_suspect_ip:
-        st.error(f'🚨 **IP mais suspeito:** `{top_suspect_ip}` com sinais de proxy/VPN no conjunto analisado.')
+        st.error(t('estatisticas.most_suspect_ip', ip=top_suspect_ip))
 
-    st.markdown('### Spotlight Operacional')
+    st.markdown(t('estatisticas.operational_spotlight'))
     spotlight_col, mix_col = st.columns([1.8, 1])
     with spotlight_col:
         provider_options, spotlight_df, provider_subtitle = _provider_spotlight_data(df, df_dates)
@@ -303,7 +302,7 @@ def page_estatisticas():
                 )
                 st.plotly_chart(fig, use_container_width=True, key='stats_spotlight_provider')
             else:
-                st.info('Nao ha dados suficientes para destacar um provedor.')
+                st.info(t('estatisticas.no_provider_data'))
 
     with mix_col:
         with st.container(border=True):
@@ -311,9 +310,9 @@ def page_estatisticas():
             if mix_fig is not None:
                 st.plotly_chart(mix_fig, use_container_width=True, key='stats_connection_mix')
             else:
-                st.info('Sem dados suficientes para classificar o tipo de conexao.')
+                st.info(t('estatisticas.no_connection_data'))
 
-    st.markdown('### Ritmo de Uso')
+    st.markdown(t('estatisticas.usage_rhythm'))
     rhythm_col1, rhythm_col2 = st.columns(2)
     with rhythm_col1:
         with st.container(border=True):
@@ -326,36 +325,36 @@ def page_estatisticas():
                     hourly_df,
                     'Horario',
                     'Conexoes',
-                    'Horarios',
-                    'Faixas de maior intensidade ao longo do dia',
+                    t('estatisticas.hours_title'),
+                    t('estatisticas.hours_subtitle'),
                     accent='#e5e7eb',
                     tickangle=-45,
                 )
                 st.plotly_chart(fig, use_container_width=True, key='stats_hourly')
             else:
-                st.info('Sem datas validas para montar a serie horaria.')
+                st.info(t('estatisticas.no_hourly_data'))
 
     with rhythm_col2:
         with st.container(border=True):
             if not df_dates.empty:
                 weekday_counts = df_dates['Data_parsed'].dt.day_name().value_counts().reindex(DAY_ORDER_EN, fill_value=0)
                 weekday_df = pd.DataFrame({
-                    'Dia': [DAY_NAME_PT[day] for day in DAY_ORDER_EN],
+                    'Dia': [_day_name(day) for day in DAY_ORDER_EN],
                     'Conexoes': weekday_counts.tolist(),
                 })
                 fig = _build_focus_line_chart(
                     weekday_df,
                     'Dia',
                     'Conexoes',
-                    'Dias da Semana',
-                    'Concentracao operacional por dia observado',
+                    t('estatisticas.weekdays_title'),
+                    t('estatisticas.weekdays_subtitle'),
                     accent=COLORS['primary'],
                 )
                 st.plotly_chart(fig, use_container_width=True, key='stats_weekday')
             else:
-                st.info('Sem datas validas para montar a serie semanal.')
+                st.info(t('estatisticas.no_weekday_data'))
 
-    st.markdown('### Panorama Temporal e Territorial')
+    st.markdown(t('estatisticas.temporal_territorial'))
     panel_col1, panel_col2 = st.columns([1.4, 1])
     with panel_col1:
         with st.container(border=True):
@@ -372,46 +371,49 @@ def page_estatisticas():
                     daily_df,
                     'Dia',
                     'Acessos',
-                    'Timeline de Atividade',
-                    'Serie diaria para identificar picos e janelas de silencio',
+                    t('estatisticas.activity_timeline'),
+                    t('estatisticas.activity_timeline_subtitle'),
                     accent=COLORS['accent'],
                 )
                 fig.update_xaxes(tickformat='%d/%m')
                 st.plotly_chart(fig, use_container_width=True, key='stats_daily_timeline')
             else:
-                st.info('Sem datas validas para montar a timeline diaria.')
+                st.info(t('estatisticas.no_timeline_data'))
 
     with panel_col2:
         with st.container(border=True):
             if 'Ip_Regiao' in df.columns:
-                region_df = df['Ip_Regiao'].fillna('Nao informado').value_counts().head(8).reset_index()
+                region_df = df['Ip_Regiao'].fillna(t('common.not_informed')).value_counts().head(8).reset_index()
                 region_df.columns = ['Regiao', 'Qtd']
-                fig = _build_horizontal_bar_chart(region_df, 'Regiao', 'Qtd', 'Regioes Mais Ativas', COLORS['secondary'])
+                fig = _build_horizontal_bar_chart(region_df, 'Regiao', 'Qtd',
+                                                  t('estatisticas.most_active_regions'), COLORS['secondary'])
                 st.plotly_chart(fig, use_container_width=True, key='stats_regions')
             else:
-                st.info('Sem dados de regiao para o ranking territorial.')
+                st.info(t('estatisticas.no_region_data'))
 
-    st.markdown('### Ranking de IPs e Calor Temporal')
+    st.markdown(t('estatisticas.ip_ranking_heat'))
     rank_col1, rank_col2 = st.columns([1.2, 1])
     with rank_col1:
         with st.container(border=True):
             if 'Ip' in df.columns:
                 top_ips_df = df['Ip'].value_counts().head(12).reset_index()
                 top_ips_df.columns = ['IP', 'Ocorrencias']
-                fig = _build_horizontal_bar_chart(top_ips_df, 'IP', 'Ocorrencias', 'Top 12 IPs Mais Recorrentes', COLORS['info'], height=360)
+                fig = _build_horizontal_bar_chart(top_ips_df, 'IP', 'Ocorrencias', t('estatisticas.top_ips'),
+                                                  COLORS['info'], height=360)
                 st.plotly_chart(fig, use_container_width=True, key='stats_top_ips')
             else:
-                st.info('Sem coluna de IP para montar o ranking.')
+                st.info(t('estatisticas.no_ip_column'))
 
     with rank_col2:
         with st.container(border=True):
             if not df_dates.empty:
                 heat_df = df_dates.copy()
                 heat_df['Hora'] = heat_df['Data_parsed'].dt.hour
-                heat_df['DiaSemana'] = heat_df['Data_parsed'].dt.day_name().map(DAY_NAME_PT)
+                day_names = {day: _day_name(day) for day in DAY_ORDER_EN}
+                heat_df['DiaSemana'] = heat_df['Data_parsed'].dt.day_name().map(day_names)
                 heat_df['DiaSemana'] = pd.Categorical(
                     heat_df['DiaSemana'],
-                    categories=[DAY_NAME_PT[item] for item in DAY_ORDER_EN],
+                    categories=[day_names[item] for item in DAY_ORDER_EN],
                     ordered=True,
                 )
                 heat_pivot = heat_df.groupby(['DiaSemana', 'Hora'], observed=True).size().reset_index(name='Acessos')
@@ -427,10 +429,10 @@ def page_estatisticas():
                         [0.55, _hex_to_rgba(COLORS['warning'], 0.75)],
                         [1.0, _hex_to_rgba(COLORS['danger'], 0.9)],
                     ],
-                    hovertemplate='%{y} - %{x}<br><b>%{z}</b> acessos<extra></extra>',
+                    hovertemplate='%{y} - %{x}<br><b>%{z}</b> ' + t('common.accesses_hover') + '<extra></extra>',
                 ))
                 fig.update_layout(
-                    title=dict(text='<b>Mapa de Calor Temporal</b><br><span style="font-size:12px;color:#94a3b8">Hora x dia da semana para leitura de padrao</span>', x=0.02, xanchor='left'),
+                    title=dict(text=f"<b>{t('estatisticas.heatmap_title')}</b><br><span style=\"font-size:12px;color:#94a3b8\">{t('estatisticas.heatmap_subtitle')}</span>", x=0.02, xanchor='left'),
                     height=360,
                     paper_bgcolor='rgba(0,0,0,0)',
                     plot_bgcolor='rgba(0,0,0,0)',
@@ -441,18 +443,18 @@ def page_estatisticas():
                 )
                 st.plotly_chart(fig, use_container_width=True, key='stats_heatmap')
             else:
-                st.info('Sem datas validas para gerar o mapa de calor.')
+                st.info(t('estatisticas.no_heatmap_data'))
 
-    st.markdown('### Anomalias e Detalhamento')
-    if gate('⚡ Detectar anomalias', df, 'stats_anomalies'):
+    st.markdown(t('estatisticas.anomalies_detail'))
+    if gate(t('estatisticas.detect_anomalies'), df, 'stats_anomalies'):
         anomalies = detect_anomalies(df)
         if anomalies:
-            st.warning(f'**{len(anomalies)}** IPs com localizacao incomum detectados.')
+            st.warning(t('estatisticas.anomalies_found', count=len(anomalies)))
             st.dataframe(pd.DataFrame(anomalies), use_container_width=True, hide_index=True)
         else:
-            st.success('Nenhuma anomalia detectada no conjunto atual.')
+            st.success(t('estatisticas.no_anomalies'))
 
-    st.subheader('📋 Detalhamento por Provedor')
+    st.subheader(t('estatisticas.provider_detail'))
     if 'Ip_Dono' in df.columns:
         provider_table = df.groupby('Ip_Dono').agg(
             Total=('Ip', 'count'),
@@ -460,5 +462,6 @@ def page_estatisticas():
             Cidades=('Ip_Cidade', lambda values: ', '.join(values.dropna().astype(str).unique()[:5])),
             Regioes=('Ip_Regiao', lambda values: ', '.join(values.dropna().astype(str).unique()[:3])),
         ).sort_values('Total', ascending=False).reset_index()
-        provider_table.columns = ['Provedor', 'Total', 'Unicos', 'Cidades', 'Regioes']
+        provider_table.columns = [t('common.provider'), t('common.total'), t('common.unique'),
+                                  t('common.cities'), t('common.regions')]
         st.dataframe(provider_table, use_container_width=True, height=380, hide_index=True)
