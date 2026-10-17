@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import logging
 import os
@@ -513,9 +514,10 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
         # Verificar se já temos informações sobre algum IP
         if df_resultado is not None:
             # Só considerar IP como "processado" se tiver dados de enriquecimento válidos
-            df_enriquecidos = df_resultado[df_resultado['Ip_Dono'].notna() & (df_resultado['Ip_Dono'] != '')]
+            df_enriquecidos = df_resultado[_tem_enriquecimento(df_resultado)]
             ips_processados = set(df_enriquecidos['Ip'].astype(str))
             ips_novos = [ip for ip in ips_unicos if ip not in ips_processados]
+            enriquecimento_existente = _enriquecimento_por_ip(df_enriquecidos, update_callback)
 
             if update_callback:
                 update_callback(f"{len(ips_unicos) - len(ips_novos)} IPs já enriquecidos, {len(ips_novos)} IPs para consultar")
@@ -527,47 +529,82 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
         if progress_callback:
             progress_callback(0, total_ips)
 
-        # Se não há IPs novos para processar
+        resultados_ips = {}
         if total_ips == 0:
+            # Sem IP novo não há consulta, mas pode haver registro novo de IP
+            # já enriquecido (outra data, outra sessão), e ele segue para a
+            # mescla. Devolver o arquivo existente aqui descartava esses
+            # registros em silêncio.
             if update_callback:
-                update_callback("Nenhum IP novo para processar")
-            if df_resultado is not None:
-                return df_resultado
-            return pd.DataFrame(columns=colunas_export_para(df))
+                update_callback("Nenhum IP novo para consultar")
+        else:
+            # Enriquecimento via serviço compartilhado (mesmo caminho de interception_parser)
+            from enrich_service import enrich_ips
 
-        # Enriquecimento via serviço compartilhado (mesmo caminho de interception_parser)
-        from enrich_service import enrich_ips
+            def _on_batch_progress(processed, total):
+                if progress_callback:
+                    progress_callback(min(processed, total_ips), total_ips, total_records)
 
-        def _on_batch_progress(processed, total):
-            if progress_callback:
-                progress_callback(min(processed, total_ips), total_ips, total_records)
+            if update_callback:
+                update_callback(f"Enviando {total_ips} IPs para o endpoint batch...")
 
-        if update_callback:
-            update_callback(f"Enviando {total_ips} IPs para o endpoint batch...")
-
-        resultados_ips, _client = await enrich_ips(
-            list(ips_unicos),
-            cache_file=cache_file,
-            api_key=api_key,
-            batch_size=batch_size,
-            period=period,
-            update_callback=update_callback,
-            progress_callback=_on_batch_progress,
-            save_cache=True,
-        )
+            resultados_ips, _client = await enrich_ips(
+                list(ips_unicos),
+                cache_file=cache_file,
+                api_key=api_key,
+                batch_size=batch_size,
+                period=period,
+                update_callback=update_callback,
+                progress_callback=_on_batch_progress,
+                save_cache=True,
+            )
 
         # Processar resultados finais
         df_processado = processar_resultados(df, resultados_ips)
 
         # Combinar com dados existentes
         if df_resultado is not None:
-            df_final = pd.concat([df_resultado, df_processado])
+            # A Reputação relida do CSV só cobre as linhas antigas, e
+            # add_reputacao_column não recalcula coluna que já existe: as
+            # novas saíam sem rótulo. Ela deriva das colunas do IP e é
+            # recalculada para todas.
+            df_existente = df_resultado.drop(columns='Reputação', errors='ignore')
+            # IP já enriquecido não volta à API: o enriquecimento das linhas
+            # dele vem do próprio arquivo que está sendo estendido. Antes do
+            # dedup, para que a linha nova preenchida vença a antiga.
+            preenchidas = np.concatenate([
+                _preencher_enriquecimento(df_existente, enriquecimento_existente),
+                _preencher_enriquecimento(df_processado, enriquecimento_existente)])
+            df_final = pd.concat([df_existente, df_processado], ignore_index=True)
             dedup_cols = _incremental_dedup_columns(df_final)
             # Chave comparada como texto: o CSV relido infere `349` como
             # número e o registro novo traz `'349'` — sem isso o mesmo registro
             # entraria duas vezes. Vazio (None/NaN) conta como igual a vazio.
-            repetidas = df_final[dedup_cols].fillna('').astype(str).duplicated(keep='last')
+            chave = df_final[dedup_cols].fillna('').astype(str)
+            # Na colisão vence a linha mais recente, mas uma linha enriquecida
+            # nunca é trocada por outra sem enriquecimento: as enriquecidas
+            # vão para o fim da ordem (estável) em que o keep='last' decide.
+            ordem = np.argsort(_tem_enriquecimento(df_final).to_numpy(), kind='stable')
+            repetidas = np.empty(len(df_final), dtype=bool)
+            repetidas[ordem] = chave.iloc[ordem].duplicated(keep='last').to_numpy()
             df_final = df_final[~repetidas]
+            preenchidas = preenchidas[~repetidas]
+
+            existentes = df_final.index < len(df_existente)
+            n_do_log = int((preenchidas & ~existentes).sum())
+            n_reparadas = int((preenchidas & existentes).sum())
+            df_final.index = pd.RangeIndex(len(df_final))
+            if update_callback and n_do_log:
+                update_callback(f"{_fmt_int(n_do_log)} registros do log processado, de IPs já "
+                                "enriquecidos, receberam o enriquecimento do arquivo existente")
+            if n_reparadas:
+                # O arquivo entregue muda de conteúdo: isso se declara.
+                logger.warning("%d registros do arquivo existente estavam sem enriquecimento "
+                               "de IP enriquecido em outras linhas; preenchidos", n_reparadas)
+                if update_callback:
+                    update_callback(f"⚠️ {_fmt_int(n_reparadas)} registros do arquivo existente "
+                                    "estavam sem enriquecimento, embora o mesmo IP esteja "
+                                    "enriquecido em outras linhas dele, e foram preenchidos")
         else:
             df_final = df_processado
 
@@ -590,6 +627,54 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
         if update_callback:
             update_callback(f"Erro: {str(e)}")
         raise
+
+
+# Campos que vêm da consulta do IP, não do registro do log.
+_CAMPOS_DO_IP = [c for c in COLUNAS_MODELO if c.startswith('Ip_')]
+
+
+def _tem_enriquecimento(df):
+    """Linhas com enriquecimento: o mesmo critério que dispensa a consulta."""
+    return df['Ip_Dono'].notna() & (df['Ip_Dono'] != '')
+
+
+def _enriquecimento_por_ip(df_enriquecidos, update_callback=None):
+    """Enriquecimento de cada IP já consultado, uma linha por IP (índice `Ip`).
+
+    IP com mais de uma versão de enriquecimento no arquivo (editado à mão,
+    juntado de outra saída) fica de fora, e isso é declarado: escolher uma
+    delas afirmaria o que o arquivo não afirma.
+    """
+    campos = [c for c in _CAMPOS_DO_IP if c in df_enriquecidos.columns]
+    tabela = (df_enriquecidos[['Ip', *campos]]
+              .assign(Ip=lambda d: d['Ip'].astype(str))
+              .drop_duplicates())
+    divergentes = tabela['Ip'].duplicated(keep=False)
+    if divergentes.any():
+        n = tabela.loc[divergentes, 'Ip'].nunique()
+        logger.warning("%d IPs com mais de um enriquecimento no arquivo existente", n)
+        if update_callback:
+            update_callback(f"⚠️ {_fmt_int(n)} IPs têm mais de um enriquecimento no arquivo "
+                            "existente: registros novos deles ficam sem enriquecimento")
+    return tabela[~divergentes].set_index('Ip')
+
+
+def _preencher_enriquecimento(df, enriquecimento):
+    """Preenche, no lugar, as linhas sem enriquecimento de IPs de `enriquecimento`.
+
+    Sobrescreve todos os campos do IP, não só os vazios: a linha sem
+    enriquecimento traz `False` nos booleanos (default do parser), e um
+    `fillna` deixaria um proxy marcado como não proxy.
+
+    Returns:
+        máscara (ndarray) das linhas preenchidas.
+    """
+    ip = df['Ip'].astype(str)
+    alvo = (~_tem_enriquecimento(df) & ip.isin(enriquecimento.index)).to_numpy()
+    if alvo.any():
+        for campo in enriquecimento.columns:
+            df[campo] = ip.map(enriquecimento[campo]).where(alvo, df[campo])
+    return alvo
 
 
 def _incremental_dedup_columns(df):

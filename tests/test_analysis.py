@@ -315,6 +315,20 @@ class TestInfrastructureClassification(unittest.TestCase):
         result = classify_infrastructure(row)
         self.assertEqual(result['category'], 'normal')
 
+    def test_nan_relido_do_csv_nao_quebra_a_classificacao_por_combinacao(self):
+        # Cada NaN é um objeto diferente e não é igual a si mesmo: como chave
+        # de dict, a combinação com `Ip_AS` vazio dava KeyError.
+        from analysis.infrastructure import add_reputacao_column, classify_dataframe
+        csv = ('Ip_Proxy;Ip_Hospedagem;Ip_Movel;Ip_AS;Ip_Dono\n'
+               'False;False;True;;Claro\nFalse;False;True;;Claro\n'
+               'True;False;False;;\nFalse;False;False;AS16509 Amazon;Amazon\n')
+        df = pd.read_csv(io.StringIO(csv), sep=';')
+        df['Ip_AS'] = df['Ip_AS'].astype(object)  # como sai de um concat
+        esperado = ['Rede Móvel', 'Rede Móvel', 'Proxy / VPN / Tor', 'Cloud Pública']
+        self.assertEqual(list(classify_dataframe(df)['_infra_label']), esperado)
+        self.assertEqual([r.split(' ', 1)[1] for r in add_reputacao_column(df)['Reputação']],
+                         esperado)
+
 
 class TestUnifiedReputation(unittest.TestCase):
     def test_empty_df(self):

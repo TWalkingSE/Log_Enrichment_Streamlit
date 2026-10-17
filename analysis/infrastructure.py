@@ -111,6 +111,19 @@ _INFRA_COLUMNS = (
 )
 
 
+def _chaves_de_classificacao(df, presentes):
+    """Colunas de entrada da classificação, com todo ausente como `None`.
+
+    As combinações viram chave de dict, e NaN não é igual a si mesmo: cada
+    NaN relido de um CSV (um `Ip_AS` vazio) era uma combinação nova e o
+    lookup estourava `KeyError`. Na classificação o ausente já é um só:
+    `as_bool` lê os dois como falso e nenhuma palavra-chave casa com o texto
+    deles.
+    """
+    chaves = df[presentes].astype(object)
+    return chaves.where(chaves.notna(), None)
+
+
 def classify_dataframe(df):
     """
     Add infrastructure classification columns to a DataFrame.
@@ -135,7 +148,7 @@ def classify_dataframe(df):
             df[coluna] = unica[campo]
         return df
 
-    chaves = df[presentes]
+    chaves = _chaves_de_classificacao(df, presentes)
     rotulos = {
         valores: classify_infrastructure(dict(zip(presentes, valores)))
         for valores in chaves.drop_duplicates().itertuples(index=False, name=None)
@@ -167,7 +180,7 @@ def add_reputacao_column(df):
         return df
 
     presentes = [c for c in _CLASSIFY_KEYS if c in df.columns]
-    chaves = df[presentes]
+    chaves = _chaves_de_classificacao(df, presentes)
     rotulos = {
         valores: format_reputacao(dict(zip(presentes, valores)))
         for valores in chaves.drop_duplicates().itertuples(index=False, name=None)
