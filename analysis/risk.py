@@ -25,7 +25,7 @@ def risk_level_counts(scores):
     return alto, medio, int((s < RISK_MEDIUM).sum())
 
 
-def calculate_risk_scores(df, ip_col='Ip'):
+def calculate_risk_scores(df, ip_col='Ip', fator_frequencia=True):
     """
     Calculate risk score (0-100) for each unique IP based on:
     - Proxy/VPN flag (+40)
@@ -33,6 +33,11 @@ def calculate_risk_scores(df, ip_col='Ip'):
     - Unusual location (+20)
     - Low frequency (+10)
     - Mobile flag (-5, less risky)
+
+    `fator_frequencia=False` desliga o fator de baixa frequência. Nos formatos
+    agregados do Google a linha não é acesso: o relatório de serviços tem uma
+    linha por IP, e todo IP sairia com "apareceu apenas 1x" — inclusive o que o
+    Google diz ter sido usado em 700 dias.
 
     Returns DataFrame with IP, score, and breakdown.
     """
@@ -86,7 +91,7 @@ def calculate_risk_scores(df, ip_col='Ip'):
             factors.append('Local incomum (+20)')
             breakdown.append({'label': 'Local incomum', 'weight': 20,
                               'detail': f'Cidade "{city}" diverge da cidade dominante "{main_city}".'})
-        if n_rows <= 2:
+        if fator_frequencia and n_rows <= 2:
             score += 10
             factors.append('Baixa frequência (+10)')
             breakdown.append({'label': 'Baixa frequência', 'weight': 10,

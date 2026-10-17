@@ -237,7 +237,11 @@ funde os resultados no DataFrame.
   base do `Days Active` do Google (em GMT−3 o caso real teria 13 contradições
   entre as duas colunas, em UTC tem 2 — e são do próprio Google). Os dois
   arquivos nunca se fundem: o incremental recusa misturá-los
-  (`FormatoSaidaIncompativel`).
+  (`FormatoSaidaIncompativel`). No laudo HTML, `generate_html_report` declara
+  o formato, rotula contagens como linhas e descarta sozinho as análises de
+  `ANALISES_NAO_APLICAVEIS_AGREGADO` (e recalcula o risco sem o fator de
+  frequência), mesmo que o chamador as passe. Análise nova que conte linhas,
+  horários de `Data` ou intervalos entre linhas como acessos entra nessa lista.
 - O hash de integridade do relatório aparece em laudos já entregues. Qualquer
   mudança no seu cálculo precisa ser provada byte-a-byte idêntica
   (`tests/test_integrations.py::TestIntegrityHash`).

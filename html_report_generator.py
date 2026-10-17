@@ -20,12 +20,96 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from data_processing.formats import FAMILIAS_GOOGLE_AGREGADO, familia_formato
 from validators import as_bool, bool_series, parse_data
 
 logger = logging.getLogger(__name__)
 
 # Path do template
 _TEMPLATE_PATH = Path(__file__).parent / "templates" / "report_template.html"
+
+# Google Aggregated Activities: a linha é um intervalo agregado (serviços) ou um
+# par IP ↔ identificador (conexões), não um acesso, e `Data` é o último uso.
+# Texto de laudo — português fixo, fora do i18n.
+RESSALVA_AGREGADO = {
+    'google_atividades': {
+        'titulo': 'Google Aggregated Activities (serviços)',
+        'paragrafos': (
+            'Cada linha é um endereço IP com o intervalo agregado pelo Google, do '
+            'primeiro ao último uso — não um acesso. Neste relatório, contagens de '
+            'linhas são contagens de linhas do documento, nunca de acessos.',
+            'A coluna Data é o último uso. Horários, períodos do dia, linha do tempo '
+            'e mapa de calor descrevem esse instante, não a distribuição dos acessos '
+            'dentro do intervalo.',
+            'Dias_Ativos_Google é a contagem informada pelo Google, em dias UTC; o '
+            'Google não informa quais dias foram. Dias_Corridos = último uso − '
+            'primeiro uso + 1, também em dias UTC.',
+        ),
+    },
+    'google_conexoes': {
+        'titulo': 'Google Aggregated Activities (conexões)',
+        'paragrafos': (
+            'Cada linha é um par IP ↔ identificador visto na mesma sessão '
+            'autenticada, com a janela daquele par — não um acesso. O mesmo IP se '
+            'repete, uma vez por identificador vinculado: contagens de linhas são '
+            'contagens de pares, nunca de acessos.',
+            'A coluna Data é o último uso do par. Horários, períodos do dia, linha '
+            'do tempo e mapa de calor descrevem esse instante, não a distribuição '
+            'dos acessos dentro da janela.',
+            'Dias_Corridos = último uso − primeiro uso + 1 do par, em dias UTC.',
+        ),
+    },
+}
+RESSALVA_AGREGADO_ANALISES = (
+    'Saltos impossíveis comparam apenas os instantes de último uso: a ausência '
+    'de salto não descarta deslocamentos no restante de cada intervalo. O score '
+    'de risco não usa o fator de baixa frequência. As análises que supõem uma '
+    'linha por acesso não foram executadas; estão listadas abaixo, com o motivo.'
+)
+
+# Análises que supõem uma linha por acesso: nos formatos agregados, contariam
+# linhas e horários de último uso como se fossem acessos. A página não as
+# executa e o gerador as descarta mesmo que venham em `analyses`.
+ANALISES_NAO_APLICAVEIS_AGREGADO = {
+    'behavioral_profile': (
+        'Perfil comportamental',
+        'horário de pico, padrão diurno/noturno e dias monitorados seriam '
+        'calculados sobre o último uso de cada linha'),
+    'vpn_heuristics': (
+        'Análise heurística de VPN',
+        'a rotação de IPs e a proporção de hosting supõem uma linha por acesso, '
+        'em sequência'),
+    'ip_confidence': (
+        'Confiança de IPs',
+        'recorrência e consistência de horário de um IP sairiam da contagem de '
+        'linhas'),
+    'base_locations': (
+        'Locais base estimados',
+        'residência e trabalho seriam estimados contando linhas pelo horário do '
+        'último uso, como se fossem acessos noturnos e diurnos'),
+    'life_patterns': (
+        'Padrões de vida',
+        'agrupamentos e desvios de rotina supõem uma linha por acesso'),
+    'digital_silence': (
+        'Silêncio digital',
+        'o intervalo entre os últimos usos de linhas diferentes não é período sem '
+        'atividade'),
+    'timezone_consistency': (
+        'Validação de fuso horário',
+        'o horário de sono seria inferido da distribuição de linhas, não de '
+        'acessos'),
+    'provider_timing': (
+        'Padrão temporal por provedor',
+        'sessões e horas ativas seriam calculadas entre últimos usos de linhas '
+        'diferentes'),
+}
+
+
+def formato_agregado(df):
+    """'google_atividades' / 'google_conexoes' quando as linhas de `df` são
+    intervalos agregados do Google; None para os demais formatos."""
+    familia = familia_formato(df)
+    return familia if familia in FAMILIAS_GOOGLE_AGREGADO else None
 
 
 def _safe(val):
@@ -35,7 +119,7 @@ def _safe(val):
     return str(val)
 
 
-def _build_findings(df, analyses, n_total):
+def _build_findings(df, analyses, n_total, agregado=None):
     """Compila achados principais para o sumário executivo."""
     findings = []
 
@@ -46,7 +130,11 @@ def _build_findings(df, analyses, n_total):
         mobile_n = int(bool_series(df, 'Ip_Movel').sum())
 
     if proxy_n + hosting_n > n_total * 0.3:
-        findings.append(f'Alto uso de anonimização ({proxy_n + hosting_n} conexões via proxy/hosting)')
+        if agregado:
+            findings.append(f'Alto uso de anonimização ({proxy_n + hosting_n} de {n_total} '
+                            f'linhas com IP de proxy/hosting)')
+        else:
+            findings.append(f'Alto uso de anonimização ({proxy_n + hosting_n} conexões via proxy/hosting)')
 
     vpn = analyses.get('vpn_heuristics', {})
     if vpn and vpn.get('score', 0) >= 50:
@@ -92,8 +180,61 @@ def _hash_dataframe_csv(df, chunk_rows=_HASH_CHUNK_ROWS):
     return digest.hexdigest()
 
 
-def _generate_map_html(df):
-    """Gera mapa Folium com layers por tipo, popups ricos, legenda e fit bounds."""
+def _top_ips_agregado(df, agregado, limite=20):
+    """IPs de um formato agregado do Google, sem tratar linha como acesso.
+
+    Serviços: ordenados pelos dias ativos que o Google informa — a linha é uma
+    por IP, e ordenar por linhas daria "1" para todos. Conexões: pelo número de
+    pares, isto é, de identificadores vinculados ao IP. Primeiro e último uso
+    cobrem todas as linhas do IP. Uma agregação por IP, como no caminho comum.
+    """
+    if 'Ip' not in df.columns or df.empty:
+        return []
+    work = pd.DataFrame({'Ip': df['Ip'].astype(str)}, index=df.index)
+    for col, destino in (('Primeiro_Uso', '_pri'), ('Ultimo_Uso', '_ult')):
+        work[destino] = parse_data(df[col]) if col in df.columns else pd.NaT
+    spec = {'linhas': ('Ip', 'size'), 'primeiro': ('_pri', 'min'), 'ultimo': ('_ult', 'max')}
+    for col in ('Ip_Dono', 'Ip_Pais', 'Ip_Cidade'):
+        if col in df.columns:
+            work[col] = df[col]
+            spec[col] = (col, 'first')
+    servicos = agregado == 'google_atividades'
+    if servicos:
+        work['_dias'] = pd.to_numeric(df['Dias_Ativos_Google'], errors='coerce')
+        spec['dias'] = ('_dias', 'max')
+    elif 'Vinculado_Tipo' in df.columns:
+        work['_tipo'] = df['Vinculado_Tipo']
+        spec['tipos'] = ('_tipo', lambda s: ', '.join(sorted(set(s.dropna().astype(str)) - {''})))
+
+    grp = work.groupby('Ip', sort=False).agg(**spec)
+    ordem = ['dias', 'linhas'] if servicos else ['linhas']
+    grp = grp.sort_values(ordem, ascending=False, na_position='last', kind='stable').head(limite)
+
+    def _quando(valor):
+        return '' if pd.isna(valor) else valor.strftime('%d/%m/%Y %H:%M:%S')
+
+    linhas = []
+    for ip, r in grp.iterrows():
+        linhas.append({
+            'ip': str(ip),
+            'count': int(r['linhas']),
+            'dias_ativos': '' if not servicos or pd.isna(r['dias']) else int(r['dias']),
+            'tipos': r.get('tipos', ''),
+            'primeiro': _quando(r['primeiro']),
+            'ultimo': _quando(r['ultimo']),
+            'provedor': _safe(r.get('Ip_Dono')),
+            'pais': _safe(r.get('Ip_Pais')),
+            'cidade': _safe(r.get('Ip_Cidade')),
+        })
+    return linhas
+
+
+def _generate_map_html(df, rotulo_contagem='Ocorrências'):
+    """Gera mapa Folium com layers por tipo, popups ricos, legenda e fit bounds.
+
+    `rotulo_contagem` nomeia o que o tamanho do ponto conta: nos formatos
+    agregados do Google são linhas, não ocorrências de acesso.
+    """
     try:
         import folium
         from folium.plugins import MarkerCluster, Fullscreen
@@ -193,7 +334,7 @@ def _generate_map_html(df):
             f'<b>Tipo:</b> <span style="color:{color}">{tipo}</span><br>'
             f'<b>Local:</b> {cidade or "—"}, {pais or "—"}<br>'
             f'<b>Provedor:</b> {dono or "—"}<br>'
-            f'<b>Ocorrências:</b> {count}'
+            f'<b>{rotulo_contagem}:</b> {count}'
             f'</div></div>'
         )
 
@@ -239,7 +380,7 @@ def _generate_map_html(df):
       <div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#60a5fa;margin-right:6px;"></span>Móvel</div>
       <div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#fbbf24;margin-right:6px;"></span>Hosting</div>
       <div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f87171;margin-right:6px;"></span>Proxy/VPN</div>
-      <div style="font-size:10px;color:#94a3b8;margin-top:6px;">Tamanho ∝ ocorrências</div>
+      <div style="font-size:10px;color:#94a3b8;margin-top:6px;">Tamanho ∝ """ + rotulo_contagem.lower() + """</div>
     </div>
     {% endmacro %}
     """
@@ -314,16 +455,16 @@ def _generate_connection_plot(df, n_total, proxy_n, hosting_n, mobile_n):
     return _plotly_to_div(fig, height=380)
 
 
-def _generate_period_plot(df):
+def _generate_period_plot(df, rotulo='Acessos', titulo='Atividade por Período'):
     """Gráfico de barras por período do dia."""
     if 'Periodo' not in df.columns:
         return ""
     pc = df['Periodo'].value_counts().reset_index()
     if pc.empty:
         return ""
-    pc.columns = ['Periodo', 'Acessos']
-    fig = px.bar(pc, x='Periodo', y='Acessos', color='Acessos',
-                 color_continuous_scale='Viridis', title='Atividade por Período')
+    pc.columns = ['Periodo', rotulo]
+    fig = px.bar(pc, x='Periodo', y=rotulo, color=rotulo,
+                 color_continuous_scale='Viridis', title=titulo)
     fig.update_layout(
         margin=dict(l=10, r=10, t=40, b=10),
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
@@ -334,7 +475,7 @@ def _generate_period_plot(df):
     return _plotly_to_div(fig, height=380)
 
 
-def _generate_timeline_plot(df, risk_df=None):
+def _generate_timeline_plot(df, risk_df=None, rotulo_data='Data', titulo='Timeline Cronológica'):
     """Timeline cronológica: scatter por timestamp colorido por provedor/risco."""
     if 'Data' not in df.columns:
         return ""
@@ -366,8 +507,8 @@ def _generate_timeline_plot(df, risk_df=None):
         color_continuous_scale=[(0, '#34d399'), (0.4, '#fbbf24'), (0.7, '#f87171')],
         range_color=[0, 100],
         hover_data={'_ip': True, '_city': True, '_score': ':.0f', '_dt': '|%Y-%m-%d %H:%M', '_prov': False},
-        labels={'_dt': 'Data', '_prov': 'Provedor', '_score': 'Risco', '_ip': 'IP', '_city': 'Cidade'},
-        title='Timeline Cronológica',
+        labels={'_dt': rotulo_data, '_prov': 'Provedor', '_score': 'Risco', '_ip': 'IP', '_city': 'Cidade'},
+        title=titulo,
     )
     fig.update_traces(marker=dict(size=7, opacity=0.75, line=dict(width=0)))
     fig.update_layout(
@@ -381,7 +522,7 @@ def _generate_timeline_plot(df, risk_df=None):
     return _plotly_to_div(fig, height=480)
 
 
-def _generate_heatmap_plot(df):
+def _generate_heatmap_plot(df, rotulo='Acessos', titulo='Atividade por Hora × Dia da Semana'):
     """Heatmap hora × dia da semana de atividade."""
     if 'Data' not in df.columns:
         return ""
@@ -404,11 +545,11 @@ def _generate_heatmap_plot(df):
         z=matrix.values,
         x=horas, y=dias,
         colorscale='Viridis',
-        hovertemplate='%{y} %{x}<br>Acessos: %{z}<extra></extra>',
-        colorbar=dict(title='Acessos', thickness=12),
+        hovertemplate='%{y} %{x}<br>' + rotulo + ': %{z}<extra></extra>',
+        colorbar=dict(title=rotulo, thickness=12),
     ))
     fig.update_layout(
-        title='Atividade por Hora × Dia da Semana',
+        title=titulo,
         margin=dict(l=10, r=10, t=40, b=10),
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
         font_color='#f1f5f9',
@@ -518,19 +659,46 @@ def generate_html_report(df, alvo, config=None, analyses=None, audit_hash=None):
     config = config or {}
     analyses = analyses or {}
 
+    # Google Aggregated Activities: o laudo declara o formato, rotula contagens
+    # como linhas e não traz as análises que supõem uma linha por acesso —
+    # descartadas aqui mesmo que o chamador as tenha calculado. Para os demais
+    # formatos nada muda: a saída é byte-a-byte a de antes.
+    agregado = formato_agregado(df)
+    nao_aplicaveis = []
+    if agregado:
+        nao_aplicaveis = [{'secao': rotulo, 'motivo': motivo}
+                          for rotulo, motivo in ANALISES_NAO_APLICAVEIS_AGREGADO.values()]
+        analyses = {k: v for k, v in analyses.items()
+                    if k not in ANALISES_NAO_APLICAVEIS_AGREGADO}
+        if analyses.get('risk_scores') is not None:
+            # Recalculado aqui, não confiado a quem chama: com o fator de
+            # frequência, todo IP do relatório de serviços sairia com "apareceu
+            # apenas 1x". Formato agregado é pequeno; a conta é um groupby.
+            from analysis.risk import calculate_risk_scores
+            analyses['risk_scores'] = calculate_risk_scores(df, ip_col='Ip', fator_frequencia=False)
+
     n_total = len(df)
     n_unique = df['Ip'].nunique() if 'Ip' in df.columns else 0
     n_countries = df['Ip_Pais'].dropna().nunique() if 'Ip_Pais' in df.columns else 0
     n_providers = df['Ip_Dono'].dropna().nunique() if 'Ip_Dono' in df.columns else 0
 
-    findings, proxy_n, hosting_n, mobile_n = _build_findings(df, analyses, n_total)
+    findings, proxy_n, hosting_n, mobile_n = _build_findings(df, analyses, n_total, agregado)
     proxy_pct = proxy_n / max(n_total, 1) * 100
     hosting_pct = hosting_n / max(n_total, 1) * 100
     mobile_pct = mobile_n / max(n_total, 1) * 100
 
     # Período
     periodo_inicio = periodo_fim = dias_atividade = ""
-    if 'Data' in df.columns:
+    if agregado:
+        # Do primeiro ao último uso. `Data` é só o último uso de cada linha: o
+        # mínimo dela não é o início do período, e contar as datas distintas
+        # dela não dá "dias com atividade" — o Google não diz quais dias foram.
+        inicio = parse_data(df['Primeiro_Uso']).dropna() if 'Primeiro_Uso' in df.columns else []
+        fim = parse_data(df['Ultimo_Uso']).dropna() if 'Ultimo_Uso' in df.columns else []
+        if len(inicio) > 0 and len(fim) > 0:
+            periodo_inicio = inicio.min().strftime('%d/%m/%Y')
+            periodo_fim = fim.max().strftime('%d/%m/%Y')
+    elif 'Data' in df.columns:
         dates = parse_data(df['Data']).dropna()
         if len(dates) > 0:
             periodo_inicio = dates.min().strftime('%d/%m/%Y')
@@ -608,14 +776,23 @@ def generate_html_report(df, alvo, config=None, analyses=None, audit_hash=None):
     # ----- GRÁFICOS -----
     provider_plot = _generate_provider_plot(df, n_total)
     connection_plot = _generate_connection_plot(df, n_total, proxy_n, hosting_n, mobile_n)
-    period_plot = _generate_period_plot(df)
     risk_df_for_plot = analyses.get('risk_scores') if isinstance(analyses.get('risk_scores'), pd.DataFrame) else None
-    timeline_plot = _generate_timeline_plot(df, risk_df_for_plot)
-    heatmap_plot = _generate_heatmap_plot(df)
+    if agregado:
+        # Cada linha entra uma vez, pelo horário do último uso.
+        period_plot = _generate_period_plot(df, rotulo='Linhas',
+                                            titulo='Período do dia do último uso')
+        timeline_plot = _generate_timeline_plot(df, risk_df_for_plot, rotulo_data='Último uso',
+                                                titulo='Último uso de cada linha')
+        heatmap_plot = _generate_heatmap_plot(df, rotulo='Linhas',
+                                              titulo='Último uso por hora × dia da semana')
+    else:
+        period_plot = _generate_period_plot(df)
+        timeline_plot = _generate_timeline_plot(df, risk_df_for_plot)
+        heatmap_plot = _generate_heatmap_plot(df)
     sankey_plot = _generate_sankey_plot(df)
 
     # ----- MAPA -----
-    map_html = _generate_map_html(df)
+    map_html = _generate_map_html(df, 'Linhas') if agregado else _generate_map_html(df)
     has_geo = bool(map_html)
 
     # ----- TABELAS -----
@@ -730,7 +907,9 @@ def generate_html_report(df, alvo, config=None, analyses=None, audit_hash=None):
 
     # ----- TOP IPs -----
     top_ips = []
-    if 'Ip' in df.columns:
+    if agregado:
+        top_ips = _top_ips_agregado(df, agregado)
+    elif 'Ip' in df.columns:
         for ip, cnt in df['Ip'].value_counts().head(20).items():
             ip_data = df[df['Ip'] == ip].iloc[0]
             top_ips.append({
@@ -745,8 +924,14 @@ def generate_html_report(df, alvo, config=None, analyses=None, audit_hash=None):
     raw_data = []
     raw_headers = []
     if config.get('include_raw_data', False):
-        export_cols = [c for c in ['Data', 'Ip', 'Ip_Pais', 'Ip_Regiao', 'Ip_Cidade', 'Ip_Dono']
-                       if c in df.columns]
+        if agregado:
+            # O intervalo (ou o par) no lugar de `Data`, que só repete o último uso.
+            colunas_brutas = ['Ip', 'Vinculado_Tipo', 'Vinculado_Valor', 'Primeiro_Uso',
+                              'Ultimo_Uso', 'Dias_Ativos_Google', 'Dias_Corridos',
+                              'Ip_Pais', 'Ip_Regiao', 'Ip_Cidade', 'Ip_Dono']
+        else:
+            colunas_brutas = ['Data', 'Ip', 'Ip_Pais', 'Ip_Regiao', 'Ip_Cidade', 'Ip_Dono']
+        export_cols = [c for c in colunas_brutas if c in df.columns]
         if export_cols:
             sample = df[export_cols].head(100)
             raw_headers = export_cols
@@ -921,6 +1106,10 @@ def generate_html_report(df, alvo, config=None, analyses=None, audit_hash=None):
         cross_correlation=cross_correlation,
         totais=totais,
         secoes_omitidas=config.get('secoes_omitidas') or [],
+        agregado=agregado,
+        ressalva=RESSALVA_AGREGADO.get(agregado),
+        ressalva_analises=RESSALVA_AGREGADO_ANALISES,
+        nao_aplicaveis=nao_aplicaveis,
     )
 
     return html.encode('utf-8')

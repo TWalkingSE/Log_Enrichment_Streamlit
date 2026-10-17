@@ -313,7 +313,7 @@ details.score-detail summary:hover { color: var(--accent); }
   </div>
   <div class="card-body">
     <div class="metrics-grid">
-      <div class="metric"><div class="value">{{ n_total|default(0) }}</div><div class="label">Registros</div></div>
+      <div class="metric"><div class="value">{{ n_total|default(0) }}</div><div class="label">{% if agregado %}Linhas agregadas{% else %}Registros{% endif %}</div></div>
       <div class="metric"><div class="value">{{ n_unique_ips|default(0) }}</div><div class="label">IPs Únicos</div></div>
       <div class="metric"><div class="value">{{ n_countries|default(0) }}</div><div class="label">Países</div></div>
       <div class="metric"><div class="value">{{ n_providers|default(0) }}</div><div class="label">Provedores</div></div>
@@ -322,6 +322,20 @@ details.score-detail summary:hover { color: var(--accent); }
       {% if hosting_pct is not none %}<div class="metric"><div class="value">{{ "%.1f"|format(hosting_pct) }}%</div><div class="label">Hosting</div></div>{% endif %}
       {% if mobile_pct is not none %}<div class="metric"><div class="value">{{ "%.1f"|format(mobile_pct) }}%</div><div class="label">Móvel</div></div>{% endif %}
     </div>
+{%- if ressalva %}
+
+    <div class="info-card ressalva-formato" style="margin-top:18px;border-left-color:var(--warning);">
+      <h3 style="font-size:0.95rem;color:var(--warning);margin-bottom:8px;">ℹ️ Formato do documento: {{ ressalva.titulo }}</h3>
+      {% for p in ressalva.paragrafos %}<p style="font-size:0.88rem;color:var(--text-muted);line-height:1.6;margin-bottom:6px;">{{ p }}</p>
+      {% endfor %}<p style="font-size:0.88rem;color:var(--text-muted);line-height:1.6;margin-bottom:6px;">{{ ressalva_analises }}</p>
+      {% if nao_aplicaveis %}
+      <h4 style="font-size:0.88rem;color:var(--text);margin:10px 0 6px;">Análises não aplicáveis a este formato</h4>
+      <ul style="padding-left:20px;color:var(--text-muted);font-size:0.86rem;">
+        {% for s in nao_aplicaveis %}<li><strong>{{ s.secao }}</strong>: {{ s.motivo }}.</li>{% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+{%- endif %}
 
     {% if secoes_omitidas %}
     <div style="margin-top:18px;">
@@ -344,7 +358,7 @@ details.score-detail summary:hover { color: var(--accent); }
 
     {% if periodo_inicio and periodo_fim %}
     <div style="margin-top:14px;font-size:0.9rem;color:var(--text-muted);">
-      Período analisado: <strong>{{ periodo_inicio }} a {{ periodo_fim }}</strong>
+      {% if agregado %}Período coberto (do primeiro ao último uso){% else %}Período analisado{% endif %}: <strong>{{ periodo_inicio }} a {{ periodo_fim }}</strong>
     </div>
     {% endif %}
   </div>
@@ -397,7 +411,7 @@ details.score-detail summary:hover { color: var(--accent); }
   </div>
   <div class="card-body">
     <div class="metrics-grid">
-      <div class="metric"><div class="value">{{ data_quality.total }}</div><div class="label">Registros</div></div>
+      <div class="metric"><div class="value">{{ data_quality.total }}</div><div class="label">{% if agregado %}Linhas agregadas{% else %}Registros{% endif %}</div></div>
       <div class="metric"><div class="value">{{ data_quality.unique_ips }}</div><div class="label">IPs Únicos</div></div>
       <div class="metric"><div class="value" style="color:var(--accent-2);">{{ "%.1f"|format(data_quality.with_geo_pct) }}%</div><div class="label">Com Geo</div></div>
       <div class="metric"><div class="value" style="color:var(--accent-2);">{{ "%.1f"|format(data_quality.with_provider_pct) }}%</div><div class="label">Com Provedor</div></div>
@@ -430,7 +444,7 @@ details.score-detail summary:hover { color: var(--accent); }
           <tr><td>Proxy/VPN</td><td><span class="bk-weight pos">+40</span></td><td>IP marcado como anonimizador pela base de geo.</td></tr>
           <tr><td>Hosting / Datacenter</td><td><span class="bk-weight pos">+25</span></td><td>Infraestrutura não residencial.</td></tr>
           <tr><td>Local incomum</td><td><span class="bk-weight pos">+20</span></td><td>Cidade diverge da cidade dominante do alvo.</td></tr>
-          <tr><td>Baixa frequência</td><td><span class="bk-weight pos">+10</span></td><td>IP visto ≤ 2x no período.</td></tr>
+          <tr><td>Baixa frequência</td><td><span class="bk-weight pos">+10</span></td><td>IP visto ≤ 2x no período.{% if agregado %} <strong>Não aplicado a este formato:</strong> a contagem de linhas de um IP não é contagem de acessos.{% endif %}</td></tr>
           <tr><td>Conexão móvel</td><td><span class="bk-weight neg">−5</span></td><td>IPs móveis são naturalmente dinmicos.</td></tr>
         </tbody>
       </table>
@@ -521,7 +535,7 @@ details.score-detail summary:hover { color: var(--accent); }
     <div class="tbl-wrap" style="margin-top:16px;">
       <input class="tbl-search" placeholder="Buscar país..." oninput="filterTable(this)">
       <table>
-        <thead><tr><th>País</th><th>Ocorrências</th><th>%</th></tr></thead>
+        <thead><tr><th>País</th><th>{% if agregado %}Linhas{% else %}Ocorrências{% endif %}</th><th>%</th></tr></thead>
         <tbody>
           {% for row in country_table %}
           <tr><td>{{ row.pais }}</td><td>{{ row.ocorrencias }}</td><td>{{ "%.1f"|format(row.pct) }}%</td></tr>
@@ -535,7 +549,7 @@ details.score-detail summary:hover { color: var(--accent); }
     <div class="tbl-wrap" style="margin-top:12px;">
       <input class="tbl-search" placeholder="Buscar região..." oninput="filterTable(this)">
       <table>
-        <thead><tr><th>Região</th><th>Ocorrências</th></tr></thead>
+        <thead><tr><th>Região</th><th>{% if agregado %}Linhas{% else %}Ocorrências{% endif %}</th></tr></thead>
         <tbody>
           {% for row in region_table %}
           <tr><td>{{ row.regiao }}</td><td>{{ row.ocorrencias }}</td></tr>
@@ -562,7 +576,7 @@ details.score-detail summary:hover { color: var(--accent); }
     <div class="tbl-wrap">
       <input class="tbl-search" placeholder="Buscar provedor..." oninput="filterTable(this)">
       <table>
-        <thead><tr><th>Provedor</th><th>Ocorrências</th><th>%</th></tr></thead>
+        <thead><tr><th>Provedor</th><th>{% if agregado %}Linhas{% else %}Ocorrências{% endif %}</th><th>%</th></tr></thead>
         <tbody>
           {% for row in provider_table %}
           <tr><td>{{ row.provedor }}</td><td>{{ row.ocorrencias }}</td><td>{{ "%.1f"|format(row.pct) }}%</td></tr>
@@ -592,15 +606,20 @@ details.score-detail summary:hover { color: var(--accent); }
 {% if period_plot or period_table %}
 <div class="card">
   <div class="card-header" onclick="toggle(this)">
-    <h2>🕐 Atividade por Período</h2>
+    <h2>🕐 {% if agregado %}Período do Dia do Último Uso{% else %}Atividade por Período{% endif %}</h2>
     <span class="toggle">▼</span>
   </div>
   <div class="card-body">
+{%- if agregado %}
+    <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
+      Cada linha entra uma vez, pelo horário do seu último uso (coluna Data). Não é a distribuição dos acessos dentro de cada intervalo.
+    </p>
+{%- endif %}
     {% if period_plot %}<div class="plot-container">{{ period_plot | safe }}</div>{% endif %}
     {% if period_table %}
     <div class="tbl-wrap">
       <table>
-        <thead><tr><th>Período</th><th>Acessos</th><th>%</th></tr></thead>
+        <thead><tr><th>Período</th><th>{% if agregado %}Linhas{% else %}Acessos{% endif %}</th><th>%</th></tr></thead>
         <tbody>
           {% for row in period_table %}
           <tr><td>{{ row.periodo }}</td><td>{{ row.acessos }}</td><td>{{ "%.1f"|format(row.pct) }}%</td></tr>
@@ -617,12 +636,12 @@ details.score-detail summary:hover { color: var(--accent); }
 {% if timeline_plot %}
 <div class="card">
   <div class="card-header" onclick="toggle(this)">
-    <h2>📅 Timeline Cronológica</h2>
+    <h2>📅 {% if agregado %}Linha do Tempo do Último Uso{% else %}Timeline Cronológica{% endif %}</h2>
     <span class="toggle">▼</span>
   </div>
   <div class="card-body">
     <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
-      Distribuição de eventos no tempo, agrupados por provedor e coloridos pelo score de risco do IP. Passe o cursor para ver detalhes.
+      {% if agregado %}Instante do último uso de cada linha (coluna Data), agrupado por provedor e colorido pelo score de risco do IP. Cada ponto é uma linha agregada, não um acesso: o restante de cada intervalo não aparece.{% else %}Distribuição de eventos no tempo, agrupados por provedor e coloridos pelo score de risco do IP.{% endif %} Passe o cursor para ver detalhes.
     </p>
     <div class="plot-container">{{ timeline_plot | safe }}</div>
   </div>
@@ -633,12 +652,12 @@ details.score-detail summary:hover { color: var(--accent); }
 {% if heatmap_plot %}
 <div class="card">
   <div class="card-header" onclick="toggle(this)">
-    <h2>🔥 Heatmap de Atividade</h2>
+    <h2>🔥 {% if agregado %}Heatmap do Último Uso{% else %}Heatmap de Atividade{% endif %}</h2>
     <span class="toggle">▼</span>
   </div>
   <div class="card-body">
     <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
-      Concentração de eventos por hora do dia e dia da semana — útil para identificar rotinas, horário comercial vs noturno e padrões atendendo a fusos horários.
+      {% if agregado %}Último uso de cada linha por hora do dia e dia da semana: mostra quando cada intervalo terminou, não a rotina de acessos.{% else %}Concentração de eventos por hora do dia e dia da semana — útil para identificar rotinas, horário comercial vs noturno e padrões atendendo a fusos horários.{% endif %}
     </p>
     <div class="plot-container">{{ heatmap_plot | safe }}</div>
   </div>
@@ -654,7 +673,7 @@ details.score-detail summary:hover { color: var(--accent); }
   </div>
   <div class="card-body">
     <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
-      Diagrama de fluxo País → Provedor → Tipo de Conexão. Espessura proporcional ao número de registros.
+      Diagrama de fluxo País → Provedor → Tipo de Conexão. Espessura proporcional ao número de {% if agregado %}linhas (não de acessos){% else %}registros{% endif %}.
     </p>
     <div class="plot-container">{{ sankey_plot | safe }}</div>
   </div>
@@ -669,6 +688,11 @@ details.score-detail summary:hover { color: var(--accent); }
     <span class="toggle">▼</span>
   </div>
   <div class="card-body">
+{%- if agregado %}
+    <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
+      Fator “Baixa frequência” não aplicado: a contagem de linhas de um IP não é contagem de acessos.
+    </p>
+{%- endif %}
     <div class="metrics-grid" style="margin-bottom:14px;">
       <div class="metric"><div class="value" style="color:var(--danger);">{{ risk_high }}</div><div class="label">Risco Alto</div></div>
       <div class="metric"><div class="value" style="color:var(--warning);">{{ risk_med }}</div><div class="label">Risco Médio</div></div>
@@ -723,7 +747,7 @@ details.score-detail summary:hover { color: var(--accent); }
   </div>
   <div class="card-body">
     <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">
-      Deslocamentos entre endereços IP que excedem velocidades fisicamente possíveis, sugerindo uso de VPN/proxy ou compartilhamento de conta.
+      Deslocamentos entre endereços IP que excedem velocidades fisicamente possíveis, sugerindo uso de VPN/proxy ou compartilhamento de conta.{% if agregado %} Neste formato só os instantes de último uso entram na comparação; a ausência de salto não descarta deslocamentos no restante de cada intervalo.{% endif %}
     </p>
     {{ corte(impossible_jumps|length, totais.saltos, 'saltos') }}
     <div class="tbl-wrap">
@@ -966,7 +990,7 @@ details.score-detail summary:hover { color: var(--accent); }
     <div class="tbl-wrap">
       <input class="tbl-search" placeholder="Buscar subnet..." oninput="filterTable(this)">
       <table>
-        <thead><tr><th>Subnet</th><th>IPs</th><th>Registros</th><th>Provedores</th><th>Cidades</th><th>Período</th></tr></thead>
+        <thead><tr><th>Subnet</th><th>IPs</th><th>{% if agregado %}Linhas{% else %}Registros{% endif %}</th><th>Provedores</th><th>Cidades</th><th>{% if agregado %}Últimos usos{% else %}Período{% endif %}</th></tr></thead>
         <tbody>
           {% for s in subnet_patterns.subnets %}
           <tr>
@@ -1186,18 +1210,27 @@ details.score-detail summary:hover { color: var(--accent); }
 {% if top_ips and top_ips|length > 0 %}
 <div class="card">
   <div class="card-header" onclick="toggle(this)">
-    <h2>📌 IPs Mais Recorrentes</h2>
+    <h2>📌 {% if agregado == 'google_atividades' %}IPs por Dias Ativos (Google){% elif agregado %}IPs por Identificadores Vinculados{% else %}IPs Mais Recorrentes{% endif %}</h2>
     <span class="toggle">▼</span>
   </div>
   <div class="card-body">
     {{ corte(top_ips|length, totais.top_ips, 'IPs') }}
+{%- if agregado == 'google_atividades' %}
+    <p style="font-size:0.85rem;color:var(--text-muted);margin:10px 0;">
+      Ordenados pelos dias ativos que o Google informa (dias UTC; o Google não diz quais dias). Primeiro e último uso cobrem todas as linhas do IP.
+    </p>
+{%- elif agregado %}
+    <p style="font-size:0.85rem;color:var(--text-muted);margin:10px 0;">
+      Ordenados pelo número de pares, isto é, de identificadores vistos junto com o IP — não pelo número de acessos. Primeiro e último uso cobrem todos os pares do IP.
+    </p>
+{%- endif %}
     <div class="tbl-wrap">
       <input class="tbl-search" placeholder="Buscar IP..." oninput="filterTable(this)">
       <table>
-        <thead><tr><th>IP</th><th>N</th><th>Provedor</th><th>País</th><th>Cidade</th></tr></thead>
+        <thead><tr><th>IP</th>{% if agregado == 'google_atividades' %}<th>Dias ativos (Google)</th><th>Linhas</th><th>Primeiro uso</th><th>Último uso</th>{% elif agregado %}<th>Pares</th><th>Tipos de identificador</th><th>Primeiro uso</th><th>Último uso</th>{% else %}<th>N</th>{% endif %}<th>Provedor</th><th>País</th><th>Cidade</th></tr></thead>
         <tbody>
           {% for row in top_ips %}
-          <tr><td>{{ row.ip }}</td><td>{{ row.count }}</td><td>{{ row.provedor }}</td><td>{{ row.pais }}</td><td>{{ row.cidade }}</td></tr>
+          <tr><td>{{ row.ip }}</td>{% if agregado == 'google_atividades' %}<td>{{ row.dias_ativos }}</td><td>{{ row.count }}</td><td>{{ row.primeiro }}</td><td>{{ row.ultimo }}</td>{% elif agregado %}<td>{{ row.count }}</td><td>{{ row.tipos }}</td><td>{{ row.primeiro }}</td><td>{{ row.ultimo }}</td>{% else %}<td>{{ row.count }}</td>{% endif %}<td>{{ row.provedor }}</td><td>{{ row.pais }}</td><td>{{ row.cidade }}</td></tr>
           {% endfor %}
         </tbody>
       </table>

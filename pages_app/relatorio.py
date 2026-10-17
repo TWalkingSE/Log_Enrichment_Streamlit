@@ -18,7 +18,8 @@ from analysis import (
     cross_target_correlation,
 )
 from audit_logger import log_audit_event, generate_integrity_receipt
-from html_report_generator import generate_html_report
+from html_report_generator import (ANALISES_NAO_APLICAVEIS_AGREGADO, formato_agregado,
+                                   generate_html_report)
 
 from i18n import t
 
@@ -81,6 +82,14 @@ def page_relatorio():
     with c3:
         st.metric(t('relatorio.providers'), providers)
 
+    # Linha de formato agregado não é acesso — o laudo declara isso e omite as
+    # análises que supõem uma linha por acesso; o analista vê antes de gerar.
+    agregado = formato_agregado(df)
+    if agregado == 'google_atividades':
+        st.info(t('resultados.google_agg_note_activities'))
+    elif agregado == 'google_conexoes':
+        st.info(t('resultados.google_agg_note_connections'))
+
     with st.expander(t('relatorio.config_title'), expanded=True):
         rc1, rc2 = st.columns(2)
         with rc1:
@@ -104,24 +113,36 @@ def page_relatorio():
                 analyses = {}
                 n_rows = len(df)
                 ip_col = 'Sender IP' if 'Sender IP' in df.columns else 'Ip'
-                analyses['risk_scores'] = _stage('risk_scores', n_rows, calculate_risk_scores, df, ip_col=ip_col)
-                analyses['impossible_jumps'] = _stage('impossible_jumps', n_rows, detect_impossible_jumps, df)
-                analyses['base_locations'] = _stage('base_locations', n_rows, detect_base_locations, df)
-                analyses['behavioral_profile'] = _stage('behavioral_profile', n_rows, generate_behavioral_profile, df, alvo=alvo)
-                analyses['vpn_heuristics'] = _stage('vpn_heuristics', n_rows, detect_vpn_heuristics, df)
-                analyses['ip_confidence'] = _stage('ip_confidence', n_rows, compute_ip_confidence, df)
-                analyses['life_patterns'] = _stage('life_patterns', n_rows, detect_life_patterns, df)
+                # Google Aggregated Activities: as análises que supõem uma linha
+                # por acesso não rodam (o laudo lista quais e por quê), e o risco
+                # não conta "baixa frequência" — linha de IP não é acesso.
+                pular = ANALISES_NAO_APLICAVEIS_AGREGADO if agregado else {}
+                secoes_falhas = []
+
+                def _etapa(nome, fn, *args, **kwargs):
+                    if nome not in pular:
+                        analyses[nome] = _stage(nome, n_rows, fn, *args, **kwargs)
+
+                def _opcional(nome, rotulo, fn, *args):
+                    if nome not in pular:
+                        analyses[nome] = _try(secoes_falhas, rotulo, fn, *args)
+
+                _etapa('risk_scores', calculate_risk_scores, df, ip_col=ip_col,
+                       fator_frequencia=not agregado)
+                _etapa('impossible_jumps', detect_impossible_jumps, df)
+                _etapa('base_locations', detect_base_locations, df)
+                _etapa('behavioral_profile', generate_behavioral_profile, df, alvo=alvo)
+                _etapa('vpn_heuristics', detect_vpn_heuristics, df)
+                _etapa('ip_confidence', compute_ip_confidence, df)
+                _etapa('life_patterns', detect_life_patterns, df)
 
                 # ── Análises adicionais (Fase 1) ──
-                secoes_falhas = []
-                analyses['digital_silence'] = _try(secoes_falhas, "Silêncio digital",
-                                                   detect_digital_silence, df)
-                analyses['subnet_patterns'] = _try(secoes_falhas, "Consistência de subnets",
-                                                   analyze_subnet_patterns, df)
-                analyses['timezone_consistency'] = _try(secoes_falhas, "Validação de fuso horário",
-                                                        validate_timezone_consistency, df)
-                analyses['provider_timing'] = _try(secoes_falhas, "Padrão temporal por provedor",
-                                                   analyze_provider_timing, df)
+                _opcional('digital_silence', "Silêncio digital", detect_digital_silence, df)
+                _opcional('subnet_patterns', "Consistência de subnets", analyze_subnet_patterns, df)
+                _opcional('timezone_consistency', "Validação de fuso horário",
+                          validate_timezone_consistency, df)
+                _opcional('provider_timing', "Padrão temporal por provedor",
+                          analyze_provider_timing, df)
 
                 # Mudanças geográficas históricas, pelo leitor único do cache
                 # (desembrulha envelope assinado; histórico não filtra TTL).
