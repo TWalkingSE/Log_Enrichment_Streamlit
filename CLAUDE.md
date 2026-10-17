@@ -227,6 +227,17 @@ funde os resultados no DataFrame.
 - Script de `AppTest.from_function` **sem acentos**: no Windows ele é gravado
   em cp1252 e lido como UTF-8, e a página sai vazia sem exceção. Por isso
   `tests/test_paginas.py` também exige que a página renderize algo.
+- Coluna nova de provedor tem de entrar em `COLUNAS_EXTRAS_PROVEDOR`
+  ([data_processing/formats.py](data_processing/formats.py)), senão
+  `processar_resultados` a descarta depois do enriquecimento; e o formato do
+  resultado sai de `familia_formato`/`colunas_export_para` — não repita a
+  cadeia de `if 'Porta' in df.columns` em página ou pipeline.
+- **Google Aggregated Activities** (serviços e conexões) são intervalos
+  agregados, não acessos. `Dias_Corridos` conta dias **UTC** de propósito: é a
+  base do `Days Active` do Google (em GMT−3 o caso real teria 13 contradições
+  entre as duas colunas, em UTC tem 2 — e são do próprio Google). Os dois
+  arquivos nunca se fundem: o incremental recusa misturá-los
+  (`FormatoSaidaIncompativel`).
 - O hash de integridade do relatório aparece em laudos já entregues. Qualquer
   mudança no seu cálculo precisa ser provada byte-a-byte idêntica
   (`tests/test_integrations.py::TestIntegrityHash`).

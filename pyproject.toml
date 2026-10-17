@@ -61,5 +61,5 @@ omit = ["tests/*", "venv/*", ".venv/*"]
 [tool.coverage.report]
 # Piso real: abaixo dele o CI falha. Suba quando a cobertura subir; não
 # desça para acomodar código novo sem teste.
-fail_under = 63
+fail_under = 65
 skip_empty = true

@@ -186,7 +186,16 @@
     "validation_failed": "⚠️ The result validation could not run: {error}",
     "unit_messages": "messages (most recent)",
     "error": "Error: {error}",
-    "cancel_audit_not_saved": "❌ The cancellation was NOT recorded in the audit trail (see the application log)."
+    "cancel_audit_not_saved": "❌ The cancellation was NOT recorded in the audit trail (see the application log).",
+    "format_google_activities": "Google Aggregated Activities (services)",
+    "format_google_connections": "Google Aggregated Activities (connections)",
+    "format_standard": "Standard (no extra columns)",
+    "google_agg_summary": "Imported {imported} IP records from {lines} rows; {without_ip} rows without an IP were left out.",
+    "google_agg_types": "Left out, by type: {types}",
+    "google_agg_days_above": "⚠️ {count} IP(s) with Google active days greater than the elapsed days. Google's value was kept as provided.",
+    "google_agg_discarded": "⚠️ {count} row(s) discarded due to an invalid IP or a malformed row.",
+    "google_agg_bad_dates": "⚠️ {count} record(s) with an unparseable date, kept as in the original.",
+    "output_format_mismatch": "❌ The output file **{file}** already holds a result in another format ({existing}); the new one is {new}. Nothing was mixed or overwritten: choose another output file."
   },
   "resultados": {
     "title": "📊 Results",
@@ -230,7 +239,9 @@
     "also_missing": "Also missing: {items}.",
     "prepare_ioc_txt": "⚙️ Prepare IOC (txt)",
     "prepare_ioc_csv": "⚙️ Prepare IOC (csv)",
-    "prepare_stix": "⚙️ Prepare STIX"
+    "prepare_stix": "⚙️ Prepare STIX",
+    "google_agg_note_activities": "ℹ️ Google Aggregated Activities (services): each row is an IP with the range Google aggregated (first → last use), not an access. **Data** = last use. **Dias_Ativos_Google** is the count Google reported, in UTC days, and Google does not say which days they were; **Dias_Corridos** = last − first + 1, also in UTC days.",
+    "google_agg_note_connections": "ℹ️ Google Aggregated Activities (connections): each row is an IP ↔ identifier pair seen in the same authenticated session, with that pair's time window. The same IP repeats once per linked identifier: a row count is not an access count. **Data** = last use of the pair; **Dias_Corridos** in UTC days."
   },
   "estatisticas": {
     "title": "📈 Statistics",

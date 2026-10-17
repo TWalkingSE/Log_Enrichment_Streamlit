@@ -13,17 +13,67 @@ import logging
 from datetime import datetime
 
 from data_processor import (
-    extrair_ips_de_texto, detectar_formato_log,
+    extrair_ips_de_texto, detectar_formato_log, COLUNAS_EXTRAS_PROVEDOR,
     FORMATO_1, FORMATO_2, FORMATO_3, FORMATO_4, FORMATO_PRESERVATION_GOOGLE,
-    FORMATO_DISCORD, FORMATO_TIKTOK
+    FORMATO_DISCORD, FORMATO_TIKTOK, FORMATO_GOOGLE_ATIVIDADES, FORMATO_GOOGLE_CONEXOES,
 )
 from audit_logger import log_audit_event
+from file_handler import FormatoSaidaIncompativel
 from validators import validate_dataframe, safe_output_path
 from helpers.shared import add_log, run_processing, save_history, extract_alvo_from_filename
 from i18n import t
 from helpers.large_data import bump_data_version, fmt, show_truncation
 
 logger = logging.getLogger(__name__)
+
+
+def _nome_formato(codigo):
+    """Nome exibido de um código de formato (detecção ou família de resultado)."""
+    nomes = {
+        'discord': 'Discord', 'meta': 'Meta Platforms',
+        'whatsapp': 'WhatsApp', 'google': 'Google',
+        'preservation_google': 'Preservation Google',
+        'tiktok': 'TikTok',
+        'google_atividades': t('entrada.format_google_activities'),
+        'google_conexoes': t('entrada.format_google_connections'),
+        'generico': t('entrada.format_generic'),
+        'padrao': t('entrada.format_standard'),
+    }
+    return nomes.get(codigo, str(codigo).upper())
+
+
+def _mostrar_previa(preview_df):
+    """Tabela de pré-visualização: Ip, as colunas extras do formato, Data e Periodo."""
+    extras = [c for c in COLUNAS_EXTRAS_PROVEDOR if c in preview_df.columns]
+    colunas = [c for c in ['Ip', *extras, 'Data', 'Periodo'] if c in preview_df.columns]
+    st.dataframe(preview_df[colunas].head(20), width='stretch', hide_index=True)
+    show_truncation(min(20, len(preview_df)), len(preview_df))
+    _declarar_google_agregado(preview_df)
+
+
+def _declarar_google_agregado(df):
+    """O que o parser do Google Aggregated Activities deixou de fora, na tela.
+
+    Só as linhas de IP entram; o analista precisa ver quantas linhas o
+    arquivo tinha e por que as demais não aparecem.
+    """
+    resumo = df.attrs.get('google_agregado')
+    if not resumo:
+        return
+    st.caption(t('entrada.google_agg_summary', imported=fmt(resumo['importadas']),
+                 lines=fmt(resumo['linhas']), without_ip=fmt(resumo['sem_ip'])))
+    por_tipo = resumo.get('ignoradas_por_tipo') or {}
+    if por_tipo:
+        st.caption(t('entrada.google_agg_types',
+                     types=', '.join(f'{tipo}: {fmt(n)}' for tipo, n in por_tipo.items())))
+    if resumo.get('dias_ativos_acima_do_periodo'):
+        st.caption(t('entrada.google_agg_days_above',
+                     count=fmt(resumo['dias_ativos_acima_do_periodo'])))
+    descartadas = resumo.get('ips_invalidos', 0) + resumo.get('linhas_malformadas', 0)
+    if descartadas:
+        st.warning(t('entrada.google_agg_discarded', count=fmt(descartadas)))
+    if resumo.get('datas_invalidas'):
+        st.warning(t('entrada.google_agg_bad_dates', count=fmt(resumo['datas_invalidas'])))
 
 
 def _sanitize_alvo(alvo):
@@ -181,12 +231,7 @@ def page_entrada():
                         with st.expander(t('entrada.preview_title'), expanded=False):
                             if preview_df is not None and not preview_df.empty:
                                 st.write(t('entrada.ips_found', count=len(preview_df)))
-                                cols_preview = ['Ip', 'Data', 'Periodo']
-                                if 'Porta' in preview_df.columns:
-                                    cols_preview.insert(1, 'Porta')
-                                available = [c for c in cols_preview if c in preview_df.columns]
-                                st.dataframe(preview_df[available].head(20), width='stretch', hide_index=True)
-                                show_truncation(min(20, len(preview_df)), len(preview_df))
+                                _mostrar_previa(preview_df)
                             else:
                                 st.warning(t('entrada.no_ip_html'))
                         # Store HTML content + platform for processing
@@ -231,15 +276,8 @@ def page_entrada():
 
                     # Detectar formato e exibir mensagem imediatamente (como HTML faz)
                     detected_format = detectar_formato_log(content) if content.strip() else 'generico'
-                    format_names = {
-                        'discord': 'Discord', 'meta': 'Meta Platforms',
-                        'whatsapp': 'WhatsApp', 'google': 'Google',
-                        'preservation_google': 'Preservation Google',
-                        'tiktok': 'TikTok',
-                        'generico': t('entrada.format_generic')
-                    }
                     st.info(t('entrada.pdf_detected', name=uploaded_file.name,
-                              format=format_names.get(detected_format, detected_format.upper())))
+                              format=_nome_formato(detected_format)))
 
                     # Pré-visualização dos IPs
                     if content.strip():
@@ -248,18 +286,7 @@ def page_entrada():
                                 preview_df = extrair_ips_de_texto(content, False, alvo=st.session_state.alvo or 'preview')
                                 if preview_df is not None and not preview_df.empty:
                                     st.write(t('entrada.ips_found', count=len(preview_df)))
-                                    cols_preview = ['Ip', 'Data', 'Periodo']
-                                    if 'Porta' in preview_df.columns:
-                                        cols_preview.insert(1, 'Porta')
-                                    if 'Evento' in preview_df.columns:
-                                        cols_preview.insert(1, 'Evento')
-                                    if 'User_Agent' in preview_df.columns:
-                                        cols_preview.insert(1, 'User_Agent')
-                                    if 'User_ID' in preview_df.columns:
-                                        cols_preview.insert(1, 'User_ID')
-                                    available = [c for c in cols_preview if c in preview_df.columns]
-                                    st.dataframe(preview_df[available].head(20), width='stretch', hide_index=True)
-                                    show_truncation(min(20, len(preview_df)), len(preview_df))
+                                    _mostrar_previa(preview_df)
                                 else:
                                     st.warning(t('entrada.no_ip_pdf'))
                         except Exception as e:
@@ -269,26 +296,18 @@ def page_entrada():
                 else:
                     content = uploaded_file.getvalue().decode('utf-8', errors='replace')
                     detected_format = detectar_formato_log(content)
-                    st.info(t('entrada.file_detected', name=uploaded_file.name, format=detected_format.upper()))
+                    st.info(t('entrada.file_detected', name=uploaded_file.name,
+                              format=_nome_formato(detected_format)))
 
                     with st.expander(t('entrada.preview_title'), expanded=False):
                         preview_df = extrair_ips_de_texto(content, False, alvo=st.session_state.alvo or 'preview')
                         if preview_df is not None and not preview_df.empty:
                             st.write(t('entrada.ips_found', count=len(preview_df)))
-                            cols_preview = ['Ip', 'Data', 'Periodo']
-                            if 'Porta' in preview_df.columns:
-                                cols_preview.insert(1, 'Porta')
-                            if 'Evento' in preview_df.columns:
-                                cols_preview.insert(1, 'Evento')
-                            if 'User_Agent' in preview_df.columns:
-                                cols_preview.insert(1, 'User_Agent')
-                            if 'User_ID' in preview_df.columns:
-                                cols_preview.insert(1, 'User_ID')
-                            available = [c for c in cols_preview if c in preview_df.columns]
-                            st.dataframe(preview_df[available].head(20), width='stretch', hide_index=True)
-                            show_truncation(min(20, len(preview_df)), len(preview_df))
+                            _mostrar_previa(preview_df)
                         else:
                             st.warning(t('entrada.no_ip_file'))
+                            if preview_df is not None:
+                                _declarar_google_agregado(preview_df)
             except Exception as e:
                 logger.exception("Erro na pré-visualização")
                 st.info(t('entrada.file_loaded', name=uploaded_file.name))
@@ -302,6 +321,8 @@ def page_entrada():
             'whatsapp': FORMATO_3,
             'google': FORMATO_4,
             'preservation_google': FORMATO_PRESERVATION_GOOGLE,
+            'google_atividades': FORMATO_GOOGLE_ATIVIDADES,
+            'google_conexoes': FORMATO_GOOGLE_CONEXOES,
             'discord': FORMATO_DISCORD,
             'tiktok': FORMATO_TIKTOK,
         }
@@ -312,6 +333,8 @@ def page_entrada():
             'whatsapp': "WhatsApp",
             'google': "Google",
             'preservation_google': "Preservation Google",
+            'google_atividades': t('entrada.format_google_activities'),
+            'google_conexoes': t('entrada.format_google_connections'),
             'discord': "Discord",
             'tiktok': "TikTok",
         }
@@ -333,7 +356,7 @@ def page_entrada():
         if pasted_text.strip():
             try:
                 detected_format = detectar_formato_log(pasted_text)
-                st.info(t('entrada.format_detected', format=detected_format.upper()))
+                st.info(t('entrada.format_detected', format=_nome_formato(detected_format)))
             except Exception as e:
                 logger.warning(f"Erro ao detectar formato: {e}")
             input_data = pasted_text
@@ -343,20 +366,11 @@ def page_entrada():
                 preview_df = extrair_ips_de_texto(pasted_text, False, alvo=st.session_state.alvo or 'preview')
                 if preview_df is not None and not preview_df.empty:
                     st.write(t('entrada.ips_found', count=len(preview_df)))
-                    cols_preview = ['Ip', 'Data', 'Periodo']
-                    if 'Porta' in preview_df.columns:
-                        cols_preview.insert(1, 'Porta')
-                    if 'Evento' in preview_df.columns:
-                        cols_preview.insert(1, 'Evento')
-                    if 'User_Agent' in preview_df.columns:
-                        cols_preview.insert(1, 'User_Agent')
-                    if 'User_ID' in preview_df.columns:
-                        cols_preview.insert(1, 'User_ID')
-                    available = [c for c in cols_preview if c in preview_df.columns]
-                    st.dataframe(preview_df[available].head(20), width='stretch', hide_index=True)
-                    show_truncation(min(20, len(preview_df)), len(preview_df))
+                    _mostrar_previa(preview_df)
                 else:
                     st.warning(t('entrada.no_ip_detected'))
+                    if preview_df is not None:
+                        _declarar_google_agregado(preview_df)
 
     # Options
     st.divider()
@@ -477,6 +491,13 @@ def page_entrada():
                         else:
                             st.warning(t('entrada.no_valid_ip'))
                             status.update(label=t('entrada.no_ip_found'), state="error")
+                    except FormatoSaidaIncompativel as e:
+                        st.error(t('entrada.output_format_mismatch',
+                                   file=os.path.basename(e.arquivo),
+                                   existing=_nome_formato(e.existente),
+                                   new=_nome_formato(e.novo)))
+                        add_log(str(e))
+                        status.update(label=t('entrada.error_processing'), state="error")
                     except JobCancelled as e:
                         st.warning(str(e))
                         add_log(str(e))

@@ -33,8 +33,13 @@ COLUNAS_EXPORT_TIKTOK = [
 ]
 
 # Colunas extras específicas de cada provedor, inseridas logo após 'Ip' na saída.
+# Coluna que não está aqui nem em COLUNAS_MODELO é descartada por
+# `processar_resultados` depois do enriquecimento.
 COLUNAS_EXTRAS_PROVEDOR = [
-    'Porta', 'Evento', 'User_ID', 'Username', 'Email', 'User_Agent'
+    'Porta', 'Evento', 'User_ID', 'Username', 'Email', 'User_Agent',
+    # Google Aggregated Activities (conexões, depois serviços)
+    'Vinculado_Tipo', 'Vinculado_Valor', 'Primeiro_Uso', 'Ultimo_Uso',
+    'Dias_Ativos_Google', 'Dias_Corridos', 'Canal_Autenticacao', 'Multilogin',
 ]
 
 # Colunas para exportação Meta Platforms (com Porta lógica)
@@ -60,6 +65,75 @@ COLUNAS_EXPORT_DISCORD = [
     'Ip_Movel', 'Ip_Proxy',
     'Ip_Hospedagem', 'Ip_Tor', 'Ip_Lat', 'Ip_Lon', 'Reputação', 'Periodo', 'ISO_Date'
 ]
+
+# Google Aggregated Activities — serviços: uma linha por IP com o intervalo
+# agregado que o Google informa. `Data` repete o último uso: é a coluna que as
+# análises leem.
+COLUNAS_EXPORT_GOOGLE_ATIVIDADES = [
+    'Alvo', 'Ip', 'Primeiro_Uso', 'Ultimo_Uso', 'Dias_Ativos_Google', 'Dias_Corridos',
+    'Canal_Autenticacao', 'Multilogin', 'Data', 'Data_Fuso', 'Ip_Dono', 'Ip_AS',
+    'Ip_Regiao', 'Ip_Cidade',
+    'Ip_Movel', 'Ip_Proxy',
+    'Ip_Hospedagem', 'Ip_Tor', 'Ip_Lat', 'Ip_Lon', 'Reputação', 'Periodo', 'ISO_Date'
+]
+
+# Google Aggregated Activities — conexões: uma linha por par IP ↔ identificador
+# visto junto na mesma sessão, com a janela daquele par.
+COLUNAS_EXPORT_GOOGLE_CONEXOES = [
+    'Alvo', 'Ip', 'Vinculado_Tipo', 'Vinculado_Valor', 'Primeiro_Uso', 'Ultimo_Uso',
+    'Dias_Corridos', 'Data', 'Data_Fuso', 'Ip_Dono', 'Ip_AS',
+    'Ip_Regiao', 'Ip_Cidade',
+    'Ip_Movel', 'Ip_Proxy',
+    'Ip_Hospedagem', 'Ip_Tor', 'Ip_Lat', 'Ip_Lon', 'Reputação', 'Periodo', 'ISO_Date'
+]
+
+# Formatos cujas linhas são intervalos agregados, não acessos — e que nunca se
+# misturam com outro resultado no mesmo arquivo de saída.
+FAMILIAS_GOOGLE_AGREGADO = ('google_atividades', 'google_conexoes')
+
+
+def familia_formato(colunas):
+    """Formato de um resultado, deduzido das colunas extras que ele carrega.
+
+    A ordem é a de precedência: as colunas dos formatos agregados do Google são
+    exclusivas deles e vêm primeiro; depois a precedência que o pipeline já
+    usava (Discord, Preservation Google, TikTok, Meta).
+    """
+    nomes = set(getattr(colunas, 'columns', colunas))
+    if 'Vinculado_Tipo' in nomes:
+        return 'google_conexoes'
+    if 'Dias_Ativos_Google' in nomes:
+        return 'google_atividades'
+    if 'User_ID' in nomes:
+        return 'discord'
+    if 'User_Agent' in nomes:
+        return 'preservation_google'
+    if 'Evento' in nomes:
+        return 'tiktok'
+    if 'Porta' in nomes:
+        return 'meta'
+    return 'padrao'
+
+
+_EXPORT_POR_FAMILIA = {
+    'google_conexoes': COLUNAS_EXPORT_GOOGLE_CONEXOES,
+    'google_atividades': COLUNAS_EXPORT_GOOGLE_ATIVIDADES,
+    'discord': COLUNAS_EXPORT_DISCORD,
+    'preservation_google': COLUNAS_EXPORT_PRESERVATION_GOOGLE,
+    'tiktok': COLUNAS_EXPORT_TIKTOK,
+    'meta': COLUNAS_EXPORT_META,
+    'padrao': COLUNAS_EXPORT,
+}
+
+
+def colunas_export_para(colunas):
+    """Conjunto de colunas de export do formato de `colunas` (DataFrame ou lista).
+
+    Lista completa do formato; quem exporta um frame filtra pelo que existe.
+    Um ponto só para o pipeline e para a tabela de Resultados — antes cada um
+    repetia a cadeia de `if`, e a tabela não conhecia o TikTok.
+    """
+    return list(_EXPORT_POR_FAMILIA[familia_formato(colunas)])
 
 # Exemplos dos formatos suportados
 FORMATO_1 = """Endereços IP
@@ -146,4 +220,30 @@ Date: 27/07/2026 02:48:12PM (UTC +00)
 IP: 203.0.113.45
 Event: publish
 Country: Brazil
+"""
+
+# Google Aggregated Activities — os dois CSVs vêm no mesmo pacote e cada um é
+# parseado sozinho. Dados sintéticos (GAIA ID de 21 dígitos, IPs de
+# documentação); cobrem as armadilhas reais: campo entre aspas com vírgula,
+# linhas que não são de IP, intervalo que cruza a meia-noite UTC, `Days Active`
+# maior que o intervalo (o Google às vezes informa 2 dias para um único
+# instante) e IP em qualquer um dos lados do par.
+FORMATO_GOOGLE_ATIVIDADES = """GAIA ID,Last Activity Timestamp,First Activity Timestamp,Days Active,Identifier Type,ID,Multilogin Used,Authentication Channel
+100000000000000000001,2025-11-03 01:40:10 UTC,2025-10-15 12:00:00 UTC,15,IP address,2001:db8:5a1e:6400:1:2:3:aa55,NO,
+100000000000000000001,2025-11-03 01:40:10 UTC,2024-01-10 08:00:00 UTC,300,User agent,App : SAFARI. Os : IOS_OS. Device Type : MOBILE.,NO,
+100000000000000000001,2025-11-02 21:30:00 UTC,2025-05-01 10:00:00 UTC,90,WebGL renderer name,"ANGLE (Exemplo, Placa de Video Exemplo Direct3D11 vs_5_0 ps_5_0, D3D11)",NO,
+100000000000000000001,2025-11-01 17:50:00 UTC,2019-01-20 15:00:00 UTC,700,IP address,198.51.100.20,NO,PASSWORD + PASSWORD
+100000000000000000001,2025-10-30 22:20:00 UTC,2018-06-05 19:30:00 UTC,800,IP address,198.51.100.21,NO,OAUTH + PASSWORD
+100000000000000000001,2025-10-29 23:10:00 UTC,2021-03-10 17:40:00 UTC,1200,Product,SEARCH,NO,
+100000000000000000001,2025-10-20 23:35:36 UTC,2025-10-20 23:35:36 UTC,2,IP address,2001:db8:93f7:c75b:1:2:3:f652,NO,
+"""
+
+FORMATO_GOOGLE_CONEXOES = """GAIA ID,Last Connection Timestamp,First Connection Timestamp,Identifier Type 1,ID 1,Identifier Type 2,ID 2
+100000000000000000001,2025-11-03 01:25:51 UTC,2025-08-02 17:15:15 UTC,SID cookie authentication time,2025-08-02 15:16:39 UTC,OAuth login ID,349
+100000000000000000001,2025-11-03 01:25:51 UTC,2025-10-15 20:16:56 UTC,IP address,2001:db8:5a1e:6400:1:2:3:aa55,SID cookie authentication time,2025-08-02 15:16:39 UTC
+100000000000000000001,2025-11-02 21:38:11 UTC,2025-10-15 15:12:13 UTC,Font fingerprint,1234567890123456789,IP address,2001:db8:5a1e:6400:1:2:3:aa55
+100000000000000000001,2025-11-02 21:38:11 UTC,2025-10-15 15:12:13 UTC,WebGL renderer name,"ANGLE (Exemplo, Placa de Video Exemplo Direct3D11 vs_5_0 ps_5_0, D3D11)",IP address,2001:db8:5a1e:6400:1:2:3:aa55
+100000000000000000001,2025-11-02 21:38:11 UTC,2025-10-15 15:12:13 UTC,Screen resolution,Width : 1920. Height : 1080.,IP address,2001:db8:5a1e:6400:1:2:3:aa55
+100000000000000000001,2025-10-28 14:55:05 UTC,2025-09-30 15:31:08 UTC,IP address,198.51.100.20,SID cookie authentication time,2025-09-11 00:43:19 UTC
+100000000000000000001,2025-09-19 22:12:01 UTC,2025-08-25 15:32:33 UTC,IP address,198.51.100.21,Other device ID,00000000-0000-4000-8000-000000000001
 """

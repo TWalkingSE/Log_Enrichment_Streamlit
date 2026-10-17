@@ -9,7 +9,7 @@ import os
 import io
 import logging
 
-from data_processor import COLUNAS_EXPORT, COLUNAS_EXPORT_META, COLUNAS_EXPORT_PRESERVATION_GOOGLE, COLUNAS_EXPORT_DISCORD
+from data_processor import colunas_export_para, familia_formato
 from analysis import classify_infrastructure
 from components.graph_view import render_ip_network_graph
 from components.visualizations import render_ip_table_with_sparklines
@@ -241,10 +241,6 @@ def page_resultados():
     ])
 
     # Table
-    is_meta = 'Porta' in df_f.columns
-    is_preservation_google = 'User_Agent' in df_f.columns
-    is_discord = 'User_ID' in df_f.columns
-
     if all(c in df_f.columns for c in ['Ip_Proxy', 'Ip_Hospedagem', 'Ip_Movel']) and 'Reputação' not in df_f.columns:
         df_f = df_f.copy()
         key_cols = ['Ip_Proxy', 'Ip_Hospedagem', 'Ip_Movel', 'Ip_AS', 'Ip_Dono']
@@ -252,14 +248,14 @@ def page_resultados():
         df_f['Reputação'] = _build_reputacao(
             df_f[existing_keys], cache_key('rep', len(df_f), tuple(existing_keys), filtros))
 
-    if is_discord:
-        display_cols = [c for c in COLUNAS_EXPORT_DISCORD if c in df_f.columns]
-    elif is_preservation_google:
-        display_cols = [c for c in COLUNAS_EXPORT_PRESERVATION_GOOGLE if c in df_f.columns]
-    elif is_meta:
-        display_cols = [c for c in COLUNAS_EXPORT_META if c in df_f.columns]
-    else:
-        display_cols = [c for c in COLUNAS_EXPORT if c in df_f.columns]
+    display_cols = [c for c in colunas_export_para(df_f) if c in df_f.columns]
+    # Linha de formato agregado não é acesso: dizer isso antes da tabela, ou
+    # "N linhas do IP X" vira "N acessos do IP X" na leitura.
+    familia = familia_formato(df_f)
+    if familia == 'google_atividades':
+        st.info(t('resultados.google_agg_note_activities'))
+    elif familia == 'google_conexoes':
+        st.info(t('resultados.google_agg_note_connections'))
     df_display = df_f[display_cols].copy()
 
     def _color_reputacao_text(val):

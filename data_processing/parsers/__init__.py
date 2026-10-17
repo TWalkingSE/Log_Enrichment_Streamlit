@@ -11,8 +11,12 @@ import pandas as pd
 
 from data_processing.parsers.discord import extrair_ips_do_formato_discord
 from data_processing.parsers.google import (
+    cabecalho_csv,
     extrair_ips_do_formato_google,
+    extrair_ips_do_formato_google_atividades,
+    extrair_ips_do_formato_google_conexoes,
     extrair_ips_do_formato_preservation_google,
+    formato_google_agregado,
 )
 from data_processing.parsers.meta import (
     extrair_ips_do_formato_meta,
@@ -29,17 +33,21 @@ from data_processing.parsers.tiktok import extrair_ips_do_formato_tiktok
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    'cabecalho_csv',
     'detectar_formato_log',
     'detectar_separador_csv',
     'extrair_ips_de_texto',
     'extrair_ips_do_formato_discord',
     'extrair_ips_do_formato_google',
+    'extrair_ips_do_formato_google_atividades',
+    'extrair_ips_do_formato_google_conexoes',
     'extrair_ips_do_formato_meta',
     'extrair_ips_do_formato_preservation_google',
     'extrair_ips_do_formato_simples',
     'extrair_ips_do_formato_tiktok',
     'extrair_ips_do_formato_whatsapp',
     'extrair_ips_texto_simples',
+    'formato_google_agregado',
     'parse_meta_ip_port',
 ]
 
@@ -47,8 +55,15 @@ __all__ = [
 def detectar_formato_log(content):
     """
     Detecta o formato do log de acesso baseado no conteúdo.
-    Retorna: 'preservation_google', 'meta', 'whatsapp', 'google', 'discord', 'tiktok' ou 'generico'
+    Retorna: 'google_atividades', 'google_conexoes', 'preservation_google',
+    'meta', 'whatsapp', 'google', 'discord', 'tiktok' ou 'generico'
     """
+    # Google Aggregated Activities (serviços / conexões): pelo conjunto de
+    # colunas do cabeçalho, antes de tudo — por substring, o
+    # 'Activity Timestamp' do Preservation casaria com 'Last Activity Timestamp'.
+    agregado = formato_google_agregado(cabecalho_csv(content))
+    if agregado:
+        return agregado
     # Preservation Google: CSV do Google Takeout com colunas específicas
     if 'Activity Timestamp' in content and 'User Agent String' in content and 'Product Name' in content:
         return 'preservation_google'
@@ -110,6 +125,14 @@ def extrair_ips_de_texto(file_path_or_content, is_file=True, update_callback=Non
 
         if update_callback:
             update_callback(f"Formato detectado: {formato}")
+
+        # Google Aggregated Activities: o cabeçalho é inequívoco, então o
+        # resultado volta mesmo vazio — cair no método genérico extrairia IPs
+        # de colunas que não são de IP e perderia o resumo do que ficou de fora.
+        if formato == 'google_atividades':
+            return extrair_ips_do_formato_google_atividades(content, update_callback, alvo)
+        if formato == 'google_conexoes':
+            return extrair_ips_do_formato_google_conexoes(content, update_callback, alvo)
 
         # Formato Discord (Session Start/IP Address com metadados do usuário)
         if formato == 'discord':

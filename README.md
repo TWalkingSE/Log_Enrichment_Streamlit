@@ -23,7 +23,7 @@ O **Log Enrichment** é uma aplicação web (Streamlit) que automatiza a anális
 ## ✨ Funcionalidades
 
 ### Enriquecimento de Logs de Acesso
-- **11 Formatos de Entrada**: Genérico, Meta Platforms, WhatsApp, Google, Preservation Google, **Discord (PDF)**, **TikTok (PDF)**, CSV/Excel, **HTML WhatsApp** (records.html), **HTML Meta Platforms** (Facebook/Instagram), **HTML Google** (SubscriberInfo.html)
+- **13 Formatos de Entrada**: Genérico, Meta Platforms, WhatsApp, Google, Preservation Google, **Google Aggregated Activities** (serviços e conexões), **Discord (PDF)**, **TikTok (PDF)**, CSV/Excel, **HTML WhatsApp** (records.html), **HTML Meta Platforms** (Facebook/Instagram), **HTML Google** (SubscriberInfo.html)
 - **Batch API**: Consulta até 100 IPs por request via POST `/batch`, reduzindo tempo de processamento em até 10x
 - **rDNS Assíncrono**: Resolução reversa de DNS em paralelo para todos os IPs
 - **Detecção Automática de Formato**: Identifica o tipo de log automaticamente
@@ -524,6 +524,57 @@ Arquivo CSV gerado pelo Google Takeout (nome padrão: `Activities - A list of Go
 Detectado automaticamente pelas colunas `Activity Timestamp`, `IP Address` e `User Agent String`.
 A coluna `User_Agent` é extraída e incluída na saída. IPs não roteáveis são filtrados automaticamente.
 
+### Formato 5a: Google Aggregated Activities — serviços (CSV)
+```csv
+GAIA ID,Last Activity Timestamp,First Activity Timestamp,Days Active,Identifier Type,ID,Multilogin Used,Authentication Channel
+100000000000000000001,2025-11-03 01:40:10 UTC,2025-10-15 12:00:00 UTC,15,IP address,2001:db8:5a1e:6400:1:2:3:aa55,NO,
+100000000000000000001,2025-11-01 17:50:00 UTC,2019-01-20 15:00:00 UTC,700,IP address,198.51.100.20,NO,PASSWORD + PASSWORD
+100000000000000000001,2025-10-29 23:10:00 UTC,2021-03-10 17:40:00 UTC,1200,Product,SEARCH,NO,
+```
+Nome padrão do arquivo: `Aggregated Activities - An aggregated representation of the Google services accessed by your device.csv`.
+Cada linha é um identificador (IP, User agent, Product, fingerprint do aparelho...) com o
+**intervalo agregado** pelo Google — primeiro e último uso —, não um acesso. Só as linhas
+`IP address` entram, **uma por IP**; as demais são contadas por tipo e declaradas na
+pré-visualização.
+
+| Coluna | Origem |
+|--------|--------|
+| `Primeiro_Uso` / `Ultimo_Uso` | `First` / `Last Activity Timestamp`, convertidos de UTC para o fuso configurado |
+| `Data` | Igual a `Ultimo_Uso` — é a coluna que as análises e o `Periodo` leem |
+| `Dias_Ativos_Google` | `Days Active` exatamente como veio. O Google **não diz quais dias** foram |
+| `Dias_Corridos` | Último − primeiro + 1, em **dias de calendário UTC** |
+| `Canal_Autenticacao` / `Multilogin` | `Authentication Channel` / `Multilogin Used`, crus |
+
+`Dias_Corridos` é contado em UTC, e não no fuso local, porque é nessa base que o Google
+conta o `Days Active`. Num caso real com 882 linhas, só 2 ficaram com `Days Active` maior
+que os dias corridos em UTC, contra 13 em GMT−3. Num IP cujo intervalo cruza a meia-noite
+UTC, a conta feita à mão sobre `Primeiro_Uso`/`Ultimo_Uso` (fuso local) pode dar um dia a
+menos. Quando `Dias_Ativos_Google` é maior que `Dias_Corridos` (o Google às vezes informa
+2 dias para um único instante), o valor do Google é preservado e a ocorrência é contada.
+Sem alvo informado, o GAIA ID vira o `Alvo`.
+
+### Formato 5b: Google Aggregated Activities — conexões (CSV)
+```csv
+GAIA ID,Last Connection Timestamp,First Connection Timestamp,Identifier Type 1,ID 1,Identifier Type 2,ID 2
+100000000000000000001,2025-11-03 01:25:51 UTC,2025-10-15 20:16:56 UTC,IP address,2001:db8:5a1e:6400:1:2:3:aa55,SID cookie authentication time,2025-08-02 15:16:39 UTC
+100000000000000000001,2025-11-02 21:38:11 UTC,2025-10-15 15:12:13 UTC,Font fingerprint,1234567890123456789,IP address,2001:db8:5a1e:6400:1:2:3:aa55
+```
+Nome padrão do arquivo: `Aggregated Activities - connections between identifiers seen together in authenticated sessions.csv`.
+Cada linha é um **par de identificadores vistos juntos** numa sessão autenticada, com a
+janela daquele par. O IP pode estar em qualquer um dos lados. A saída tem **uma linha por
+par**, como no arquivo: o mesmo IP se repete, uma vez por identificador vinculado.
+
+| Coluna | Origem |
+|--------|--------|
+| `Vinculado_Tipo` / `Vinculado_Valor` | O outro lado do par, cru. O SID cookie é um timestamp, mas identifica a sessão e mantém o `UTC` literal |
+| `Primeiro_Uso` / `Ultimo_Uso` / `Data` | Janela do par, no fuso configurado; `Data` = último uso |
+| `Dias_Corridos` | Último − primeiro + 1 do par, em dias UTC |
+
+Os dois arquivos são **respostas distintas** e cada um gera o próprio resultado. Com o
+processamento incremental ligado, processar um e depois o outro no mesmo arquivo de saída
+é recusado antes de qualquer consulta à API, sem tocar no arquivo existente: escolha outro
+arquivo de saída. Em ambos, contagem de linhas **não é contagem de acessos**.
+
 ### Formato 6: Discord (PDF)
 ```
 User ID:                     1234567890123456789
@@ -579,6 +630,11 @@ Suporta upload de ZIP com 15 dias de interceptação (ZIP contendo ZIPs internos
 | Porta | Porta lógica — Meta Platforms, e WhatsApp quando o documento a traz |
 | Evento | Tipo de evento da conta (apenas TikTok: video_play, like, follow, etc.) |
 | User_Agent | User Agent do dispositivo (apenas Preservation Google) |
+| Vinculado_Tipo / Vinculado_Valor | Identificador visto junto com o IP (apenas Google Aggregated Activities — conexões) |
+| Primeiro_Uso / Ultimo_Uso | Intervalo agregado pelo Google, no fuso configurado (apenas Google Aggregated Activities) |
+| Dias_Ativos_Google | `Days Active` informado pelo Google (apenas Google Aggregated Activities — serviços) |
+| Dias_Corridos | Último − primeiro + 1, em dias UTC (apenas Google Aggregated Activities) |
+| Canal_Autenticacao / Multilogin | `Authentication Channel` / `Multilogin Used` (apenas Google Aggregated Activities — serviços) |
 | Data | Data/hora convertida para o fuso configurado |
 | Data_Fuso | Fuso horário configurado |
 | Ip_Dono | Provedor/proprietário do IP |
@@ -745,7 +801,7 @@ Log Enrichment/
 │   ├── formats.py                 # Colunas do modelo/export e exemplos de formato
 │   ├── parsers/                   # Um módulo por plataforma + detecção de formato
 │   │   ├── meta.py                # Meta Platforms e WhatsApp
-│   │   ├── google.py              # Google (IP ACTIVITY) e Preservation Google
+│   │   ├── google.py              # Google (IP ACTIVITY), Preservation Google e Aggregated Activities
 │   │   ├── discord.py, tiktok.py
 │   │   └── texto.py               # Texto livre: data da própria linha
 │   ├── merge.py                   # Fusão dos resultados da API no DataFrame

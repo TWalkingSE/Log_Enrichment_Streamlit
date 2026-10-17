@@ -4,13 +4,70 @@ import os
 import re
 import json
 from pathlib import Path
-from data_processor import (COLUNAS_MODELO, COLUNAS_EXPORT, COLUNAS_EXPORT_META,
-                          COLUNAS_EXPORT_PRESERVATION_GOOGLE, COLUNAS_EXPORT_DISCORD,
-                          COLUNAS_EXPORT_TIKTOK,
+from data_processor import (COLUNAS_MODELO, FAMILIAS_GOOGLE_AGREGADO, cabecalho_csv,
+                          colunas_export_para, familia_formato, formato_google_agregado,
                           detectar_separador_csv, extrair_ips_de_texto, processar_resultados,
                           extrair_ips_do_formato_preservation_google,
+                          extrair_ips_do_formato_google_atividades,
+                          extrair_ips_do_formato_google_conexoes,
                           TZ_LABEL, get_periodo, format_iso_date)
 from api_client import is_valid_ip
+
+
+class FormatoSaidaIncompativel(ValueError):
+    """O arquivo de saída incremental guarda o resultado de outro formato.
+
+    Os dois CSVs "Aggregated Activities" do Google são respostas distintas:
+    misturá-los (ou misturar um deles com acessos de outra plataforma) no
+    mesmo arquivo produziria uma tabela em que metade das linhas é intervalo
+    e metade é par de identificadores. A recusa acontece antes de consultar a
+    API e sem tocar no arquivo existente.
+    """
+
+    def __init__(self, arquivo, existente, novo):
+        self.arquivo = arquivo
+        self.existente = existente
+        self.novo = novo
+        super().__init__(
+            f"O arquivo de saída {arquivo} já contém resultado do formato "
+            f"'{existente}', e o novo é '{novo}'. Nada foi misturado nem "
+            "sobrescrito: escolha outro arquivo de saída.")
+
+
+def _recusar_mistura(df_novo, df_existente, output_file):
+    """Levanta `FormatoSaidaIncompativel` se um dos lados é Google agregado
+    e os formatos diferem."""
+    novo, existente = familia_formato(df_novo), familia_formato(df_existente)
+    if novo != existente and (novo in FAMILIAS_GOOGLE_AGREGADO
+                              or existente in FAMILIAS_GOOGLE_AGREGADO):
+        raise FormatoSaidaIncompativel(output_file, existente, novo)
+
+
+_PARSER_GOOGLE_AGREGADO = {
+    'google_atividades': extrair_ips_do_formato_google_atividades,
+    'google_conexoes': extrair_ips_do_formato_google_conexoes,
+}
+
+
+def _ler_texto(caminho):
+    """Texto do arquivo: UTF-8 (com ou sem BOM), senão cp1252, senão latin-1."""
+    with open(caminho, 'rb') as f:
+        dados = f.read()
+    for encoding in ('utf-8-sig', 'cp1252'):
+        try:
+            return dados.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return dados.decode('latin-1')
+
+
+def _primeira_linha_arquivo(caminho):
+    """Primeira linha não vazia, sem ler o arquivo inteiro."""
+    with open(caminho, 'r', encoding='utf-8-sig', errors='replace') as f:
+        for linha in f:
+            if linha.strip():
+                return linha
+    return ''
 
 # Limite do próprio formato XLSX: 1.048.576 linhas por planilha, menos o
 # cabeçalho. Acima disso o resultado continua em abas adicionais.
@@ -95,6 +152,17 @@ def carregar_arquivo_log(input_file, update_callback=None, alvo='desconhecido'):
                 pass
 
         if ext == '.csv':
+            # Google Aggregated Activities: reconhecido pelo cabeçalho, antes da
+            # leitura com inferência de tipos — o GAIA ID (até 21 dígitos)
+            # estouraria o int64, e o laço genérico abaixo pegaria só o último
+            # uso, em UTC rotulado como fuso local.
+            agregado = formato_google_agregado(cabecalho_csv(_primeira_linha_arquivo(input_file)))
+            if agregado:
+                if update_callback:
+                    update_callback(f"Formato {agregado} detectado")
+                return _PARSER_GOOGLE_AGREGADO[agregado](
+                    _ler_texto(input_file), update_callback, alvo=alvo)
+
             # Detectar separador
             separador = detectar_separador_csv(input_file)
             logger.info(f"Separador detectado: '{separador}'")
@@ -112,6 +180,11 @@ def carregar_arquivo_log(input_file, update_callback=None, alvo='desconhecido'):
                 df = pd.read_csv(input_file, sep=separador, encoding='utf-8', encoding_errors='replace')
         elif ext in ('.xls', '.xlsx'):
             df = pd.read_excel(input_file)
+            agregado = formato_google_agregado(df.columns)
+            if agregado:
+                # CSV do Google regravado no Excel: relido como texto.
+                return _PARSER_GOOGLE_AGREGADO[agregado](
+                    pd.read_excel(input_file, dtype=str), update_callback, alvo=alvo)
         elif ext == '.txt':
             # Usar função específica para extrair IPs de texto
             return extrair_ips_de_texto(input_file, True, update_callback, alvo=alvo)
@@ -353,23 +426,12 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
         else:
             df = extrair_ips_de_texto(input_file_or_content, False, update_callback, alvo=alvo)
 
-        # Detectar formato pelas colunas extras: Meta (Porta), Preservation Google (User_Agent),
-        # Discord (User_ID) ou TikTok (Evento)
-        is_meta = 'Porta' in df.columns
-        is_preservation_google = 'User_Agent' in df.columns
-        is_discord = 'User_ID' in df.columns
-        is_tiktok = 'Evento' in df.columns
-
+        # O formato (e com ele as colunas de export) sai das colunas extras
+        # que o parser deixou: Porta, Evento, User_Agent, User_ID, Vinculado_*...
         if df.empty:
             if update_callback:
                 update_callback("Nenhum IP válido encontrado nos dados")
-            if is_discord:
-                return pd.DataFrame(columns=COLUNAS_EXPORT_DISCORD)
-            if is_preservation_google:
-                return pd.DataFrame(columns=COLUNAS_EXPORT_PRESERVATION_GOOGLE)
-            if is_tiktok:
-                return pd.DataFrame(columns=COLUNAS_EXPORT_TIKTOK)
-            return pd.DataFrame(columns=COLUNAS_EXPORT_META if is_meta else COLUNAS_EXPORT)
+            return pd.DataFrame(columns=colunas_export_para(df))
 
         total_records = len(df)
         total_unique_all = df['Ip'].nunique()
@@ -395,16 +457,6 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
                             raise e
                     else:
                         df_resultado = pd.read_csv(output_file, sep=sep_existente, encoding='utf-8', encoding_errors='replace')
-
-                # Verificar se resultado existente é Meta, Preservation Google, Discord ou TikTok
-                if 'Porta' in df_resultado.columns:
-                    is_meta = True
-                if 'User_Agent' in df_resultado.columns:
-                    is_preservation_google = True
-                if 'User_ID' in df_resultado.columns:
-                    is_discord = True
-                if 'Evento' in df_resultado.columns:
-                    is_tiktok = True
 
                 # Garantir que temos as colunas do modelo
                 for col in COLUNAS_MODELO:
@@ -451,6 +503,10 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
                     update_callback(f"Erro ao carregar arquivo existente: {e}")
                 logger.warning(f"Erro ao carregar arquivo existente: {e}")
 
+        # Fora do try acima: a recusa tem de chegar à página, não virar aviso.
+        if df_resultado is not None:
+            _recusar_mistura(df, df_resultado, output_file)
+
         # Obter lista de IPs únicos para consulta
         ips_unicos = df['Ip'].unique()
 
@@ -477,11 +533,7 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
                 update_callback("Nenhum IP novo para processar")
             if df_resultado is not None:
                 return df_resultado
-            if is_discord:
-                return pd.DataFrame(columns=COLUNAS_EXPORT_DISCORD)
-            if is_tiktok:
-                return pd.DataFrame(columns=COLUNAS_EXPORT_TIKTOK)
-            return pd.DataFrame(columns=COLUNAS_EXPORT_META if is_meta else COLUNAS_EXPORT)
+            return pd.DataFrame(columns=colunas_export_para(df))
 
         # Enriquecimento via serviço compartilhado (mesmo caminho de interception_parser)
         from enrich_service import enrich_ips
@@ -511,7 +563,11 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
         if df_resultado is not None:
             df_final = pd.concat([df_resultado, df_processado])
             dedup_cols = _incremental_dedup_columns(df_final)
-            df_final = df_final.drop_duplicates(subset=dedup_cols, keep='last')
+            # Chave comparada como texto: o CSV relido infere `349` como
+            # número e o registro novo traz `'349'` — sem isso o mesmo registro
+            # entraria duas vezes. Vazio (None/NaN) conta como igual a vazio.
+            repetidas = df_final[dedup_cols].fillna('').astype(str).duplicated(keep='last')
+            df_final = df_final[~repetidas]
         else:
             df_final = df_processado
 
@@ -522,17 +578,8 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
         # Adicionar coluna Reputação
         df_final = _add_reputacao_column(df_final)
 
-        # Definir colunas de exportação (com User_ID/Username/Email para Discord, User_Agent para Preservation Google, Porta para Meta, Evento para TikTok)
-        if is_discord:
-            export_cols = [c for c in COLUNAS_EXPORT_DISCORD if c in df_final.columns]
-        elif is_preservation_google:
-            export_cols = [c for c in COLUNAS_EXPORT_PRESERVATION_GOOGLE if c in df_final.columns]
-        elif is_tiktok:
-            export_cols = [c for c in COLUNAS_EXPORT_TIKTOK if c in df_final.columns]
-        elif is_meta:
-            export_cols = [c for c in COLUNAS_EXPORT_META if c in df_final.columns]
-        else:
-            export_cols = [c for c in COLUNAS_EXPORT if c in df_final.columns]
+        # Colunas de exportação do formato (extras de cada provedor logo após Ip)
+        export_cols = [c for c in colunas_export_para(df_final) if c in df_final.columns]
         salvar_exportacao(df_final, export_cols, output_file,
                           update_callback, gerar_xlsx=False)
 
@@ -546,9 +593,15 @@ async def processar_log_acesso_async(input_file_or_content, output_file, is_file
 
 
 def _incremental_dedup_columns(df):
-    """Colunas de dedup incremental: Ip+Data e chaves de formato (Porta/Evento/User_ID/User_Agent)."""
+    """Colunas de dedup incremental: Ip+Data e chaves de formato.
+
+    `Vinculado_*` é chave nas conexões do Google: o mesmo IP com o mesmo
+    último uso aparece uma vez por identificador vinculado, e sem elas um
+    reprocessamento colapsaria esses pares num só.
+    """
     cols = []
-    for c in ('Ip', 'Data', 'Porta', 'Evento', 'User_ID', 'User_Agent'):
+    for c in ('Ip', 'Data', 'Porta', 'Evento', 'User_ID', 'User_Agent',
+              'Vinculado_Tipo', 'Vinculado_Valor'):
         if c in df.columns:
             cols.append(c)
     return cols or list(df.columns[:1])

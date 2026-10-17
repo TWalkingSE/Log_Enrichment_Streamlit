@@ -203,6 +203,8 @@ A ferramenta aceita múltiplas fontes de dados:
 | **Arquivo de log** | Upload de arquivo `.txt` ou `.log` com IPs |
 | **CSV/Excel** | Upload de planilha já formatada |
 | **Preservation Google** | CSV do Google Takeout com User Agent |
+| **Google Aggregated Activities — serviços** | CSV com primeiro/último uso e `Days Active` por identificador; entra uma linha por IP (`Dias_Ativos_Google`, `Dias_Corridos`) |
+| **Google Aggregated Activities — conexões** | CSV de pares de identificadores vistos juntos; entra uma linha por par IP ↔ identificador (`Vinculado_Tipo`, `Vinculado_Valor`) |
 | **HTML WhatsApp** | Upload de `records.html` do WhatsApp Business Record |
 | **HTML Meta Platforms** | Upload de `records.html` do Facebook/Instagram — com porta (IG) ou sem (FB) |
 | **HTML Google** | Upload de `SubscriberInfo.html` com tabela IP Activity |
@@ -212,7 +214,21 @@ A ferramenta aceita múltiplas fontes de dados:
 | **HTML de Interceptação** | Upload de `records.html` individual |
 | **Modo Offline** | Carregue CSV já enriquecido (sem chamar API) |
 
-**Formatos de log detectados automaticamente:** Genérico, Meta Platforms, WhatsApp, Google, Preservation Google, Discord (PDF), TikTok (PDF), HTML WhatsApp, HTML Meta Platforms, HTML Google.
+**Formatos de log detectados automaticamente:** Genérico, Meta Platforms, WhatsApp, Google, Preservation Google, Google Aggregated Activities (serviços e conexões), Discord (PDF), TikTok (PDF), HTML WhatsApp, HTML Meta Platforms, HTML Google.
+
+#### Google Aggregated Activities: intervalos, não acessos
+
+Os dois CSVs "Aggregated Activities" trazem, para cada IP, o **primeiro e o último uso**
+agregados pelo Google — não cada acesso. Cada arquivo é processado sozinho e gera o
+próprio resultado; use um arquivo de saída diferente para cada um (com o incremental
+ligado, a mistura é recusada). Na leitura:
+
+- `Data` é o último uso; `Periodo` (diurno/noturno) se refere só a esse instante.
+- `Dias_Ativos_Google` é a contagem do Google e **não diz quais dias** foram;
+  `Dias_Corridos` é o intervalo do primeiro ao último uso. Ambos contados em dias UTC.
+- No arquivo de conexões o mesmo IP se repete, uma linha por identificador vinculado
+  (sessão SID, GPU, resolução, `Other device ID`...).
+- A pré-visualização informa quantas linhas do arquivo não eram de IP e ficaram de fora.
 
 #### Confira o total de IPs contra o documento original
 

@@ -281,6 +281,15 @@ class TestIncrementalDedup(unittest.TestCase):
         self.assertIn('Porta', cols)
         self.assertIn('User_ID', cols)
 
+    def test_dedup_columns_include_google_linked_identifier(self):
+        # Conexões do Google: o mesmo IP com o mesmo último uso aparece uma vez
+        # por identificador vinculado — Ip+Data sozinhos colapsariam os pares.
+        from file_handler import _incremental_dedup_columns
+
+        df = pd.DataFrame(columns=['Ip', 'Data', 'Vinculado_Tipo', 'Vinculado_Valor'])
+        self.assertEqual(_incremental_dedup_columns(df),
+                         ['Ip', 'Data', 'Vinculado_Tipo', 'Vinculado_Valor'])
+
 
 class TestRunAsync(unittest.TestCase):
     def test_run_async_simple_coro(self):

@@ -186,7 +186,16 @@
     "validation_failed": "⚠️ La validación del resultado no pudo ejecutarse: {error}",
     "unit_messages": "mensajes (los más recientes)",
     "error": "Error: {error}",
-    "cancel_audit_not_saved": "❌ La cancelación NO se registró en el audit trail (vea el log de la aplicación)."
+    "cancel_audit_not_saved": "❌ La cancelación NO se registró en el audit trail (vea el log de la aplicación).",
+    "format_google_activities": "Google Aggregated Activities (servicios)",
+    "format_google_connections": "Google Aggregated Activities (conexiones)",
+    "format_standard": "Estándar (sin columnas extra)",
+    "google_agg_summary": "Importados {imported} registros de IP de {lines} líneas; {without_ip} líneas sin IP quedaron fuera.",
+    "google_agg_types": "Fuera de la importación, por tipo: {types}",
+    "google_agg_days_above": "⚠️ {count} IP(s) con días activos (Google) mayores que los días transcurridos. Se conservó el valor de Google tal como vino.",
+    "google_agg_discarded": "⚠️ {count} línea(s) descartada(s) por IP inválida o línea mal formada.",
+    "google_agg_bad_dates": "⚠️ {count} registro(s) con fecha no interpretable, conservada como en el original.",
+    "output_format_mismatch": "❌ El archivo de salida **{file}** ya contiene un resultado de otro formato ({existing}); el nuevo es {new}. No se mezcló ni se sobrescribió nada: elija otro archivo de salida."
   },
   "resultados": {
     "title": "📊 Resultados",
@@ -230,7 +239,9 @@
     "also_missing": "También ausentes: {items}.",
     "prepare_ioc_txt": "⚙️ Preparar IOC (txt)",
     "prepare_ioc_csv": "⚙️ Preparar IOC (csv)",
-    "prepare_stix": "⚙️ Preparar STIX"
+    "prepare_stix": "⚙️ Preparar STIX",
+    "google_agg_note_activities": "ℹ️ Google Aggregated Activities (servicios): cada fila es una IP con el intervalo agregado por Google (primer → último uso), no un acceso. **Data** = último uso. **Dias_Ativos_Google** es el conteo informado por Google, en días UTC, y Google no dice cuáles fueron; **Dias_Corridos** = último − primero + 1, también en días UTC.",
+    "google_agg_note_connections": "ℹ️ Google Aggregated Activities (conexiones): cada fila es un par IP ↔ identificador visto en la misma sesión autenticada, con la ventana de ese par. La misma IP se repite una vez por identificador vinculado: el conteo de filas no es un conteo de accesos. **Data** = último uso del par; **Dias_Corridos** en días UTC."
   },
   "estatisticas": {
     "title": "📈 Estadísticas",

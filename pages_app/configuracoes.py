@@ -227,6 +227,7 @@ def page_configuracoes():
             # lista era uma cópia à parte e não tinha Discord nem Preservation.
             from data_processor import (
                 FORMATO_1, FORMATO_2, FORMATO_3, FORMATO_4, FORMATO_DISCORD,
+                FORMATO_GOOGLE_ATIVIDADES, FORMATO_GOOGLE_CONEXOES,
                 FORMATO_PRESERVATION_GOOGLE, FORMATO_TIKTOK,
             )
             exemplos = [
@@ -235,6 +236,8 @@ def page_configuracoes():
                 ("WhatsApp", FORMATO_3),
                 ("Google", FORMATO_4),
                 ("Preservation Google", FORMATO_PRESERVATION_GOOGLE),
+                (t('entrada.format_google_activities'), FORMATO_GOOGLE_ATIVIDADES),
+                (t('entrada.format_google_connections'), FORMATO_GOOGLE_CONEXOES),
                 ("Discord", FORMATO_DISCORD),
                 ("TikTok (Events IP Data)", FORMATO_TIKTOK),
             ]
