@@ -4,8 +4,6 @@
 
 Ferramenta profissional para extração, análise forense e enriquecimento de endereços IP em logs de acesso e interceptação telemática, utilizando múltiplas fontes de inteligência (IP-API, VirusTotal, AbuseIPDB).
 
-<img width="1899" height="919" alt="image" src="https://github.com/user-attachments/assets/e850b58c-5247-45ac-95fa-75a117384566" />
-
 ## 📋 Descrição
 
 O **Log Enrichment** é uma aplicação web (Streamlit) que automatiza a análise de logs de acesso e interceptação telemática do WhatsApp. Extrai endereços IP de diversos formatos, consulta APIs de geolocalização e reputação via **batch endpoint** (até 100 IPs por request), e gera relatórios completos com gráficos, mapas, grafos interativos e resumo executivo.
