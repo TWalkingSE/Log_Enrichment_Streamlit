@@ -10,6 +10,9 @@ Ferramenta profissional para extração, análise forense e enriquecimento de en
 
 O **Log Enrichment** é uma aplicação web (Streamlit) que automatiza a análise de logs de acesso e interceptação telemática do WhatsApp. Extrai endereços IP de diversos formatos, consulta APIs de geolocalização e reputação via **batch endpoint** (até 100 IPs por request), e gera relatórios completos com gráficos, mapas, grafos interativos e resumo executivo.
 
+![Uploading image.png…]()
+
+
 ## ⚠️ Alerta de Dados Sensíveis
 
 > **Atenção:** esta ferramenta pode processar **endereços IP, portas lógicas, horários de conexão, localização aproximada, ASN/provedor e metadados correlatos** obtidos de registros de plataformas e serviços como **Google, WhatsApp, Meta, Discord, TikTok** e provedores de acesso. Em muitos contextos, esses dados podem ser **sensíveis, sigilosos ou juridicamente protegidos**.
