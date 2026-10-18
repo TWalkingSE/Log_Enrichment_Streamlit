@@ -5,7 +5,7 @@ aiohttp==3.14.3
 folium==0.19.4
 openpyxl==3.1.5
 streamlit==1.54.0
-plotly==5.24.1
+plotly==7.1.0
 streamlit-folium==0.24.0
 beautifulsoup4==4.12.3
 python-dotenv==1.2.2
