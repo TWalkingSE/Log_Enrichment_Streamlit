@@ -22,4 +22,4 @@ bcrypt==4.2.1
 pyarrow==23.0.1
 # Transitiva (streamlit, pdfplumber), fixada porque a versão que o resolvedor
 # escolhia tinha CVEs abertas. O pip-audit do CI acusa se voltar a ter.
-pillow==12.3.0
+pillow==13.0.0
