@@ -119,22 +119,41 @@ def _safe(val):
     return str(val)
 
 
+def _tipo_conexao(df):
+    """Classifica cada linha em um único tipo de conexão.
+
+    Os indicadores se sobrepõem (8.8.8.8 é proxy e hosting), por isso a
+    precedência é a mesma do mapa e do grafo: Proxy/VPN > Hosting > Móvel.
+    """
+    return np.select(
+        [bool_series(df, 'Ip_Proxy'),
+         bool_series(df, 'Ip_Hospedagem'),
+         bool_series(df, 'Ip_Movel')],
+        ['Proxy/VPN', 'Hosting', 'Móvel'],
+        default='Residencial')
+
+
 def _build_findings(df, analyses, n_total, agregado=None):
     """Compila achados principais para o sumário executivo."""
     findings = []
 
-    proxy_n = hosting_n = mobile_n = 0
+    proxy_n = hosting_n = mobile_n = anonimizado_n = 0
     if all(c in df.columns for c in ['Ip_Proxy', 'Ip_Hospedagem', 'Ip_Movel']):
-        proxy_n = int(bool_series(df, 'Ip_Proxy').sum())
-        hosting_n = int(bool_series(df, 'Ip_Hospedagem').sum())
+        proxy = bool_series(df, 'Ip_Proxy')
+        hosting = bool_series(df, 'Ip_Hospedagem')
+        proxy_n = int(proxy.sum())
+        hosting_n = int(hosting.sum())
         mobile_n = int(bool_series(df, 'Ip_Movel').sum())
+        # Não é proxy_n + hosting_n: a linha que é as duas coisas contaria duas
+        # vezes, e o laudo chegaria a declarar mais conexões do que registros.
+        anonimizado_n = int((proxy | hosting).sum())
 
-    if proxy_n + hosting_n > n_total * 0.3:
+    if anonimizado_n > n_total * 0.3:
         if agregado:
-            findings.append(f'Alto uso de anonimização ({proxy_n + hosting_n} de {n_total} '
+            findings.append(f'Alto uso de anonimização ({anonimizado_n} de {n_total} '
                             f'linhas com IP de proxy/hosting)')
         else:
-            findings.append(f'Alto uso de anonimização ({proxy_n + hosting_n} conexões via proxy/hosting)')
+            findings.append(f'Alto uso de anonimização ({anonimizado_n} conexões via proxy/hosting)')
 
     vpn = analyses.get('vpn_heuristics', {})
     if vpn and vpn.get('score', 0) >= 50:
@@ -428,11 +447,15 @@ def _generate_provider_plot(df, n_total):
     return _plotly_to_div(fig)
 
 
-def _generate_connection_plot(df, n_total, proxy_n, hosting_n, mobile_n):
-    """Gráfico donut de tipos de conexão."""
-    normal_n = n_total - proxy_n - hosting_n - mobile_n
+def _generate_connection_plot(df):
+    """Gráfico donut de tipos de conexão: cada linha entra em uma fatia só."""
+    # Sem os indicadores não há o que afirmar: tudo sairia como 'Residencial'.
+    if not all(c in df.columns for c in ['Ip_Proxy', 'Ip_Hospedagem', 'Ip_Movel']):
+        return ""
+
     labels = ['Residencial', 'Móvel', 'Proxy/VPN', 'Hosting']
-    values = [max(normal_n, 0), mobile_n, proxy_n, hosting_n]
+    contagem = pd.Series(_tipo_conexao(df)).value_counts()
+    values = [int(contagem.get(rotulo, 0)) for rotulo in labels]
     colors = ['#34d399', '#60a5fa', '#f87171', '#fbbf24']
 
     if sum(values) == 0:
@@ -446,9 +469,9 @@ def _generate_connection_plot(df, n_total, proxy_n, hosting_n, mobile_n):
         hovertemplate='%{label}: %{value} (%{percent})<extra></extra>',
     )])
     fig.update_layout(
-        title='Tipos de Conexão',
+        title='Tipos de Conexão<br><sup>Cada linha em uma só categoria (Proxy/VPN > Hosting > Móvel)</sup>',
         showlegend=False,
-        margin=dict(l=10, r=10, t=40, b=10),
+        margin=dict(l=10, r=10, t=60, b=10),
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
         font_color='#f1f5f9',
     )
@@ -586,12 +609,7 @@ def _generate_sankey_plot(df, max_per_level=8):
         return ""
 
     work = work.copy()
-    work['_conn'] = np.select(
-        [bool_series(work, 'Ip_Proxy'),
-         bool_series(work, 'Ip_Hospedagem'),
-         bool_series(work, 'Ip_Movel')],
-        ['Proxy/VPN', 'Hosting', 'Móvel'],
-        default='Residencial')
+    work['_conn'] = _tipo_conexao(work)
 
     # Constrói nós e fluxos
     countries = sorted(work['Ip_Pais'].unique())
@@ -775,7 +793,7 @@ def generate_html_report(df, alvo, config=None, analyses=None, audit_hash=None):
 
     # ----- GRÁFICOS -----
     provider_plot = _generate_provider_plot(df, n_total)
-    connection_plot = _generate_connection_plot(df, n_total, proxy_n, hosting_n, mobile_n)
+    connection_plot = _generate_connection_plot(df)
     risk_df_for_plot = analyses.get('risk_scores') if isinstance(analyses.get('risk_scores'), pd.DataFrame) else None
     if agregado:
         # Cada linha entra uma vez, pelo horário do último uso.

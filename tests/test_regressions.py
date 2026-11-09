@@ -145,5 +145,83 @@ class TestPeriodCompareDatas(unittest.TestCase):
         self.assertEqual(len(fatia), 2)
 
 
+class TestLaudoContaProxyEHostingUmaVez(unittest.TestCase):
+    """Uma linha pode ser proxy e hosting ao mesmo tempo (ex.: 8.8.8.8).
+
+    Somar as duas contagens fez um arquivo de 6 registros sair no laudo com
+    "9 conexões via proxy/hosting".
+    """
+
+    @staticmethod
+    def _df(proxy, hosting, movel=None):
+        return pd.DataFrame({
+            'Ip_Proxy': proxy, 'Ip_Hospedagem': hosting,
+            'Ip_Movel': movel if movel is not None else [False] * len(proxy),
+        })
+
+    def test_achado_nao_passa_do_total_de_linhas(self):
+        from html_report_generator import _build_findings
+        df = self._df([True] * 3 + [False] * 3, [True] * 6)
+        achados, proxy_n, hosting_n, _ = _build_findings(df, {}, 6)
+        # As métricas individuais continuam contando cada categoria inteira.
+        self.assertEqual((proxy_n, hosting_n), (3, 6))
+        self.assertIn('Alto uso de anonimização (6 conexões via proxy/hosting)', achados)
+
+    def test_achado_de_formato_agregado(self):
+        from html_report_generator import _build_findings
+        df = self._df([True] * 3 + [False] * 3, [True] * 6)
+        achados, *_ = _build_findings(df, {}, 6, agregado='google_atividades')
+        self.assertIn('Alto uso de anonimização (6 de 6 linhas com IP de proxy/hosting)', achados)
+
+    def test_sobreposicao_nao_dispara_o_limite(self):
+        from html_report_generator import _build_findings
+        # 2 de 10 linhas (20%): a soma dava 40% e passava do limite de 30%.
+        df = self._df([True] * 2 + [False] * 8, [True] * 2 + [False] * 8)
+        achados, *_ = _build_findings(df, {}, 10)
+        self.assertFalse([a for a in achados if 'anonimização' in a], achados)
+
+    def test_valores_de_csv_e_excel(self):
+        from html_report_generator import _build_findings
+        df = self._df(['1', 'VERDADEIRO', '0', '0'], ['1', '0', 'FALSO', '0'])
+        achados, *_ = _build_findings(df, {}, 4)
+        self.assertIn('Alto uso de anonimização (2 conexões via proxy/hosting)', achados)
+
+    @staticmethod
+    def _fatias(df):
+        from html_report_generator import _generate_connection_plot
+        with patch('html_report_generator._plotly_to_div', side_effect=lambda fig, **_: fig):
+            fig = _generate_connection_plot(df)
+        return dict(zip(fig.data[0].labels, fig.data[0].values))
+
+    def test_grafico_tem_uma_fatia_por_linha(self):
+        df = self._df(
+            [True, True, False, False, True] + [False] * 5,
+            [True, True, True, False, False] + [False] * 5,
+            [False, False, False, True, True] + [False] * 5,
+        )
+        self.assertEqual(self._fatias(df),
+                         {'Residencial': 5, 'Móvel': 1, 'Proxy/VPN': 3, 'Hosting': 1})
+
+    def test_grafico_nao_reduz_residencial_por_sobreposicao(self):
+        df = self._df([True] * 4 + [False] * 6, [True] * 4 + [False] * 6)
+        fatias = self._fatias(df)
+        self.assertEqual(fatias['Residencial'], 6)
+        self.assertEqual(sum(fatias.values()), len(df))
+
+    def test_laudo_gerado_declara_a_contagem_correta(self):
+        df = self._df([True] * 3 + [False] * 3, [True] * 6).assign(
+            Ip=['198.51.100.1'] * 3 + ['203.0.113.1'] * 3,
+            Data=[f'2025-09-2{i} 10:00:00' for i in range(6)],
+            Ip_Pais='US', Ip_Regiao='CA', Ip_Cidade='LA', Ip_Dono='Provedor', Periodo='Diurno',
+        )
+        html = generate_html_report(df, 'alvo').decode('utf-8')
+        self.assertIn('Alto uso de anonimização (6 conexões via proxy/hosting)', html)
+        self.assertNotIn('9 conexões', html)
+
+    def test_grafico_sem_classificacao_nao_afirma_residencial(self):
+        from html_report_generator import _generate_connection_plot
+        self.assertEqual(_generate_connection_plot(pd.DataFrame({'Ip': ['198.51.100.1']})), '')
+
+
 if __name__ == '__main__':
     unittest.main()
