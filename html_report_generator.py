@@ -492,10 +492,14 @@ def _generate_timeline_plot(df, risk_df=None, rotulo_data='Data', titulo='Timeli
     if isinstance(risk_df, pd.DataFrame) and not risk_df.empty and 'IP' in risk_df.columns:
         score_map = dict(zip(risk_df['IP'].astype(str), risk_df['Score']))
 
-    work['_ip'] = work.get(ip_col, '').astype(str)
+    def _texto(coluna):
+        # Coluna ausente (CSV do Modo Offline) se declara em vez de derrubar o laudo.
+        return work[coluna].astype(str) if coluna in work.columns else 'não informado'
+
+    work['_ip'] = _texto(ip_col)
     work['_score'] = work['_ip'].map(score_map).fillna(0)
-    work['_prov'] = work.get('Ip_Dono', '').astype(str)
-    work['_city'] = work.get('Ip_Cidade', '').astype(str)
+    work['_prov'] = _texto('Ip_Dono')
+    work['_city'] = _texto('Ip_Cidade')
 
     # Amostrar se muito grande (mantém legibilidade)
     if len(work) > 5000:

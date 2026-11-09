@@ -89,6 +89,33 @@ class TestReportGenerator(unittest.TestCase):
         self.assertIn('<!DOCTYPE html>', html_text)
         self.assertIn('test_target', html_text)
 
+    def test_laudo_sem_coluna_opcional(self):
+        # Um CSV do Modo Offline não traz necessariamente todas as colunas.
+        for coluna in ('Ip_Dono', 'Ip_Cidade', 'Ip_Regiao', 'Ip_Pais', 'Periodo'):
+            with self.subTest(sem=coluna):
+                html = generate_html_report(self._make_sample_df().drop(columns=coluna), 'alvo')
+                self.assertIn('<!DOCTYPE html>', html.decode('utf-8'))
+
+    def test_laudo_so_com_ip_e_data(self):
+        html = generate_html_report(self._make_sample_df()[['Ip', 'Data']], 'alvo')
+        self.assertIn('<!DOCTYPE html>', html.decode('utf-8'))
+
+    def test_timeline_declara_o_campo_ausente(self):
+        from html_report_generator import _generate_timeline_plot
+        df = self._make_sample_df().drop(columns=['Ip', 'Ip_Dono', 'Ip_Cidade'])
+        with patch('html_report_generator._plotly_to_div', side_effect=lambda fig, **_: fig):
+            fig = _generate_timeline_plot(df)
+        self.assertEqual(set(fig.data[0].y), {'não informado'})
+        # customdata: IP, cidade e score, na ordem do hover_data.
+        for ip, cidade, _ in fig.data[0].customdata:
+            self.assertEqual((ip, cidade), ('não informado', 'não informado'))
+
+    def test_timeline_mantem_os_valores_presentes(self):
+        from html_report_generator import _generate_timeline_plot
+        with patch('html_report_generator._plotly_to_div', side_effect=lambda fig, **_: fig):
+            fig = _generate_timeline_plot(self._make_sample_df())
+        self.assertEqual(set(fig.data[0].y), {'Google', 'Cloudflare'})
+
     def test_html_report_with_config(self):
         config = {
             'title': 'Test Report',
