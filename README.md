@@ -357,7 +357,7 @@ quebrou em produção. Fixtures de poucas linhas não revelam complexidade O(n²
 ## 🛠️ Instalação
 
 ### Pré-requisitos
-- Python 3.10+ (3.11 recomendado)
+- Python 3.12+
 - pip
 
 ### Passos

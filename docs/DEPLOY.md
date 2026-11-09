@@ -2,7 +2,7 @@
 
 ## Requisitos
 
-- Python 3.11+
+- Python 3.12+
 - Dependências: `pip install -r requirements.txt`
 - (Opcional) Ollama local para assistente AI
 - (Recomendado) reverse proxy HTTPS (nginx/Caddy)

@@ -11,6 +11,7 @@ Os demais formatos não podem mudar: o laudo entregue é conferido pelo hash.
 Dados sintéticos dos `FORMATO_*`, geolocalização fixa por IP — sem rede.
 """
 import hashlib
+import json
 import unittest
 from html import unescape
 
@@ -158,9 +159,13 @@ class TestLinhaNaoViraAcesso(unittest.TestCase):
     def test_rotulos_dizem_que_e_o_ultimo_uso(self):
         html = _laudo(_servicos())
         for trecho in ('Período do Dia do Último Uso', 'Linha do Tempo do Último Uso',
-                       'Heatmap do Último Uso', 'Último uso por hora × dia da semana',
+                       'Heatmap do Último Uso',
                        'Cada linha entra uma vez, pelo horário do seu último uso'):
             self.assertIn(trecho, html)
+        # Título do gráfico: fica no JSON do Plotly, onde o que não é ASCII sai
+        # como \uXXXX quando o orjson (opcional) não está instalado.
+        titulo = 'Último uso por hora × dia da semana'
+        self.assertTrue(titulo in html or json.dumps(titulo)[1:-1] in html, titulo)
         # Mapa: o tamanho do ponto conta linhas.
         self.assertIn('Tamanho ∝ linhas', html)
         self.assertNotIn('Tamanho ∝ ocorrências', html)
@@ -257,7 +262,8 @@ class TestRelatorioPelaPagina(unittest.TestCase):
                 at.session_state['df_resultado'] = fabrica()
                 at = at.run()
                 self.assertFalse(at.exception, [e.value for e in at.exception])
-                self.assertIn(notas[nota], [i.value for i in at.info])
+                # O Streamlit move o emoji inicial do corpo do alerta para `icon`.
+                self.assertIn(notas[nota], [f'{i.icon} {i.value}' for i in at.info])
 
                 gerar = [b for b in at.button if b.key == 'btn_pro_html']
                 self.assertEqual(len(gerar), 1)
