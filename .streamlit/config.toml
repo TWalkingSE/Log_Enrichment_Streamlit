@@ -8,6 +8,8 @@ font = "sans serif"
 
 [server]
 headless = false
+# Só nesta máquina: dados de caso não ficam acessíveis pela rede.
+address = "localhost"
 
 [browser]
 gatherUsageStats = false
